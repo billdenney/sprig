@@ -14,17 +14,33 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install pinned Swift toolchain
-        # Hosted macOS runners default to whatever Swift ships with the image's
-        # Xcode, which can lag our required 6.0+. SwiftyLab/setup-swift reads
-        # our .swift-version and installs the exact toolchain — same pin as
-        # ci-linux and local dev.
-        uses: SwiftyLab/setup-swift@latest
-        with:
-          swift-version: "6.3.1"
-
-      - name: Print Swift version (sanity)
-        run: swift --version
+      - name: Select a Swift 6+ Xcode
+        # GitHub's hosted macOS runners ship multiple Xcode versions at
+        # well-known paths. We try the newest-available first and fail
+        # fast if the selected toolchain is older than Swift 6 (our
+        # Package.swift uses swift-tools-version: 6.0).
+        run: |
+          set -euo pipefail
+          for app in \
+            /Applications/Xcode_16.3.app \
+            /Applications/Xcode_16.2.app \
+            /Applications/Xcode_16.1.app \
+            /Applications/Xcode_16.0.app \
+            /Applications/Xcode_16.app \
+            /Applications/Xcode.app \
+          ; do
+            if [[ -d "$app" ]]; then
+              echo "Selecting $app"
+              sudo xcode-select -s "$app"
+              break
+            fi
+          done
+          swift --version
+          major=$(swift -version 2>&1 | head -1 | sed -nE 's/.*Swift version ([0-9]+)\..*/\1/p')
+          if [[ -z "$major" || "$major" -lt 6 ]]; then
+            echo "::error::Need Swift 6 or newer; got $(swift -version 2>&1 | head -1)"
+            exit 1
+          fi
 
       - name: Install lint tooling
         run: brew install swiftlint swiftformat
