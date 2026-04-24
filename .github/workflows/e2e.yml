@@ -10,5 +10,5 @@ jobs:
   e2e:
     runs-on: [self-hosted, macOS, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ./script/test --suite=e2e
