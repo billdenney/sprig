@@ -1,6 +1,6 @@
-import Testing
 import Foundation
 @testable import GitCore
+import Testing
 
 /// End-to-end parser tests: spawn real git against a temp repo in various
 /// states and parse the actual `-z` output. Catches format-drift that
@@ -47,8 +47,8 @@ struct PorcelainV2IntegrationTests {
 
     // MARK: tests
 
-    @Test("clean repo after initial commit: branch headers present, no entries")
-    func cleanRepo() async throws {
+    @Test
+    func `clean repo after initial commit: branch headers present, no entries`() async throws {
         let (tmp, r) = try mkRepo("clean")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -62,8 +62,8 @@ struct PorcelainV2IntegrationTests {
         #expect(status.entries.isEmpty)
     }
 
-    @Test("fresh repo with untracked file surfaces as untracked entry")
-    func untrackedEntry() async throws {
+    @Test
+    func `fresh repo with untracked file surfaces as untracked entry`() async throws {
         let (tmp, r) = try mkRepo("untracked")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -76,8 +76,8 @@ struct PorcelainV2IntegrationTests {
         #expect(status.entries == [.untracked(path: "hello.txt")])
     }
 
-    @Test("modified tracked file surfaces as ordinary entry with .M status")
-    func modifiedTrackedFile() async throws {
+    @Test
+    func `modified tracked file surfaces as ordinary entry with .M status`() async throws {
         let (tmp, r) = try mkRepo("modified")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -89,7 +89,7 @@ struct PorcelainV2IntegrationTests {
 
         let status = try await parseStatus(r)
         let ordinary = status.entries.compactMap { entry -> Ordinary? in
-            if case .ordinary(let e) = entry { return e } else { return nil }
+            if case let .ordinary(e) = entry { return e } else { return nil }
         }
         #expect(ordinary.count == 1)
         #expect(ordinary.first?.xy.index == .unmodified)
@@ -97,8 +97,8 @@ struct PorcelainV2IntegrationTests {
         #expect(ordinary.first?.path == "a.txt")
     }
 
-    @Test("staged new file surfaces as ordinary entry with A. status")
-    func stagedAddedFile() async throws {
+    @Test
+    func `staged new file surfaces as ordinary entry with A. status`() async throws {
         let (tmp, r) = try mkRepo("added")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -110,15 +110,15 @@ struct PorcelainV2IntegrationTests {
 
         let status = try await parseStatus(r)
         let ordinary = status.entries.compactMap { entry -> Ordinary? in
-            if case .ordinary(let e) = entry { return e } else { return nil }
+            if case let .ordinary(e) = entry { return e } else { return nil }
         }
         #expect(ordinary.first?.xy.index == .added)
         #expect(ordinary.first?.xy.worktree == .unmodified)
         #expect(ordinary.first?.path == "new.txt")
     }
 
-    @Test("rename detected and parsed with both paths")
-    func renamedFile() async throws {
+    @Test
+    func `rename detected and parsed with both paths`() async throws {
         let (tmp, r) = try mkRepo("renamed")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -129,7 +129,7 @@ struct PorcelainV2IntegrationTests {
 
         let status = try await parseStatus(r)
         let renames = status.entries.compactMap { entry -> Renamed? in
-            if case .renamed(let e) = entry { return e } else { return nil }
+            if case let .renamed(e) = entry { return e } else { return nil }
         }
         #expect(renames.count == 1)
         #expect(renames.first?.path == "new.txt")
@@ -137,8 +137,8 @@ struct PorcelainV2IntegrationTests {
         #expect(renames.first?.op == .renamed)
     }
 
-    @Test("merge conflict produces an unmerged entry")
-    func mergeConflict() async throws {
+    @Test
+    func `merge conflict produces an unmerged entry`() async throws {
         let (tmp, r) = try mkRepo("conflict")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -161,7 +161,7 @@ struct PorcelainV2IntegrationTests {
 
         let status = try await parseStatus(r)
         let unmerged = status.entries.compactMap { entry -> Unmerged? in
-            if case .unmerged(let e) = entry { return e } else { return nil }
+            if case let .unmerged(e) = entry { return e } else { return nil }
         }
         #expect(unmerged.count == 1)
         #expect(unmerged.first?.path == "c.txt")
@@ -170,8 +170,8 @@ struct PorcelainV2IntegrationTests {
         #expect(unmerged.first?.xy.worktree == .updatedUnmerged)
     }
 
-    @Test("path with spaces survives round-trip through real git")
-    func pathWithSpacesRoundTrip() async throws {
+    @Test
+    func `path with spaces survives round-trip through real git`() async throws {
         let (tmp, r) = try mkRepo("spacey-path")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -184,8 +184,8 @@ struct PorcelainV2IntegrationTests {
         #expect(status.entries == [.untracked(path: "my notes.md")])
     }
 
-    @Test("stash header reflects stash count")
-    func stashHeaderReflectsCount() async throws {
+    @Test
+    func `stash header reflects stash count`() async throws {
         let (tmp, r) = try mkRepo("stash")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)

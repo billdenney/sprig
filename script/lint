@@ -1,33 +1,52 @@
 #!/usr/bin/env bash
-# Run SwiftLint against the working tree.
+# Run SwiftLint + SwiftFormat (check-only) against the working tree.
 #
 # Direct SwiftLint binaries crash on Swift 6.3.1 Linux toolchains
 # (libFoundation.so SIGILL), so this helper prefers Docker on Linux and
-# falls back to the host `swiftlint` binary otherwise.
+# falls back to the host binaries otherwise.
+#
+# Mirrors the macOS CI `lint-build-test` job: lint + format-check + build.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 STRICT="${STRICT:-1}"
-ARGS=()
+LINT_ARGS=()
 if [[ "$STRICT" == "1" ]]; then
-    ARGS+=(--strict)
+    LINT_ARGS+=(--strict)
 fi
 
-if [[ "$(uname -s)" == "Linux" ]] && command -v docker >/dev/null 2>&1; then
-    exec docker run --rm \
-        -v "$PWD:/work" \
-        -w /work \
-        ghcr.io/realm/swiftlint:0.63.2 \
-        swiftlint "${ARGS[@]}" "$@"
-fi
+run_swiftlint() {
+    if [[ "$(uname -s)" == "Linux" ]] && command -v docker >/dev/null 2>&1; then
+        docker run --rm -v "$PWD:/work" -w /work \
+            ghcr.io/realm/swiftlint:0.63.2 \
+            swiftlint "${LINT_ARGS[@]}" "$@"
+    elif command -v swiftlint >/dev/null 2>&1; then
+        swiftlint "${LINT_ARGS[@]}" "$@"
+    else
+        echo "swiftlint not found. Install via 'brew install swiftlint' or use Docker." >&2
+        return 1
+    fi
+}
 
-if command -v swiftlint >/dev/null 2>&1; then
-    exec swiftlint "${ARGS[@]}" "$@"
-fi
+run_swiftformat_check() {
+    if [[ "$(uname -s)" == "Linux" ]] && command -v docker >/dev/null 2>&1; then
+        docker run --rm -v "$PWD:/work" -w /work \
+            ghcr.io/nicklockwood/swiftformat:latest \
+            --lint . "$@"
+    elif command -v swiftformat >/dev/null 2>&1; then
+        swiftformat --lint . "$@"
+    else
+        echo "swiftformat not found. Install via 'brew install swiftformat' or use Docker." >&2
+        return 1
+    fi
+}
 
-echo "swiftlint not found. Install via:" >&2
-echo "  macOS:  brew install swiftlint" >&2
-echo "  Linux:  docker pull ghcr.io/realm/swiftlint:0.63.2  (this script uses it automatically)" >&2
-exit 1
+echo "==> SwiftLint"
+run_swiftlint
+echo
+echo "==> SwiftFormat (check-only)"
+run_swiftformat_check
+echo
+echo "All checks passed."

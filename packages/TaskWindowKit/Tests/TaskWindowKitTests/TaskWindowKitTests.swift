@@ -1,6 +1,6 @@
-import Testing
 @testable import TaskWindowKit
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test func `module name is set`() {
     #expect(TaskWindowKit.moduleName == "TaskWindowKit")
 }

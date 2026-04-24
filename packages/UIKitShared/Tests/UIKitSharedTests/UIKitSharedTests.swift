@@ -1,6 +1,6 @@
 import Testing
 @testable import UIKitShared
 
-@Test func moduleNameIsSet() {
+@Test func `module name is set`() {
     #expect(UIKitShared.moduleName == "UIKitShared")
 }

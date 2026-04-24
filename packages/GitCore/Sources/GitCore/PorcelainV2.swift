@@ -62,11 +62,11 @@ public enum Entry: Sendable, Equatable {
     /// Convenience: the primary path associated with this entry.
     public var path: String {
         switch self {
-        case .ordinary(let e): return e.path
-        case .renamed(let e): return e.path
-        case .unmerged(let e): return e.path
-        case .untracked(let path): return path
-        case .ignored(let path): return path
+        case let .ordinary(e): e.path
+        case let .renamed(e): e.path
+        case let .unmerged(e): e.path
+        case let .untracked(path): path
+        case let .ignored(path): path
         }
     }
 }

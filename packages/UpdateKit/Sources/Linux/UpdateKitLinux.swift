@@ -1,13 +1,13 @@
 #if os(Linux)
-import Foundation
+    import Foundation
 
-// Linux stub — part of the day-1 cross-platform scaffolding (ADR 0053).
-// Real implementation lands when a Linux port is prioritized post-1.0.
+    // Linux stub — part of the day-1 cross-platform scaffolding (ADR 0053).
+    // Real implementation lands when a Linux port is prioritized post-1.0.
 
-enum UpdateKitLinuxImpl {
-    static let platform = "Linux"
-    static func notImplemented() -> Never {
-        fatalError("UpdateKit Linux impl not yet available — see docs/architecture/cross-platform.md")
+    enum UpdateKitLinuxImpl {
+        static let platform = "Linux"
+        static func notImplemented() -> Never {
+            fatalError("UpdateKit Linux impl not yet available — see docs/architecture/cross-platform.md")
+        }
     }
-}
 #endif

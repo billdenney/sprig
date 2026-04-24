@@ -1,6 +1,6 @@
-import Testing
 @testable import IPCSchema
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test func `module name is set`() {
     #expect(IPCSchema.moduleName == "IPCSchema")
 }

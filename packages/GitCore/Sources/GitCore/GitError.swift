@@ -32,18 +32,18 @@ public enum GitError: Error, Sendable, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .binaryNotFound(let probed):
-            return "git binary not found" + (probed.map { " (probed: \($0))" } ?? "")
-        case .nonZeroExit(let cmd, let code, let stderr, _):
-            return "git \(cmd.joined(separator: " ")) exited with code \(code): \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
-        case .signalled(let cmd, let sig, _):
-            return "git \(cmd.joined(separator: " ")) killed by signal \(sig)"
-        case .timedOut(let cmd, let secs):
-            return "git \(cmd.joined(separator: " ")) timed out after \(secs)s"
-        case .parseFailure(let ctx, let snippet):
-            return "parse failure in \(ctx): '\(snippet)'"
-        case .precondition(let msg):
-            return "precondition: \(msg)"
+        case let .binaryNotFound(probed):
+            "git binary not found" + (probed.map { " (probed: \($0))" } ?? "")
+        case let .nonZeroExit(cmd, code, stderr, _):
+            "git \(cmd.joined(separator: " ")) exited with code \(code): \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+        case let .signalled(cmd, sig, _):
+            "git \(cmd.joined(separator: " ")) killed by signal \(sig)"
+        case let .timedOut(cmd, secs):
+            "git \(cmd.joined(separator: " ")) timed out after \(secs)s"
+        case let .parseFailure(ctx, snippet):
+            "parse failure in \(ctx): '\(snippet)'"
+        case let .precondition(msg):
+            "precondition: \(msg)"
         }
     }
 }

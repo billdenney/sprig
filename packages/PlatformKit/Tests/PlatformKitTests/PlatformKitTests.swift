@@ -1,6 +1,6 @@
-import Testing
 @testable import PlatformKit
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test func `module name is set`() {
     #expect(PlatformKit.moduleName == "PlatformKit")
 }

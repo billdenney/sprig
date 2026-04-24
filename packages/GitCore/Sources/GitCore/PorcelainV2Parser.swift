@@ -31,16 +31,16 @@ public enum PorcelainV2Parser {
             let first = record.first!
             switch first {
             case "1":
-                result.entries.append(.ordinary(try parseOrdinary(record)))
+                try result.entries.append(.ordinary(parseOrdinary(record)))
             case "2":
                 // Type-2 entries are followed by an extra NUL-terminated record
                 // for the original path. Consume it here.
                 let orig = records.next() ?? ""
-                result.entries.append(
-                    .renamed(try parseRenamed(record, origPath: orig))
+                try result.entries.append(
+                    .renamed(parseRenamed(record, origPath: orig))
                 )
             case "u":
-                result.entries.append(.unmerged(try parseUnmerged(record)))
+                try result.entries.append(.unmerged(parseUnmerged(record)))
             case "?":
                 result.entries.append(.untracked(path: pathAfterPrefix(record)))
             case "!":
@@ -123,7 +123,7 @@ public enum PorcelainV2Parser {
 
     /// Format: `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>`
     private static func parseOrdinary(_ record: String) throws -> Ordinary {
-        let body = record.dropFirst(2)  // drop "1 "
+        let body = record.dropFirst(2) // drop "1 "
         let tokens = body.split(separator: " ", maxSplits: 7, omittingEmptySubsequences: false)
         guard tokens.count == 8 else {
             throw GitError.parseFailure(
@@ -131,12 +131,12 @@ public enum PorcelainV2Parser {
                 rawSnippet: record
             )
         }
-        return Ordinary(
-            xy: try parseXY(String(tokens[0]), in: record),
-            submodule: try parseSubmoduleState(String(tokens[1]), in: record),
-            modeHead: try parseMode(String(tokens[2]), in: record),
-            modeIndex: try parseMode(String(tokens[3]), in: record),
-            modeWorktree: try parseMode(String(tokens[4]), in: record),
+        return try Ordinary(
+            xy: parseXY(String(tokens[0]), in: record),
+            submodule: parseSubmoduleState(String(tokens[1]), in: record),
+            modeHead: parseMode(String(tokens[2]), in: record),
+            modeIndex: parseMode(String(tokens[3]), in: record),
+            modeWorktree: parseMode(String(tokens[4]), in: record),
             hashHead: String(tokens[5]),
             hashIndex: String(tokens[6]),
             path: String(tokens[7])
@@ -145,7 +145,7 @@ public enum PorcelainV2Parser {
 
     /// Format: `2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>` (+ separate origPath record)
     private static func parseRenamed(_ record: String, origPath: String) throws -> Renamed {
-        let body = record.dropFirst(2)  // drop "2 "
+        let body = record.dropFirst(2) // drop "2 "
         let tokens = body.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: false)
         guard tokens.count == 9 else {
             throw GitError.parseFailure(
@@ -163,12 +163,12 @@ public enum PorcelainV2Parser {
                 rawSnippet: record
             )
         }
-        return Renamed(
-            xy: try parseXY(String(tokens[0]), in: record),
-            submodule: try parseSubmoduleState(String(tokens[1]), in: record),
-            modeHead: try parseMode(String(tokens[2]), in: record),
-            modeIndex: try parseMode(String(tokens[3]), in: record),
-            modeWorktree: try parseMode(String(tokens[4]), in: record),
+        return try Renamed(
+            xy: parseXY(String(tokens[0]), in: record),
+            submodule: parseSubmoduleState(String(tokens[1]), in: record),
+            modeHead: parseMode(String(tokens[2]), in: record),
+            modeIndex: parseMode(String(tokens[3]), in: record),
+            modeWorktree: parseMode(String(tokens[4]), in: record),
             hashHead: String(tokens[5]),
             hashIndex: String(tokens[6]),
             op: op,
@@ -180,7 +180,7 @@ public enum PorcelainV2Parser {
 
     /// Format: `u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>`
     private static func parseUnmerged(_ record: String) throws -> Unmerged {
-        let body = record.dropFirst(2)  // drop "u "
+        let body = record.dropFirst(2) // drop "u "
         let tokens = body.split(separator: " ", maxSplits: 9, omittingEmptySubsequences: false)
         guard tokens.count == 10 else {
             throw GitError.parseFailure(
@@ -188,13 +188,13 @@ public enum PorcelainV2Parser {
                 rawSnippet: record
             )
         }
-        return Unmerged(
-            xy: try parseXY(String(tokens[0]), in: record),
-            submodule: try parseSubmoduleState(String(tokens[1]), in: record),
-            modeStage1: try parseMode(String(tokens[2]), in: record),
-            modeStage2: try parseMode(String(tokens[3]), in: record),
-            modeStage3: try parseMode(String(tokens[4]), in: record),
-            modeWorktree: try parseMode(String(tokens[5]), in: record),
+        return try Unmerged(
+            xy: parseXY(String(tokens[0]), in: record),
+            submodule: parseSubmoduleState(String(tokens[1]), in: record),
+            modeStage1: parseMode(String(tokens[2]), in: record),
+            modeStage2: parseMode(String(tokens[3]), in: record),
+            modeStage3: parseMode(String(tokens[4]), in: record),
+            modeWorktree: parseMode(String(tokens[5]), in: record),
             hashStage1: String(tokens[6]),
             hashStage2: String(tokens[7]),
             hashStage3: String(tokens[8]),
@@ -282,7 +282,7 @@ private struct RecordIterator {
         while cursor < data.count, data[cursor] != 0 {
             cursor += 1
         }
-        let slice = data[start..<cursor]
+        let slice = data[start ..< cursor]
         // Advance past the NUL (if present).
         if cursor < data.count { cursor += 1 }
         // Use `String(decoding:as:)` (non-failable, replaces invalid UTF-8

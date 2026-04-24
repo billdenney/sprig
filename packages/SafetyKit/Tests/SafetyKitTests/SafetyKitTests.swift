@@ -1,6 +1,6 @@
-import Testing
 @testable import SafetyKit
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test func `module name is set`() {
     #expect(SafetyKit.moduleName == "SafetyKit")
 }

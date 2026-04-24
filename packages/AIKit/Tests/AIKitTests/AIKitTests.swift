@@ -1,6 +1,6 @@
-import Testing
 @testable import AIKit
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test func `module name is set`() {
     #expect(AIKit.moduleName == "AIKit")
 }

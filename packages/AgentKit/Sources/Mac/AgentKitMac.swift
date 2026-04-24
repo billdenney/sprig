@@ -1,10 +1,10 @@
 #if os(macOS)
-import Foundation
+    import Foundation
 
-// macOS implementation stub — see ADR 0048 / CLAUDE.md.
-// Real impl arrives in the relevant milestone (see docs/planning/roadmap.md).
+    // macOS implementation stub — see ADR 0048 / CLAUDE.md.
+    // Real impl arrives in the relevant milestone (see docs/planning/roadmap.md).
 
-enum AgentKitMacImpl {
-    static let platform = "macOS"
-}
+    enum AgentKitMacImpl {
+        static let platform = "macOS"
+    }
 #endif

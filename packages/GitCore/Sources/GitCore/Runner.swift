@@ -43,6 +43,7 @@ public struct Runner: Sendable {
         public var stdoutString: String {
             String(data: stdout, encoding: .utf8) ?? ""
         }
+
         public var stderrString: String {
             String(data: stderr, encoding: .utf8) ?? ""
         }
@@ -170,16 +171,16 @@ public struct Runner: Sendable {
         let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
         let separator: Character
         #if os(Windows)
-        separator = ";"
+            separator = ";"
         #else
-        separator = ":"
+            separator = ":"
         #endif
         let candidateDirs = pathEnv.split(separator: separator).map(String.init)
         let exeName: String
         #if os(Windows)
-        exeName = "git.exe"
+            exeName = "git.exe"
         #else
-        exeName = "git"
+            exeName = "git"
         #endif
         for dir in candidateDirs {
             let candidate = (dir as NSString).appendingPathComponent(exeName)

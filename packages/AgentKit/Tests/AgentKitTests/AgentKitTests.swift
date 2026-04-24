@@ -1,6 +1,6 @@
-import Testing
 @testable import AgentKit
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test func `module name is set`() {
     #expect(AgentKit.moduleName == "AgentKit")
 }

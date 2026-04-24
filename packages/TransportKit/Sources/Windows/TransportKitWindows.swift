@@ -1,13 +1,13 @@
 #if os(Windows)
-import Foundation
+    import Foundation
 
-// Windows stub — part of the day-1 cross-platform scaffolding (ADR 0053).
-// Real implementation lands when a Windows port is prioritized post-1.0.
+    // Windows stub — part of the day-1 cross-platform scaffolding (ADR 0053).
+    // Real implementation lands when a Windows port is prioritized post-1.0.
 
-enum TransportKitWindowsImpl {
-    static let platform = "Windows"
-    static func notImplemented() -> Never {
-        fatalError("TransportKit Windows impl not yet available — see docs/architecture/cross-platform.md")
+    enum TransportKitWindowsImpl {
+        static let platform = "Windows"
+        static func notImplemented() -> Never {
+            fatalError("TransportKit Windows impl not yet available — see docs/architecture/cross-platform.md")
+        }
     }
-}
 #endif
