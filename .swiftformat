@@ -1,0 +1,8 @@
+--indent 4
+--swiftversion 6.3
+--commas inline
+--trimwhitespace always
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--disable redundantSelf

@@ -1,0 +1,9 @@
+# All PRs require review from the maintainer pre-1.0.
+* @maintainer
+
+# Cross-platform-sensitive paths need explicit review from anyone who touches
+# them, because the ADRs 0048/0053 rules apply.
+/packages/               @maintainer
+/apps/macos/             @maintainer
+/.github/workflows/      @maintainer
+/docs/decisions/         @maintainer

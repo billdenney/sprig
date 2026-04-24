@@ -1,0 +1,63 @@
+# Sprig SwiftLint configuration.
+# Custom rules enforce the three-tier cross-platform boundaries (ADR 0048, 0053).
+
+included:
+  - apps
+  - packages
+  - tests
+
+excluded:
+  - .build
+  - .swiftpm
+  - DerivedData
+
+line_length:
+  warning: 140
+  error: 200
+
+type_name:
+  min_length: 2
+
+identifier_name:
+  min_length: 1
+  excluded:
+    - id
+    - x
+    - y
+    - z
+    - r
+    - g
+    - b
+
+custom_rules:
+  no_appkit_in_packages:
+    name: "No AppKit/SwiftUI/Cocoa in packages/ (Tier 1-2 must be portable)"
+    regex: '^import (AppKit|SwiftUI|Cocoa|FinderSync|Combine|ServiceManagement|Sparkle)\b'
+    included:
+      - "packages/"
+    severity: error
+    message: "Imports of AppKit/SwiftUI/Cocoa/FinderSync/Combine/ServiceManagement/Sparkle are banned in packages/. See ADR 0048, 0053 and CLAUDE.md."
+
+  no_hardcoded_home_paths:
+    name: "No hardcoded user-home or platform paths"
+    regex: '("/Users/|"~/Library/|"\\\\AppData\\\\|"/home/)'
+    included:
+      - "packages/"
+      - "apps/"
+    excluded:
+      - "tests/fixtures/"
+      - "docs/"
+    severity: error
+    message: "Hardcoded absolute paths are forbidden. Use PathResolver (ADR 0053)."
+
+  no_os_check_in_portable:
+    name: "No #if os() in portable package sources"
+    regex: '^\s*#if os\('
+    included:
+      - "packages/"
+    excluded:
+      - "packages/**/Sources/Mac/"
+      - "packages/**/Sources/Linux/"
+      - "packages/**/Sources/Windows/"
+    severity: error
+    message: "#if os() is only permitted in Mac/Linux/Windows adapter subdirs. If portable code needs a platform branch, the abstraction is wrong (ADR 0048)."

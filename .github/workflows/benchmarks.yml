@@ -1,0 +1,16 @@
+name: Benchmarks (nightly)
+on:
+  schedule:
+    - cron: "17 7 * * *"   # 07:17 UTC
+  workflow_dispatch:
+
+jobs:
+  perf:
+    runs-on: [self-hosted, macOS, arm64]   # hosted runners are too noisy for perf gates
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift package benchmark --format jmh > benchmarks.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks
+          path: benchmarks.json

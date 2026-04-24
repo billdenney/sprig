@@ -1,0 +1,22 @@
+name: Bug report
+description: Something's broken
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+  - type: textarea
+    attributes:
+      label: What did you expect to happen?
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    attributes:
+      label: Sprig version
+  - type: input
+    attributes:
+      label: macOS version
+  - type: input
+    attributes:
+      label: git version (output of `git --version`)

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Set up a local dev environment. Idempotent.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+echo "==> Bootstrapping Sprig dev environment"
+
+if ! command -v swift >/dev/null 2>&1; then
+    echo "Swift toolchain not found. Install Swift 6.3+ from https://swift.org/download" >&2
+    exit 1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+    echo "git not found. On macOS: 'xcode-select --install' or 'brew install git'." >&2
+    exit 1
+fi
+
+echo "==> Resolving SwiftPM dependencies"
+swift package resolve
+
+echo "==> Building packages (portable graph)"
+swift build
+
+echo "==> Done. Run './script/test' to verify your environment."

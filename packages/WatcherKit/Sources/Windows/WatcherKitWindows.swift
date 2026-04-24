@@ -1,0 +1,13 @@
+#if os(Windows)
+import Foundation
+
+// Windows stub — part of the day-1 cross-platform scaffolding (ADR 0053).
+// Real implementation lands when a Windows port is prioritized post-1.0.
+
+enum WatcherKitWindowsImpl {
+    static let platform = "Windows"
+    static func notImplemented() -> Never {
+        fatalError("WatcherKit Windows impl not yet available — see docs/architecture/cross-platform.md")
+    }
+}
+#endif

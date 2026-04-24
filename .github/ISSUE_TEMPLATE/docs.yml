@@ -1,0 +1,10 @@
+name: Docs issue
+description: Something's unclear, missing, or wrong in the docs
+labels: [docs]
+body:
+  - type: input
+    attributes:
+      label: Which page or file?
+  - type: textarea
+    attributes:
+      label: What's the problem?

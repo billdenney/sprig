@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Run the local test matrix.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+SUITE="${1:---suite=unit}"
+
+case "$SUITE" in
+    --suite=unit|"")
+        echo "==> swift test (unit)"
+        swift test
+        ;;
+    --suite=integration)
+        echo "==> swift test (integration)"
+        swift test --filter Integration
+        ;;
+    --suite=e2e)
+        echo "==> XCUITest (requires macOS + signed build)"
+        xcodebuild test -project apps/macos/SprigApp/SprigApp.xcodeproj \
+            -scheme SprigAppUITests -destination 'platform=macOS'
+        ;;
+    --suite=all)
+        swift test
+        ;;
+    *)
+        echo "Unknown suite: $SUITE" >&2
+        exit 2
+        ;;
+esac

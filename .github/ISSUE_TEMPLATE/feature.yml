@@ -1,0 +1,13 @@
+name: Feature request
+description: Propose a new capability
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes:
+      label: What's the problem?
+  - type: textarea
+    attributes:
+      label: What would the solution look like?
+  - type: textarea
+    attributes:
+      label: Alternatives considered

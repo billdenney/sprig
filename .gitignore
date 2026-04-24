@@ -1,0 +1,49 @@
+## Swift + Xcode
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+*.xcscmblueprint
+xcuserdata/
+Package.resolved
+
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+## Linux
+*.swp
+.nfs*
+
+## Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+## Secrets / signing
+*.p12
+*.p8
+*.provisionprofile
+.env
+.env.*
+!.env.example
+apps/macos/Sparkle/ed_private_key*
+
+## Tools
+node_modules/
+dist/
+coverage/
+*.log
+
+## Sprig-specific
+apps/macos/**/SprigApp.xcodeproj/project.xcworkspace/xcuserdata/
+tests/fixtures/repos/*.extracted/
+
+## AI coding harness state (not part of the project)
+.claude/

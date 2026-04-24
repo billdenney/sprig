@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Build signed + notarized DMG, update Sparkle appcast, open Homebrew cask PR.
+# Only runs on macOS self-hosted runner during a tag push.
+set -euo pipefail
+echo "Release pipeline not yet implemented. Placeholder until M9." >&2
+exit 1

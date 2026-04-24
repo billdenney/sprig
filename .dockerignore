@@ -1,0 +1,7 @@
+.git
+.build
+.swiftpm
+apps/
+tests/fixtures/repos/*.extracted
+*.xcodeproj
+DerivedData

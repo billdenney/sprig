@@ -1,0 +1,19 @@
+name: CI (Linux — cross-platform guard for packages/)
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-portable:
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.3-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build packages (portable subset)
+        # Tier 1 + protocol shells of Tier 2 must compile on Linux.
+        # Mac-only adapter sources are excluded by #if os(macOS).
+        run: swift build
+      - name: Run tests (portable subset)
+        run: swift test

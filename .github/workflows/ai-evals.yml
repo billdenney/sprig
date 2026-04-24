@@ -1,0 +1,18 @@
+name: AI evals
+on:
+  pull_request:
+    paths:
+      - 'packages/AIKit/**'
+      - 'tests/ai-evals/**'
+
+jobs:
+  evals:
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.3-noble
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test --filter AIEvals
+        env:
+          SPRIG_AI_EVAL_FIXTURES: tests/ai-evals/fixtures
+          # Provider keys set via GitHub secrets; Ollama runs in a sidecar.

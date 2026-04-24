@@ -1,0 +1,15 @@
+* text=auto eol=lf
+*.swift text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.sh    text eol=lf
+
+*.png   binary
+*.jpg   binary
+*.pdf   binary
+*.ico   binary
+*.icns  binary
+
+# Large repo fixtures live in LFS
+tests/fixtures/repos/**/*.tar.zst filter=lfs diff=lfs merge=lfs -text

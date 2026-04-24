@@ -1,0 +1,20 @@
+name: CI (Windows — advisory cross-platform guard)
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-portable:
+    runs-on: windows-2022
+    continue-on-error: true   # advisory until Windows port is prioritized
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.3-release
+          tag: 6.3-RELEASE
+      - name: Build packages
+        run: swift build
+      - name: Run tests
+        run: swift test
