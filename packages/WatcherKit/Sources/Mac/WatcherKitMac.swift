@@ -20,8 +20,16 @@
         /// us a balance between responsiveness and kernel-side coalescing.
         public var coalesceInterval: CFTimeInterval = 0.25
 
-        private struct State {
-            var stream: FSEventStreamRef?
+        /// `FSEventStreamRef` is `OpaquePointer`, which Swift 6 explicitly
+        /// marks non-`Sendable`. We synchronize access to the underlying
+        /// pointer via our lock, so this wrapper is safe — hence
+        /// `@unchecked Sendable`.
+        private struct StreamHandle: @unchecked Sendable {
+            let pointer: FSEventStreamRef
+        }
+
+        private struct State: @unchecked Sendable {
+            var stream: StreamHandle?
             var continuation: AsyncStream<WatchEvent>.Continuation?
         }
 
@@ -47,18 +55,18 @@
         }
 
         public func stop() async {
-            let (stream, cont) = state.withLock { state -> (FSEventStreamRef?, AsyncStream<WatchEvent>.Continuation?) in
-                let s = state.stream
+            let (handle, cont) = state.withLock { state -> (StreamHandle?, AsyncStream<WatchEvent>.Continuation?) in
+                let h = state.stream
                 let c = state.continuation
                 state.stream = nil
                 state.continuation = nil
-                return (s, c)
+                return (h, c)
             }
             cont?.finish()
-            if let stream {
-                FSEventStreamStop(stream)
-                FSEventStreamInvalidate(stream)
-                FSEventStreamRelease(stream)
+            if let handle {
+                FSEventStreamStop(handle.pointer)
+                FSEventStreamInvalidate(handle.pointer)
+                FSEventStreamRelease(handle.pointer)
             }
         }
 
@@ -83,7 +91,7 @@
                     | kFSEventStreamCreateFlagIgnoreSelf
             )
 
-            guard let stream = FSEventStreamCreate(
+            guard let rawStream = FSEventStreamCreate(
                 kCFAllocatorDefault,
                 Self.callback,
                 &context,
@@ -95,20 +103,21 @@
                 continuation.finish()
                 return
             }
+            let handle = StreamHandle(pointer: rawStream)
 
             state.withLock { state in
                 if state.continuation != nil {
                     preconditionFailure("FSEventsWatcher.start called twice")
                 }
-                state.stream = stream
+                state.stream = handle
                 state.continuation = continuation
             }
 
             FSEventStreamSetDispatchQueue(
-                stream,
+                handle.pointer,
                 DispatchQueue.global(qos: .utility)
             )
-            FSEventStreamStart(stream)
+            FSEventStreamStart(handle.pointer)
         }
 
         fileprivate func dispatch(
