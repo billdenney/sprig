@@ -1,6 +1,7 @@
 #if os(macOS)
     import CoreServices
     import Foundation
+    import os
     import PlatformKit
 
     /// macOS ``FileWatcher`` backed by FSEvents.
@@ -19,9 +20,16 @@
         /// us a balance between responsiveness and kernel-side coalescing.
         public var coalesceInterval: CFTimeInterval = 0.25
 
-        private let lock = NSLock()
-        private var stream: FSEventStreamRef?
-        private var continuation: AsyncStream<WatchEvent>.Continuation?
+        private struct State {
+            var stream: FSEventStreamRef?
+            var continuation: AsyncStream<WatchEvent>.Continuation?
+        }
+
+        /// `OSAllocatedUnfairLock` is Apple's async-safe replacement for
+        /// `NSLock` (macOS 13+; Sprig requires macOS 14+). `withLock` is
+        /// explicitly callable from async contexts — `NSLock.lock()` is
+        /// `@unavailable` from async contexts in Swift 6.
+        private let state = OSAllocatedUnfairLock(initialState: State())
 
         public init() {}
 
@@ -31,7 +39,7 @@
                     continuation.finish()
                     return
                 }
-                self.attach(continuation: continuation, paths: paths)
+                attach(continuation: continuation, paths: paths)
                 continuation.onTermination = { [weak self] _ in
                     Task { await self?.stop() }
                 }
@@ -39,16 +47,18 @@
         }
 
         public func stop() async {
-            lock.lock()
-            let s = stream
-            stream = nil
-            continuation?.finish()
-            continuation = nil
-            lock.unlock()
-            if let s {
-                FSEventStreamStop(s)
-                FSEventStreamInvalidate(s)
-                FSEventStreamRelease(s)
+            let (stream, cont) = state.withLock { state -> (FSEventStreamRef?, AsyncStream<WatchEvent>.Continuation?) in
+                let s = state.stream
+                let c = state.continuation
+                state.stream = nil
+                state.continuation = nil
+                return (s, c)
+            }
+            cont?.finish()
+            if let stream {
+                FSEventStreamStop(stream)
+                FSEventStreamInvalidate(stream)
+                FSEventStreamRelease(stream)
             }
         }
 
@@ -56,12 +66,6 @@
             continuation: AsyncStream<WatchEvent>.Continuation,
             paths: [URL]
         ) {
-            lock.lock()
-            if self.continuation != nil {
-                lock.unlock()
-                preconditionFailure("FSEventsWatcher.start called twice")
-            }
-            self.continuation = continuation
             let pathsToWatch = paths.map(\.path) as CFArray
 
             var context = FSEventStreamContext(
@@ -79,7 +83,7 @@
                     | kFSEventStreamCreateFlagIgnoreSelf
             )
 
-            guard let s = FSEventStreamCreate(
+            guard let stream = FSEventStreamCreate(
                 kCFAllocatorDefault,
                 Self.callback,
                 &context,
@@ -88,37 +92,36 @@
                 coalesceInterval,
                 flags
             ) else {
-                lock.unlock()
                 continuation.finish()
                 return
             }
 
-            stream = s
-            lock.unlock()
+            state.withLock { state in
+                if state.continuation != nil {
+                    preconditionFailure("FSEventsWatcher.start called twice")
+                }
+                state.stream = stream
+                state.continuation = continuation
+            }
 
             FSEventStreamSetDispatchQueue(
-                s,
+                stream,
                 DispatchQueue.global(qos: .utility)
             )
-            FSEventStreamStart(s)
+            FSEventStreamStart(stream)
         }
 
         fileprivate func dispatch(
-            paths: UnsafePointer<UnsafePointer<CChar>?>,
+            paths: UnsafePointer<UnsafePointer<CChar>>,
             flags: UnsafePointer<FSEventStreamEventFlags>,
             count: Int
         ) {
-            lock.lock()
-            guard let continuation else {
-                lock.unlock()
-                return
-            }
-            lock.unlock()
+            let continuation = state.withLock { $0.continuation }
+            guard let continuation else { return }
 
             let now = Date()
             for i in 0 ..< count {
-                guard let cstr = paths[i] else { continue }
-                let path = String(cString: cstr)
+                let path = String(cString: paths[i])
                 let kind = classify(flags: flags[i])
                 continuation.yield(WatchEvent(
                     path: URL(fileURLWithPath: path),
@@ -155,14 +158,16 @@
 
         /// FSEvents requires a C function pointer. We bounce into the Swift
         /// instance via the stashed `info` pointer on the context.
+        ///
+        /// `eventPaths` is a `const char *const *` (array of C strings) because
+        /// we don't set `kFSEventStreamCreateFlagUseCFTypes`. `assumingMemoryBound`
+        /// gives us a safely-typed view without the `unsafeBitCast`
+        /// undefined-behavior warning.
         private static let callback: FSEventStreamCallback = { _, info, numEvents, eventPaths, eventFlags, _ in
             guard let info else { return }
             let watcher = Unmanaged<FSEventsWatcher>.fromOpaque(info)
                 .takeUnretainedValue()
-            let paths = unsafeBitCast(
-                eventPaths,
-                to: UnsafePointer<UnsafePointer<CChar>?>.self
-            )
+            let paths = eventPaths.assumingMemoryBound(to: UnsafePointer<CChar>.self)
             watcher.dispatch(paths: paths, flags: eventFlags, count: numEvents)
         }
     }
