@@ -14,28 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install pinned Swift toolchain (via swiftly)
-        # Hosted macOS runners default to whatever Xcode was shipped with the
-        # image, which may bundle an older Swift than Sprig requires. Using
-        # swiftly keeps CI in lock-step with .swift-version and the Linux CI,
-        # and avoids fragile `xcode-select` path guessing.
-        run: |
-          set -euo pipefail
-          curl -fLO https://download.swift.org/swiftly/darwin/swiftly.pkg
-          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
-          ~/.swiftly/bin/swiftly init --quiet-shell-followup --assume-yes --skip-install
-          . ~/.swiftly/env.sh
-          TOOLCHAIN=$(cat .swift-version)
-          swiftly install "$TOOLCHAIN"
-          swiftly use "$TOOLCHAIN"
-          echo "$HOME/.swiftly/bin" >>"$GITHUB_PATH"
-          # Persist the swiftly-managed toolchain's PATH so later steps pick it up.
-          echo "$(swiftly use --print-location)/usr/bin" >>"$GITHUB_PATH"
-          swift --version
+      - name: Install pinned Swift toolchain
+        # Hosted macOS runners default to whatever Swift ships with the image's
+        # Xcode, which can lag our required 6.0+. SwiftyLab/setup-swift reads
+        # our .swift-version and installs the exact toolchain — same pin as
+        # ci-linux and local dev.
+        uses: SwiftyLab/setup-swift@latest
+        with:
+          swift-version: "6.3.1"
+
+      - name: Print Swift version (sanity)
+        run: swift --version
 
       - name: Install lint tooling
-        run: |
-          brew install swiftlint swiftformat
+        run: brew install swiftlint swiftformat
 
       - name: SwiftLint
         run: swiftlint --strict
