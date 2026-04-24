@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Run SwiftLint against the working tree.
+#
+# Direct SwiftLint binaries crash on Swift 6.3.1 Linux toolchains
+# (libFoundation.so SIGILL), so this helper prefers Docker on Linux and
+# falls back to the host `swiftlint` binary otherwise.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+STRICT="${STRICT:-1}"
+ARGS=()
+if [[ "$STRICT" == "1" ]]; then
+    ARGS+=(--strict)
+fi
+
+if [[ "$(uname -s)" == "Linux" ]] && command -v docker >/dev/null 2>&1; then
+    exec docker run --rm \
+        -v "$PWD:/work" \
+        -w /work \
+        ghcr.io/realm/swiftlint:0.63.2 \
+        swiftlint "${ARGS[@]}" "$@"
+fi
+
+if command -v swiftlint >/dev/null 2>&1; then
+    exec swiftlint "${ARGS[@]}" "$@"
+fi
+
+echo "swiftlint not found. Install via:" >&2
+echo "  macOS:  brew install swiftlint" >&2
+echo "  Linux:  docker pull ghcr.io/realm/swiftlint:0.63.2  (this script uses it automatically)" >&2
+exit 1

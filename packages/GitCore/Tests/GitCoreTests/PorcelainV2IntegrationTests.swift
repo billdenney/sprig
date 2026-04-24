@@ -36,7 +36,7 @@ struct PorcelainV2IntegrationTests {
             "--branch",
             "--show-stash",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=all"
         ])
         return try PorcelainV2Parser.parse(output.stdout)
     }

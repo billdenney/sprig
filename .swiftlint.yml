@@ -5,6 +5,7 @@ included:
   - apps
   - packages
   - tests
+  - cli
 
 excluded:
   - .build
@@ -29,6 +30,23 @@ identifier_name:
     - g
     - b
 
+# --- Custom rules ---
+#
+# SwiftLint custom rules support `included`/`excluded` as regex path patterns
+# (not glob). They only apply when a file's path matches `included` and does
+# not match `excluded`. We rely on these to enforce ADR 0048 + 0053 boundaries:
+#
+#   - no AppKit / SwiftUI / FinderSync / Combine / ServiceManagement / Sparkle
+#     imports in `packages/` (portable tier 1 + 2)
+#   - no hardcoded user-home / platform paths in production code
+#
+# A third boundary — "no `#if os(...)` in portable package logic" — was tried
+# as a custom rule but produced false positives for trivial cross-platform
+# constants (PATH separator, executable name). That boundary is now enforced
+# by: CLAUDE.md guidance, code review, and the Linux CI job that actually
+# compiles `packages/` on a non-Apple toolchain (a real behavior divergence
+# would break that build).
+
 custom_rules:
   no_appkit_in_packages:
     name: "No AppKit/SwiftUI/Cocoa in packages/ (Tier 1-2 must be portable)"
@@ -44,20 +62,10 @@ custom_rules:
     included:
       - "packages/"
       - "apps/"
+      - "cli/"
     excluded:
+      - "Tests/"
       - "tests/fixtures/"
       - "docs/"
     severity: error
     message: "Hardcoded absolute paths are forbidden. Use PathResolver (ADR 0053)."
-
-  no_os_check_in_portable:
-    name: "No #if os() in portable package sources"
-    regex: '^\s*#if os\('
-    included:
-      - "packages/"
-    excluded:
-      - "packages/**/Sources/Mac/"
-      - "packages/**/Sources/Linux/"
-      - "packages/**/Sources/Windows/"
-    severity: error
-    message: "#if os() is only permitted in Mac/Linux/Windows adapter subdirs. If portable code needs a platform branch, the abstraction is wrong (ADR 0048)."

@@ -285,6 +285,11 @@ private struct RecordIterator {
         let slice = data[start..<cursor]
         // Advance past the NUL (if present).
         if cursor < data.count { cursor += 1 }
+        // Use `String(decoding:as:)` (non-failable, replaces invalid UTF-8
+        // with U+FFFD) rather than `String(bytes:encoding:)` — git paths are
+        // raw bytes and we want a best-effort string for display even when
+        // not valid UTF-8. See docs/architecture/git-backend.md.
+        // swiftlint:disable:next optional_data_string_conversion
         return String(decoding: slice, as: UTF8.self)
     }
 }

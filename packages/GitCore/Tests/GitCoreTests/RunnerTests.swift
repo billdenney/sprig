@@ -74,14 +74,14 @@ struct RunnerTests {
             "GIT_DIR": "/should/be/removed",
             "GIT_WORK_TREE": "/should/be/removed",
             "LC_ALL": "de_DE.UTF-8",
-            "HOME": "/Users/test",
+            "SOME_OTHER_VAR": "preserved"
         ])
         #expect(scrubbed["GIT_DIR"] == nil)
         #expect(scrubbed["GIT_WORK_TREE"] == nil)
         #expect(scrubbed["LC_ALL"] == "C.UTF-8")
         #expect(scrubbed["LANG"] == "C.UTF-8")
         #expect(scrubbed["GIT_TERMINAL_PROMPT"] == "0")
-        #expect(scrubbed["HOME"] == "/Users/test")  // unrelated vars preserved
+        #expect(scrubbed["SOME_OTHER_VAR"] == "preserved")  // unrelated vars preserved
     }
 
     @Test("environmentOverrides can re-set scrubbed vars")

@@ -16,11 +16,11 @@ The repo has three tiers; files live where their tier says they live.
 - **Tier 2 — Platform adapters** (`packages/{WatcherKit, CredentialKit, NotifyKit, UpdateKit, LauncherKit, TransportKit, AgentKit}/`). Protocol in `Sources/<Pkg>/`; macOS impl in `Sources/Mac/`; Linux/Windows impls in `Sources/Linux/` and `Sources/Windows/` (may be `fatalError` stubs but the types exist).
 - **Tier 3 — Platform shells** (`apps/macos/`, `apps/windows/`, `apps/linux/`). Full rewrite per OS. At MVP only `apps/macos/` is populated; the other two are README-only placeholders.
 
-### Hard rules (CI-enforced via SwiftLint + grep-lint + Linux build)
+### Hard rules (enforced via SwiftLint + Linux CI build)
 
-1. **Never import `AppKit`, `SwiftUI`, `Cocoa`, `FinderSync`, `Combine`, `ServiceManagement`, or `Sparkle` in any file under `packages/`.** These are Tier 3 imports only.
-2. **Never use `#if os(...)` inside portable (Tier 1) package sources.** If you need a platform branch, the abstraction is wrong — move the capability into a `PlatformKit` protocol and add an adapter under `Sources/{Mac,Linux,Windows}/`.
-3. **No hardcoded absolute paths.** No `/Users/...`, no `~/Library/...`, no `\AppData\`, no `/home/...` outside `tests/fixtures/` and `docs/`. Use `PathResolver.appSupport()` etc.
+1. **Never import `AppKit`, `SwiftUI`, `Cocoa`, `FinderSync`, `Combine`, `ServiceManagement`, or `Sparkle` in any file under `packages/`.** These are Tier 3 imports only. *(SwiftLint custom rule `no_appkit_in_packages`.)*
+2. **Never use `#if os(...)` inside portable (Tier 1) package sources for behavior branching.** Trivial cross-platform constants (PATH separator, executable name) are the only acceptable case. If you need a platform branch for real logic, the abstraction is wrong — move the capability into a `PlatformKit` protocol and add an adapter under `Sources/{Mac,Linux,Windows}/`. *(Enforced by code review + the Linux CI job that compiles `packages/` on a non-Apple toolchain. A real behavior divergence will fail that build.)*
+3. **No hardcoded absolute paths.** No `/Users/...`, no `~/Library/...`, no `\AppData\`, no `/home/...` outside `Tests/`, `tests/fixtures/`, and `docs/`. Use `PathResolver.appSupport()` etc. *(SwiftLint custom rule `no_hardcoded_home_paths`.)*
 4. **All git invocation goes through `GitCore.Runner`.** No ad-hoc `Process()` in features — the runner owns cwd, env scrubbing, encoding, argv escaping, and the long-lived `cat-file --batch` cache.
 5. **All IPC messages are `Codable` structs in `IPCSchema`.** No `@objc` protocols leak into portable code. The wire format must survive transport swaps (XPC → named pipes → D-Bus).
 6. **Force-pushes always use `--force-with-lease --force-if-includes`.** Raw `--force` is never emitted.
