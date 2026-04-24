@@ -29,16 +29,16 @@ struct PorcelainV2ParserTests {
 
     // MARK: Empty / trivial cases
 
-    @Test
-    func `empty input yields empty status`() throws {
+    @Test("empty input yields empty status")
+    func emptyInputYieldsEmptyStatus() throws {
         let status = try PorcelainV2Parser.parse(Data())
         #expect(status.branch == nil)
         #expect(status.entries.isEmpty)
         #expect(status.stashCount == nil)
     }
 
-    @Test
-    func `only headers, no entries`() throws {
+    @Test("only headers, no entries")
+    func onlyHeadersNoEntries() throws {
         let data = bytes(
             "# branch.oid \(branchOid)",
             "# branch.head main",
@@ -54,8 +54,8 @@ struct PorcelainV2ParserTests {
         #expect(status.entries.isEmpty)
     }
 
-    @Test
-    func `initial commit — oid is (initial), head is the branch name`() throws {
+    @Test("initial commit — oid is (initial), head is the branch name")
+    func initialCommitOidIsInitialHeadIsTheBranchName() throws {
         let data = bytes(
             "# branch.oid (initial)",
             "# branch.head main"
@@ -65,8 +65,8 @@ struct PorcelainV2ParserTests {
         #expect(status.branch?.head == "main")
     }
 
-    @Test
-    func `detached HEAD — head is (detached)`() throws {
+    @Test("detached HEAD — head is (detached)")
+    func detachedHEADHeadIsDetached() throws {
         let data = bytes(
             "# branch.oid \(branchOid)",
             "# branch.head (detached)"
@@ -76,8 +76,8 @@ struct PorcelainV2ParserTests {
         #expect(status.branch?.oid != nil)
     }
 
-    @Test
-    func `stash header parsed into stashCount`() throws {
+    @Test("stash header parsed into stashCount")
+    func stashHeaderParsedIntoStashCount() throws {
         let data = bytes("# stash 4")
         let status = try PorcelainV2Parser.parse(data)
         #expect(status.stashCount == 4)
@@ -85,8 +85,8 @@ struct PorcelainV2ParserTests {
 
     // MARK: Entry types
 
-    @Test
-    func `ordinary entry: modified in worktree`() throws {
+    @Test("ordinary entry: modified in worktree")
+    func ordinaryEntryModifiedInWorktree() throws {
         let record = "1 .M N... 100644 100644 100644 \(hashA) \(hashB) README.md"
         let data = bytes(record)
         let status = try PorcelainV2Parser.parse(data)
@@ -105,8 +105,8 @@ struct PorcelainV2ParserTests {
         #expect(entry.path == "README.md")
     }
 
-    @Test
-    func `ordinary entry: staged add (index A, worktree .)`() throws {
+    @Test("ordinary entry: staged add (index A, worktree .)")
+    func ordinaryEntryStagedAddIndexAWorktree() throws {
         let record = "1 A. N... 000000 100644 100644 \(hashZero) \(hashB) new.txt"
         let data = bytes(record)
         let status = try PorcelainV2Parser.parse(data)
@@ -119,8 +119,8 @@ struct PorcelainV2ParserTests {
         #expect(entry.modeHead == 0)
     }
 
-    @Test
-    func `renamed entry: consumes the extra origPath record`() throws {
+    @Test("renamed entry: consumes the extra origPath record")
+    func renamedEntryConsumesTheExtraOrigPathRecord() throws {
         let record = "2 R. N... 100644 100644 100644 \(hashC) \(hashD) R100 new/path.swift"
         let data = bytes(record, "old/path.swift")
         let status = try PorcelainV2Parser.parse(data)
@@ -135,8 +135,8 @@ struct PorcelainV2ParserTests {
         #expect(entry.origPath == "old/path.swift")
     }
 
-    @Test
-    func `copied entry: op=C with partial score`() throws {
+    @Test("copied entry: op=C with partial score")
+    func copiedEntryOpCWithPartialScore() throws {
         let record = "2 C. N... 100644 100644 100644 \(hashC) \(hashD) C85 dupe.swift"
         let data = bytes(record, "orig.swift")
         let status = try PorcelainV2Parser.parse(data)
@@ -148,8 +148,8 @@ struct PorcelainV2ParserTests {
         #expect(entry.score == 85)
     }
 
-    @Test
-    func `unmerged entry: both sides modified (UU)`() throws {
+    @Test("unmerged entry: both sides modified (UU)")
+    func unmergedEntryBothSidesModifiedUU() throws {
         let record = "u UU N... 100644 100644 100644 100644 \(hashC) \(hashD) \(hashE) conflict.txt"
         let data = bytes(record)
         let status = try PorcelainV2Parser.parse(data)
@@ -165,8 +165,8 @@ struct PorcelainV2ParserTests {
         #expect(entry.path == "conflict.txt")
     }
 
-    @Test
-    func `untracked and ignored entries`() throws {
+    @Test("untracked and ignored entries")
+    func untrackedAndIgnoredEntries() throws {
         let data = bytes(
             "? new-file.txt",
             "! .DS_Store"
@@ -177,8 +177,8 @@ struct PorcelainV2ParserTests {
         #expect(status.entries[1] == .ignored(path: ".DS_Store"))
     }
 
-    @Test
-    func `submodule state: S with commit-changed and tracked-modified`() throws {
+    @Test("submodule state: S with commit-changed and tracked-modified")
+    func submoduleStateSWithCommitChangedAndTrackedModified() throws {
         let record = "1 .M SCM. 160000 160000 160000 \(hashA) \(hashB) vendor/lib"
         let data = bytes(record)
         let status = try PorcelainV2Parser.parse(data)
@@ -192,8 +192,8 @@ struct PorcelainV2ParserTests {
         #expect(!entry.submodule.untrackedModified)
     }
 
-    @Test
-    func `paths with spaces are preserved whole (last field captures everything)`() throws {
+    @Test("paths with spaces are preserved whole (last field captures everything)")
+    func pathsWithSpacesArePreservedWholeLastFieldCapturesEverything() throws {
         let record = "1 .M N... 100644 100644 100644 \(hashA) \(hashB) docs/my notes and plans.md"
         let data = bytes(record)
         let status = try PorcelainV2Parser.parse(data)
@@ -204,8 +204,8 @@ struct PorcelainV2ParserTests {
         #expect(entry.path == "docs/my notes and plans.md")
     }
 
-    @Test
-    func `mixed entry stream round-trips`() throws {
+    @Test("mixed entry stream round-trips")
+    func mixedEntryStreamRoundTrips() throws {
         let ordinary = "1 .M N... 100644 100644 100644 \(hashA) \(hashB) changed.txt"
         let renamed = "2 R. N... 100644 100644 100644 \(hashC) \(hashD) R100 renamed/new.txt"
         let unmerged = "u UU N... 100644 100644 100644 100644 \(hashC) \(hashD) \(hashE) conflict.txt"
@@ -230,16 +230,16 @@ struct PorcelainV2ParserTests {
 
     // MARK: Malformed input
 
-    @Test
-    func `unknown entry prefix throws parseFailure`() {
+    @Test("unknown entry prefix throws parseFailure")
+    func unknownEntryPrefixThrowsParseFailure() {
         let data = bytes("Z bogus")
         #expect(throws: GitError.self) {
             _ = try PorcelainV2Parser.parse(data)
         }
     }
 
-    @Test
-    func `malformed XY status throws parseFailure`() {
+    @Test("malformed XY status throws parseFailure")
+    func malformedXYStatusThrowsParseFailure() {
         let record = "1 XZ N... 100644 100644 100644 \(hashA) \(hashB) bad.txt"
         let data = bytes(record)
         #expect(throws: GitError.self) {
@@ -247,16 +247,16 @@ struct PorcelainV2ParserTests {
         }
     }
 
-    @Test
-    func `malformed branch.ab throws parseFailure`() {
+    @Test("malformed branch.ab throws parseFailure")
+    func malformedBranchAbThrowsParseFailure() {
         let data = bytes("# branch.ab garbage")
         #expect(throws: GitError.self) {
             _ = try PorcelainV2Parser.parse(data)
         }
     }
 
-    @Test
-    func `unknown headers are tolerated (forward-compat)`() throws {
+    @Test("unknown headers are tolerated (forward-compat)")
+    func unknownHeadersAreToleratedForwardCompat() throws {
         let data = bytes(
             "# branch.head main",
             "# branch.future-thing hello",

@@ -47,8 +47,8 @@ struct PorcelainV2IntegrationTests {
 
     // MARK: tests
 
-    @Test
-    func `clean repo after initial commit: branch headers present, no entries`() async throws {
+    @Test("clean repo after initial commit: branch headers present, no entries")
+    func cleanRepoAfterInitialCommitBranchHeadersPresentNoEntries() async throws {
         let (tmp, r) = try mkRepo("clean")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -62,8 +62,8 @@ struct PorcelainV2IntegrationTests {
         #expect(status.entries.isEmpty)
     }
 
-    @Test
-    func `fresh repo with untracked file surfaces as untracked entry`() async throws {
+    @Test("fresh repo with untracked file surfaces as untracked entry")
+    func freshRepoWithUntrackedFileSurfacesAsUntrackedEntry() async throws {
         let (tmp, r) = try mkRepo("untracked")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -76,8 +76,8 @@ struct PorcelainV2IntegrationTests {
         #expect(status.entries == [.untracked(path: "hello.txt")])
     }
 
-    @Test
-    func `modified tracked file surfaces as ordinary entry with .M status`() async throws {
+    @Test("modified tracked file surfaces as ordinary entry with .M status")
+    func modifiedTrackedFileSurfacesAsOrdinaryEntryWithMStatus() async throws {
         let (tmp, r) = try mkRepo("modified")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -97,8 +97,8 @@ struct PorcelainV2IntegrationTests {
         #expect(ordinary.first?.path == "a.txt")
     }
 
-    @Test
-    func `staged new file surfaces as ordinary entry with A. status`() async throws {
+    @Test("staged new file surfaces as ordinary entry with A. status")
+    func stagedNewFileSurfacesAsOrdinaryEntryWithAStatus() async throws {
         let (tmp, r) = try mkRepo("added")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -117,8 +117,8 @@ struct PorcelainV2IntegrationTests {
         #expect(ordinary.first?.path == "new.txt")
     }
 
-    @Test
-    func `rename detected and parsed with both paths`() async throws {
+    @Test("rename detected and parsed with both paths")
+    func renameDetectedAndParsedWithBothPaths() async throws {
         let (tmp, r) = try mkRepo("renamed")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -137,8 +137,8 @@ struct PorcelainV2IntegrationTests {
         #expect(renames.first?.op == .renamed)
     }
 
-    @Test
-    func `merge conflict produces an unmerged entry`() async throws {
+    @Test("merge conflict produces an unmerged entry")
+    func mergeConflictProducesAnUnmergedEntry() async throws {
         let (tmp, r) = try mkRepo("conflict")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -170,8 +170,8 @@ struct PorcelainV2IntegrationTests {
         #expect(unmerged.first?.xy.worktree == .updatedUnmerged)
     }
 
-    @Test
-    func `path with spaces survives round-trip through real git`() async throws {
+    @Test("path with spaces survives round-trip through real git")
+    func pathWithSpacesSurvivesRoundTripThroughRealGit() async throws {
         let (tmp, r) = try mkRepo("spacey-path")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)
@@ -184,8 +184,8 @@ struct PorcelainV2IntegrationTests {
         #expect(status.entries == [.untracked(path: "my notes.md")])
     }
 
-    @Test
-    func `stash header reflects stash count`() async throws {
+    @Test("stash header reflects stash count")
+    func stashHeaderReflectsStashCount() async throws {
         let (tmp, r) = try mkRepo("stash")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try await initRepo(r)

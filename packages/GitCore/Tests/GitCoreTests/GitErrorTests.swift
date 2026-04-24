@@ -3,14 +3,14 @@ import Testing
 
 @Suite("GitError")
 struct GitErrorTests {
-    @Test
-    func `binaryNotFound description includes the probed path`() {
+    @Test("binaryNotFound description includes the probed path")
+    func binaryNotFoundDescriptionIncludesTheProbedPath() {
         let error = GitError.binaryNotFound(probedPath: "/usr/local/bin")
         #expect(error.description.contains("/usr/local/bin"))
     }
 
-    @Test
-    func `nonZeroExit description includes the exit code`() {
+    @Test("nonZeroExit description includes the exit code")
+    func nonZeroExitDescriptionIncludesTheExitCode() {
         let error = GitError.nonZeroExit(
             command: ["status"],
             exitCode: 128,
