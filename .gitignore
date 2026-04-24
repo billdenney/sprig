@@ -47,3 +47,7 @@ tests/fixtures/repos/*.extracted/
 
 ## AI coding harness state (not part of the project)
 .claude/
+
+## Swiftly installer artifacts (if downloaded into repo root)
+swiftly-*.tar.gz
+LICENSE.txt

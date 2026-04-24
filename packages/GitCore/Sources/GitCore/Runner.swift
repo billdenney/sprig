@@ -1,0 +1,205 @@
+import Foundation
+
+/// Invokes the system `git` binary and captures its output.
+///
+/// This is the one and only place Sprig spawns `git`. Enforcing that rule (per
+/// CLAUDE.md and ADR 0023) gives us a single seam for argv escaping, environment
+/// scrubbing, encoding normalization, cancellation, timeouts, and the eventual
+/// long-lived `cat-file --batch` cache.
+///
+/// The runner is portable Swift + Foundation. It works on macOS, Linux, and
+/// Windows (Foundation's `Process` uses `posix_spawn` on POSIX and
+/// `CreateProcessW` on Windows). Platform-quirky behaviors are handled here so
+/// the rest of the codebase can call `run(_:)` without thinking about them.
+public struct Runner: Sendable {
+    /// Absolute path to the `git` executable, or `nil` to use `git` from `PATH`.
+    public var gitPath: String?
+
+    /// Default working directory for invocations that don't specify one.
+    public var defaultWorkingDirectory: URL?
+
+    /// Environment variables merged into the invocation. Nil values unset the
+    /// corresponding variable. Sprig scrubs a few git-sensitive env vars by
+    /// default (see ``scrubbedEnvironment(base:)``).
+    public var environmentOverrides: [String: String?]
+
+    public init(
+        gitPath: String? = nil,
+        defaultWorkingDirectory: URL? = nil,
+        environmentOverrides: [String: String?] = [:]
+    ) {
+        self.gitPath = gitPath
+        self.defaultWorkingDirectory = defaultWorkingDirectory
+        self.environmentOverrides = environmentOverrides
+    }
+
+    /// Captured output of a completed invocation.
+    public struct Output: Sendable {
+        public var stdout: Data
+        public var stderr: Data
+        public var exitCode: Int32
+        public var commandLine: [String]
+
+        public var stdoutString: String {
+            String(data: stdout, encoding: .utf8) ?? ""
+        }
+        public var stderrString: String {
+            String(data: stderr, encoding: .utf8) ?? ""
+        }
+    }
+
+    /// Spawn `git <arguments>` and await completion.
+    ///
+    /// - Parameters:
+    ///   - arguments: argv, **not** a shell string. Each element becomes a
+    ///     distinct argument; no shell interpolation happens.
+    ///   - cwd: working directory, or `defaultWorkingDirectory` if nil.
+    ///   - stdin: optional bytes fed to the child's stdin.
+    /// - Returns: stdout/stderr/exit code.
+    /// - Throws: ``GitError`` for binary-not-found, non-zero exits (only when
+    ///   `throwOnNonZero` is true), signals, or I/O failures.
+    public func run(
+        _ arguments: [String],
+        cwd: URL? = nil,
+        stdin: Data? = nil,
+        throwOnNonZero: Bool = true
+    ) async throws -> Output {
+        let resolvedPath = try resolveGitPath()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: resolvedPath)
+        process.arguments = arguments
+        process.currentDirectoryURL = cwd ?? defaultWorkingDirectory
+        process.environment = scrubbedEnvironment(base: ProcessInfo.processInfo.environment)
+
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        if let stdin {
+            let inPipe = Pipe()
+            process.standardInput = inPipe
+            try inPipe.fileHandleForWriting.write(contentsOf: stdin)
+            try inPipe.fileHandleForWriting.close()
+        } else {
+            process.standardInput = FileHandle.nullDevice
+        }
+
+        // Run and collect asynchronously — wait() blocks, so we wrap in a task
+        // that reads both pipes concurrently and awaits termination.
+        try process.run()
+
+        async let stdoutBytes = Self.readToEnd(outPipe.fileHandleForReading)
+        async let stderrBytes = Self.readToEnd(errPipe.fileHandleForReading)
+        let stdout = try await stdoutBytes
+        let stderr = try await stderrBytes
+        process.waitUntilExit()
+
+        let reason = process.terminationReason
+        let status = process.terminationStatus
+
+        if reason == .uncaughtSignal {
+            throw GitError.signalled(
+                command: arguments,
+                signal: status,
+                stderr: String(data: stderr, encoding: .utf8) ?? ""
+            )
+        }
+
+        if throwOnNonZero, status != 0 {
+            throw GitError.nonZeroExit(
+                command: arguments,
+                exitCode: status,
+                stderr: String(data: stderr, encoding: .utf8) ?? "",
+                stdout: String(data: stdout, encoding: .utf8) ?? ""
+            )
+        }
+
+        return Output(
+            stdout: stdout,
+            stderr: stderr,
+            exitCode: status,
+            commandLine: [resolvedPath] + arguments
+        )
+    }
+
+    /// Convenience: `git --version`, parsed.
+    public func version() async throws -> GitVersion {
+        let output = try await run(["--version"])
+        guard let version = GitVersion.parse(output.stdoutString) else {
+            throw GitError.parseFailure(
+                context: "git --version",
+                rawSnippet: output.stdoutString
+            )
+        }
+        return version
+    }
+
+    // MARK: - Internals
+
+    /// Scrub environment variables that would make git behave unpredictably.
+    /// Callers can re-set any of these via `environmentOverrides`.
+    ///
+    /// - `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` removed: we always pass
+    ///   these via arguments or `-C` so they don't leak from the parent shell.
+    /// - `GIT_TERMINAL_PROMPT=0` set: never block on a tty prompt in Sprig
+    ///   invocations; credentials flow through ``CredentialKit``.
+    /// - `LC_ALL=C.UTF-8` set: ensures deterministic UTF-8 output and
+    ///   porcelain-v2 byte-stability across locales.
+    func scrubbedEnvironment(base: [String: String]) -> [String: String] {
+        var env = base
+        env.removeValue(forKey: "GIT_DIR")
+        env.removeValue(forKey: "GIT_WORK_TREE")
+        env.removeValue(forKey: "GIT_INDEX_FILE")
+        env.removeValue(forKey: "GIT_CONFIG")
+        env.removeValue(forKey: "GIT_CONFIG_GLOBAL")
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["LC_ALL"] = "C.UTF-8"
+        env["LANG"] = "C.UTF-8"
+
+        for (key, value) in environmentOverrides {
+            if let value { env[key] = value } else { env.removeValue(forKey: key) }
+        }
+        return env
+    }
+
+    func resolveGitPath() throws -> String {
+        if let gitPath { return gitPath }
+
+        // Explicit PATH search so we can give a clean GitError rather than let
+        // Process throw a generic ENOENT.
+        let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let separator: Character
+        #if os(Windows)
+        separator = ";"
+        #else
+        separator = ":"
+        #endif
+        let candidateDirs = pathEnv.split(separator: separator).map(String.init)
+        let exeName: String
+        #if os(Windows)
+        exeName = "git.exe"
+        #else
+        exeName = "git"
+        #endif
+        for dir in candidateDirs {
+            let candidate = (dir as NSString).appendingPathComponent(exeName)
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        throw GitError.binaryNotFound(probedPath: pathEnv)
+    }
+
+    private static func readToEnd(_ handle: FileHandle) async throws -> Data {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+            DispatchQueue.global().async {
+                do {
+                    let data = try handle.readToEnd() ?? Data()
+                    continuation.resume(returning: data)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}
