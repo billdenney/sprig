@@ -1,6 +1,8 @@
 @testable import NotifyKit
 import Testing
 
-@Test func `module name is set`() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(NotifyKit.moduleName == "NotifyKit")
 }

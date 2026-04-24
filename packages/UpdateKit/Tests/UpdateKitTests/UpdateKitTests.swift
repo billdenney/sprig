@@ -1,6 +1,8 @@
 import Testing
 @testable import UpdateKit
 
-@Test func `module name is set`() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(UpdateKit.moduleName == "UpdateKit")
 }

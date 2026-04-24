@@ -1,6 +1,8 @@
 @testable import CredentialKit
 import Testing
 
-@Test func `module name is set`() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(CredentialKit.moduleName == "CredentialKit")
 }

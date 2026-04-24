@@ -1,6 +1,8 @@
 import Testing
 @testable import WatcherKit
 
-@Test func `module name is set`() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(WatcherKit.moduleName == "WatcherKit")
 }
