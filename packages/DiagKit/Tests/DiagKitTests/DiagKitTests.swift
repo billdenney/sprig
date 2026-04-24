@@ -1,6 +1,8 @@
-import Testing
 @testable import DiagKit
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(DiagKit.moduleName == "DiagKit")
 }

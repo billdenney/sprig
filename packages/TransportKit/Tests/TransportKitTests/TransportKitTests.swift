@@ -1,6 +1,8 @@
 import Testing
 @testable import TransportKit
 
-@Test func moduleNameIsSet() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(TransportKit.moduleName == "TransportKit")
 }

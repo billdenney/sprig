@@ -1,6 +1,8 @@
-import Testing
 @testable import RepoState
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(RepoState.moduleName == "RepoState")
 }

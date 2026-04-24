@@ -4,17 +4,28 @@ on:
   push:
     branches: [main]
 
+# Windows is an **advisory** guard — its purpose is to prove the portable
+# `packages/` graph + platform-adapter stubs still compile with the Windows
+# Swift toolchain. A real Windows port (SprigApp/SprigExplorer/SprigAgent
+# service wrappers) lives in `apps/windows/` and arrives post-1.0.
+#
+# We deliberately DO NOT run `swift test` here: many GitCoreTests spawn real
+# `git` (init/status round-trips, merge conflict fixtures), depend on POSIX
+# `NSTemporaryDirectory` semantics, and assume a Unix-style `PATH`. Making
+# those pass on a plain Windows runner would require a Git-for-Windows
+# install and non-trivial portability work that belongs with the real port.
+# Running `swift build` is enough to catch accidental Windows-only
+# compilation regressions (the thing this guard exists for).
+
 jobs:
   build-portable:
     runs-on: windows-2022
-    continue-on-error: true   # advisory until Windows port is prioritized
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
       - uses: compnerd/gha-setup-swift@main
         with:
           branch: swift-6.3-release
           tag: 6.3-RELEASE
-      - name: Build packages
+      - name: Build packages (compile-only — see header comment)
         run: swift build
-      - name: Run tests
-        run: swift test

@@ -1,6 +1,6 @@
-import Testing
 import Foundation
 @testable import GitCore
+import Testing
 
 /// Tests that actually spawn the system `git` binary.
 ///
@@ -10,7 +10,7 @@ import Foundation
 @Suite("Runner end-to-end (spawns real git)")
 struct RunnerTests {
     @Test("version() returns a parseable GitVersion meeting our minimum")
-    func versionReportsGitVersion() async throws {
+    func versionReturnsAParseableGitVersionMeetingOurMinimum() async throws {
         let runner = Runner()
         let version = try await runner.version()
         #expect(version.major >= 2)
@@ -21,7 +21,7 @@ struct RunnerTests {
     }
 
     @Test("run() captures stdout and stderr separately")
-    func runCapturesStreamsSeparately() async throws {
+    func runCapturesStdoutAndStderrSeparately() async throws {
         let runner = Runner()
         let output = try await runner.run(["--version"])
         #expect(output.exitCode == 0)
@@ -30,7 +30,7 @@ struct RunnerTests {
     }
 
     @Test("run() throws nonZeroExit for an unknown subcommand")
-    func runThrowsForUnknownSubcommand() async throws {
+    func runThrowsNonZeroExitForAnUnknownSubcommand() async throws {
         let runner = Runner()
         do {
             _ = try await runner.run(["this-is-not-a-git-subcommand-xyzzy"])
@@ -42,7 +42,7 @@ struct RunnerTests {
     }
 
     @Test("throwOnNonZero=false returns the non-zero output instead of throwing")
-    func runDoesNotThrowWhenDisabled() async throws {
+    func throwOnNonZeroFalseReturnsTheNonZeroOutputInsteadOfThrowing() async throws {
         let runner = Runner()
         let output = try await runner.run(
             ["this-is-not-a-git-subcommand-xyzzy"],
@@ -52,7 +52,7 @@ struct RunnerTests {
     }
 
     @Test("init/status round-trip in a temporary repo")
-    func initAndStatusInTempRepo() async throws {
+    func initStatusRoundTripInATemporaryRepo() async throws {
         let tmp = try createTempDirectory()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
@@ -68,24 +68,24 @@ struct RunnerTests {
     }
 
     @Test("scrubbed environment forces deterministic UTF-8 locale and disables prompts")
-    func scrubbedEnvironmentSetsLocaleAndDisablesPrompts() throws {
+    func scrubbedEnvironmentForcesDeterministicUTF8LocaleAndDisablesPrompts() {
         let runner = Runner()
         let scrubbed = runner.scrubbedEnvironment(base: [
             "GIT_DIR": "/should/be/removed",
             "GIT_WORK_TREE": "/should/be/removed",
             "LC_ALL": "de_DE.UTF-8",
-            "HOME": "/Users/test",
+            "SOME_OTHER_VAR": "preserved"
         ])
         #expect(scrubbed["GIT_DIR"] == nil)
         #expect(scrubbed["GIT_WORK_TREE"] == nil)
         #expect(scrubbed["LC_ALL"] == "C.UTF-8")
         #expect(scrubbed["LANG"] == "C.UTF-8")
         #expect(scrubbed["GIT_TERMINAL_PROMPT"] == "0")
-        #expect(scrubbed["HOME"] == "/Users/test")  // unrelated vars preserved
+        #expect(scrubbed["SOME_OTHER_VAR"] == "preserved") // unrelated vars preserved
     }
 
     @Test("environmentOverrides can re-set scrubbed vars")
-    func environmentOverridesReapply() {
+    func environmentOverridesCanReSetScrubbedVars() {
         let runner = Runner(environmentOverrides: ["LC_ALL": "en_US.UTF-8"])
         let scrubbed = runner.scrubbedEnvironment(base: [:])
         #expect(scrubbed["LC_ALL"] == "en_US.UTF-8")

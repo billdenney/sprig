@@ -1,6 +1,8 @@
-import Testing
 @testable import LauncherKit
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(LauncherKit.moduleName == "LauncherKit")
 }

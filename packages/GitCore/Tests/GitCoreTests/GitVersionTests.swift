@@ -1,10 +1,10 @@
-import Testing
 @testable import GitCore
+import Testing
 
 @Suite("GitVersion parsing")
 struct GitVersionTests {
-    @Test("parses vanilla `git version 2.43.0`")
-    func parsesVanilla() throws {
+    @Test("parses vanilla git version 2.43.0")
+    func parsesVanillaGitVersion2430() throws {
         let version = try #require(GitVersion.parse("git version 2.43.0"))
         #expect(version.major == 2)
         #expect(version.minor == 43)
@@ -12,8 +12,8 @@ struct GitVersionTests {
         #expect(version.suffix.isEmpty)
     }
 
-    @Test("parses Apple-bundled `git version 2.39.5 (Apple Git-154)`")
-    func parsesAppleBundled() throws {
+    @Test("parses Apple-bundled git version 2.39.5 (Apple Git-154)")
+    func parsesAppleBundledGitVersion2395AppleGit154() throws {
         let version = try #require(
             GitVersion.parse("git version 2.39.5 (Apple Git-154)")
         )
@@ -24,7 +24,7 @@ struct GitVersionTests {
     }
 
     @Test("parses two-component version with implied patch 0")
-    func parsesTwoComponent() throws {
+    func parsesTwoComponentVersionWithImpliedPatch0() throws {
         let version = try #require(GitVersion.parse("git version 2.44"))
         #expect(version.patch == 0)
     }
@@ -36,30 +36,32 @@ struct GitVersionTests {
     }
 
     @Test("returns nil for unrecognized output")
-    func returnsNilForGarbage() {
+    func returnsNilForUnrecognizedOutput() {
         #expect(GitVersion.parse("hg version 6.7.2") == nil)
         #expect(GitVersion.parse("") == nil)
         #expect(GitVersion.parse("git version abc") == nil)
     }
 
     @Test("comparison is lexicographic on major/minor/patch")
-    func comparisonIsLexicographic() {
+    func comparisonIsLexicographicOnMajorMinorPatch() {
         #expect(
             GitVersion(major: 2, minor: 39, patch: 0) <
-            GitVersion(major: 2, minor: 39, patch: 1)
+                GitVersion(major: 2, minor: 39, patch: 1)
         )
         #expect(
             GitVersion(major: 2, minor: 39, patch: 9) <
-            GitVersion(major: 2, minor: 40, patch: 0)
+                GitVersion(major: 2, minor: 40, patch: 0)
         )
         #expect(
-            !(GitVersion(major: 2, minor: 43, patch: 0) <
-              GitVersion(major: 2, minor: 43, patch: 0))
+            !(
+                GitVersion(major: 2, minor: 43, patch: 0) <
+                    GitVersion(major: 2, minor: 43, patch: 0)
+            )
         )
     }
 
     @Test("meetsMinimum gates at 2.39")
-    func meetsMinimum() {
+    func meetsMinimumGatesAt239() {
         #expect(GitVersion(major: 2, minor: 39, patch: 0).meetsMinimum)
         #expect(GitVersion(major: 2, minor: 43, patch: 0).meetsMinimum)
         #expect(!GitVersion(major: 2, minor: 38, patch: 9).meetsMinimum)

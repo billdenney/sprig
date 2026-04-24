@@ -1,6 +1,8 @@
-import Testing
 @testable import ConflictKit
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(ConflictKit.moduleName == "ConflictKit")
 }

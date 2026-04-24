@@ -1,6 +1,8 @@
-import Testing
 @testable import SubmoduleKit
+import Testing
 
-@Test func moduleNameIsSet() {
+@Test("module name is set")
+
+func moduleNameIsSet() {
     #expect(SubmoduleKit.moduleName == "SubmoduleKit")
 }

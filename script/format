@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Run SwiftFormat in auto-fix mode. For check-only, use `script/lint` (which
+# also runs SwiftFormat --lint under the hood).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+if [[ "$(uname -s)" == "Linux" ]] && command -v docker >/dev/null 2>&1; then
+    exec docker run --rm \
+        -v "$PWD:/work" \
+        -w /work \
+        ghcr.io/nicklockwood/swiftformat:latest \
+        . "$@"
+fi
+
+if command -v swiftformat >/dev/null 2>&1; then
+    exec swiftformat . "$@"
+fi
+
+echo "swiftformat not found. Install via:" >&2
+echo "  macOS:  brew install swiftformat" >&2
+echo "  Linux:  docker pull ghcr.io/nicklockwood/swiftformat:latest  (this script uses it automatically)" >&2
+exit 1

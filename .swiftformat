@@ -6,3 +6,8 @@
 --wrapparameters before-first
 --wrapcollections before-first
 --disable redundantSelf
+# swiftTestingTestCaseNames turns `@Test("name") func foo()` into
+# `@Test func \`name\`()` with a backticked identifier. That syntax
+# requires Swift 6.1+'s relaxed parser, but Xcode 16.x on macos-14 CI
+# still ships Swift 6.0.3. Keep the @Test("string") form instead.
+--disable swiftTestingTestCaseNames

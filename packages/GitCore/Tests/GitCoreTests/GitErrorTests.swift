@@ -1,16 +1,16 @@
-import Testing
 @testable import GitCore
+import Testing
 
 @Suite("GitError")
 struct GitErrorTests {
     @Test("binaryNotFound description includes the probed path")
-    func binaryNotFoundIncludesPath() {
+    func binaryNotFoundDescriptionIncludesTheProbedPath() {
         let error = GitError.binaryNotFound(probedPath: "/usr/local/bin")
         #expect(error.description.contains("/usr/local/bin"))
     }
 
     @Test("nonZeroExit description includes the exit code")
-    func nonZeroExitIncludesExitCode() {
+    func nonZeroExitDescriptionIncludesTheExitCode() {
         let error = GitError.nonZeroExit(
             command: ["status"],
             exitCode: 128,
