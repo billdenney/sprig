@@ -55,7 +55,7 @@ let package = Package(
                 ),
                 .testTarget(
                     name: "\(name)Tests",
-                    dependencies: [.target(name: name)],
+                    dependencies: [.target(name: name), "PlatformKit"],
                     path: "packages/\(name)/Tests/\(name)Tests"
                 )
             ]
