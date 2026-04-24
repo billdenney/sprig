@@ -7,7 +7,7 @@ jobs:
   release:
     runs-on: [self-hosted, macOS, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ./script/release
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}

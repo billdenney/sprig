@@ -9,7 +9,7 @@ jobs:
     runs-on: windows-2022
     continue-on-error: true   # advisory until Windows port is prioritized
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: compnerd/gha-setup-swift@main
         with:
           branch: swift-6.3-release
