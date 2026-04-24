@@ -168,7 +168,14 @@ public struct Runner: Sendable {
 
         // Explicit PATH search so we can give a clean GitError rather than let
         // Process throw a generic ENOENT.
-        let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        //
+        // Windows env vars are case-insensitive at the OS level but
+        // Foundation's `environment` dictionary is case-sensitive. Look up PATH
+        // case-insensitively so `Path`, `PATH`, `pAtH` all resolve. POSIX
+        // platforms are case-sensitive by convention but the same lookup
+        // still works.
+        let env = ProcessInfo.processInfo.environment
+        let pathEnv = env.first { $0.key.caseInsensitiveCompare("PATH") == .orderedSame }?.value ?? ""
         let separator: Character
         #if os(Windows)
             separator = ";"
