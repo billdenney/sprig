@@ -104,7 +104,40 @@ struct SprigctlTests {
         #expect(out.exitCode == 0)
         #expect(out.stdout.contains("status"))
         #expect(out.stdout.contains("version"))
+        #expect(out.stdout.contains("watch"))
     }
+
+    @Test("sprigctl watch --help shows usage")
+    func sprigctlWatchHelp() async throws {
+        let out = try await run(["watch", "--help"])
+        #expect(out.exitCode == 0)
+        #expect(out.stdout.lowercased().contains("watch"))
+        #expect(out.stdout.contains("--json"))
+        #expect(out.stdout.contains("--duration"))
+    }
+
+    #if !os(macOS)
+        @Test("sprigctl watch on non-macOS exits non-zero with a clear message")
+        func sprigctlWatchOnNonMacOS() async throws {
+            let tmp = try mkRepo("watch-nonmac")
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            let out = try await run(["watch", tmp.path])
+            #expect(out.exitCode != 0)
+            #expect(out.stderr.lowercased().contains("macos"))
+        }
+    #endif
+
+    #if os(macOS)
+        @Test("sprigctl watch --duration 0.2 exits cleanly")
+        func sprigctlWatchShortDurationExits() async throws {
+            let tmp = try mkRepo("watch-mac")
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            let out = try await run(["watch", "--duration", "0.2", tmp.path])
+            // Duration-capped run should return 0 (or at worst a benign non-error
+            // exit from the stream finishing). We only assert it doesn't hang.
+            #expect(out.exitCode == 0)
+        }
+    #endif
 
     @Test("sprigctl version prints sprigctl + git versions")
     func sprigctlVersionPrintsSprigctlGitVersions() async throws {

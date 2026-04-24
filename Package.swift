@@ -66,6 +66,8 @@ let package = Package(
                 name: "sprigctl",
                 dependencies: [
                     "GitCore",
+                    "WatcherKit",
+                    "PlatformKit",
                     .product(name: "ArgumentParser", package: "swift-argument-parser")
                 ],
                 path: "cli/sprigctl/Sources"
