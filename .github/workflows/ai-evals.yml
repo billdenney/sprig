@@ -11,7 +11,7 @@ jobs:
     container:
       image: swift:6.3-noble
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: swift test --filter AIEvals
         env:
           SPRIG_AI_EVAL_FIXTURES: tests/ai-evals/fixtures

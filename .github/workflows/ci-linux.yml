@@ -10,7 +10,7 @@ jobs:
     container:
       image: swift:6.3.1-noble   # pinned; matches .swift-version
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install git (GitCore tests shell out to the system git)
         # The swift:6.3.1-noble image doesn't include git by default.
         # Tests in GitCoreTests spawn real git for version probes,
