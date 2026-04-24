@@ -21,7 +21,17 @@ let package = Package(
     products:
     (tier1Targets + tier2Targets).map { name in
         .library(name: name, targets: [name])
-    },
+    }
+
+        + [
+            .executable(name: "sprigctl", targets: ["sprigctl"])
+        ],
+    dependencies: [
+        .package(
+            url: "https://github.com/apple/swift-argument-parser.git",
+            from: "1.3.0"
+        )
+    ],
     targets:
     tier1Targets.flatMap { name in
         [
@@ -50,4 +60,20 @@ let package = Package(
                 )
             ]
         }
+
+        + [
+            .executableTarget(
+                name: "sprigctl",
+                dependencies: [
+                    "GitCore",
+                    .product(name: "ArgumentParser", package: "swift-argument-parser")
+                ],
+                path: "cli/sprigctl/Sources"
+            ),
+            .testTarget(
+                name: "sprigctlTests",
+                dependencies: ["sprigctl"],
+                path: "cli/sprigctl/Tests"
+            )
+        ]
 )
