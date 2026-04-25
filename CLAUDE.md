@@ -6,26 +6,29 @@ This file orients Claude Code (and any other AI coding agent) working in this re
 
 Sprig is a macOS-native, Finder-first Git GUI modeled on TortoiseGit. The design is captured in `docs/decisions/` as 50+ ADRs (see `docs/decisions/README.md`). This CLAUDE.md summarizes the load-bearing ones.
 
+The macOS app is the user-facing 1.0 product, but **the engine (`packages/` + `cli/sprigctl/`) is portable and runs first-class on macOS, Linux, and Windows**. Every PR has CI that builds and tests on all three. See `docs/architecture/cross-platform.md` for the full matrix.
+
 ## Architectural invariants — do not violate without an ADR update
 
 ### Tier discipline
 
 The repo has three tiers; files live where their tier says they live.
 
-- **Tier 1 — Portable core** (`packages/{GitCore, RepoState, ConflictKit, AIKit, LFSKit, SubmoduleKit, SubtreeKit, SafetyKit, IPCSchema, PlatformKit, DiagKit, StatusKit, TaskWindowKit, UIKitShared}/`). Pure Swift + Foundation. **Must compile on macOS, Linux, and Windows.**
-- **Tier 2 — Platform adapters** (`packages/{WatcherKit, CredentialKit, NotifyKit, UpdateKit, LauncherKit, TransportKit, AgentKit}/`). Protocol in `Sources/<Pkg>/`; macOS impl in `Sources/Mac/`; Linux/Windows impls in `Sources/Linux/` and `Sources/Windows/` (may be `fatalError` stubs but the types exist).
-- **Tier 3 — Platform shells** (`apps/macos/`, `apps/windows/`, `apps/linux/`). Full rewrite per OS. At MVP only `apps/macos/` is populated; the other two are README-only placeholders.
+- **Tier 1 — Portable core** (`packages/{GitCore, RepoState, ConflictKit, AIKit, LFSKit, SubmoduleKit, SubtreeKit, SafetyKit, IPCSchema, PlatformKit, DiagKit, StatusKit, TaskWindowKit, UIKitShared}/`). Pure Swift + Foundation. **Must compile and pass tests on macOS, Linux, and Windows.**
+- **Tier 2 — Platform adapters** (`packages/{WatcherKit, CredentialKit, NotifyKit, UpdateKit, LauncherKit, TransportKit, AgentKit}/`). Protocol in `Sources/<Pkg>/`; native macOS impl in `Sources/Mac/`; Linux/Windows in `Sources/Linux/` and `Sources/Windows/`. Where a portable fallback exists (e.g. `PollingFileWatcher`) it lives in `Sources/<Pkg>/` and is the default everywhere except where a native impl wins on perf. Stubs are `fatalError` until a real impl is added.
+- **Tier 3 — Platform shells** (`apps/macos/`, `apps/windows/`, `apps/linux/`). Full rewrite per OS. Only `apps/macos/` is populated today; the other two are README-only placeholders for future work.
 
-### Hard rules (enforced via SwiftLint + Linux CI build)
+### Hard rules (enforced via SwiftLint + the three-OS CI matrix)
 
 1. **Never import `AppKit`, `SwiftUI`, `Cocoa`, `FinderSync`, `Combine`, `ServiceManagement`, or `Sparkle` in any file under `packages/`.** These are Tier 3 imports only. *(SwiftLint custom rule `no_appkit_in_packages`.)*
-2. **Never use `#if os(...)` inside portable (Tier 1) package sources for behavior branching.** Trivial cross-platform constants (PATH separator, executable name) are the only acceptable case. If you need a platform branch for real logic, the abstraction is wrong — move the capability into a `PlatformKit` protocol and add an adapter under `Sources/{Mac,Linux,Windows}/`. *(Enforced by code review + the Linux CI job that compiles `packages/` on a non-Apple toolchain. A real behavior divergence will fail that build.)*
+2. **Never use `#if os(...)` inside portable (Tier 1) package sources for behavior branching.** Trivial cross-platform constants (PATH separator, executable name) are the only acceptable case. If you need a platform branch for real logic, the abstraction is wrong — move the capability into a `PlatformKit` protocol and add an adapter under `Sources/{Mac,Linux,Windows}/`. *(Enforced by code review + the Linux + Windows CI jobs that compile + test `packages/` on non-Apple toolchains. A real behavior divergence will fail at least one of those builds.)*
 3. **No hardcoded absolute paths.** No `/Users/...`, no `~/Library/...`, no `\AppData\`, no `/home/...` outside `Tests/`, `tests/fixtures/`, and `docs/`. Use `PathResolver.appSupport()` etc. *(SwiftLint custom rule `no_hardcoded_home_paths`.)*
-4. **All git invocation goes through `GitCore.Runner`.** No ad-hoc `Process()` in features — the runner owns cwd, env scrubbing, encoding, argv escaping, and the long-lived `cat-file --batch` cache.
-5. **All IPC messages are `Codable` structs in `IPCSchema`.** No `@objc` protocols leak into portable code. The wire format must survive transport swaps (XPC → named pipes → D-Bus).
-6. **Force-pushes always use `--force-with-lease --force-if-includes`.** Raw `--force` is never emitted.
-7. **Destructive operations create a snapshot ref under `refs/sprig/snapshots/` *before* executing.** See `SafetyKit`.
-8. **Every new tier-2 adapter adds Mac/Linux/Windows source files in the same commit** (stubs OK for Linux/Windows). The package graph must stay green on all three toolchains.
+4. **No POSIX-only assumptions in tests either.** `/usr/bin/env`, `/`-only path separators, `git` (vs `git.exe`) bare names — none of these are safe. Use case-insensitive `PATH` walks; resolve binaries per platform. *(Caught by the Windows CI job running the full test suite.)*
+5. **All git invocation goes through `GitCore.Runner` or `GitCore.CatFileBatch`.** No ad-hoc `Process()` in features — these own cwd, env scrubbing, encoding, argv escaping, the long-lived `cat-file --batch` cache, and case-insensitive PATH discovery.
+6. **All IPC messages are `Codable` structs in `IPCSchema`.** No `@objc` protocols leak into portable code. The wire format must survive transport swaps (XPC → named pipes → D-Bus).
+7. **Force-pushes always use `--force-with-lease --force-if-includes`.** Raw `--force` is never emitted.
+8. **Destructive operations create a snapshot ref under `refs/sprig/snapshots/` *before* executing.** See `SafetyKit`.
+9. **Every new tier-2 adapter adds Mac/Linux/Windows source files in the same commit** (stubs OK for Linux/Windows). The package graph must stay green on all three toolchains.
 
 ### Defer to git
 
