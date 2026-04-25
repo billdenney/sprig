@@ -3,15 +3,17 @@ import Foundation
 import PlatformKit
 import WatcherKit
 
-/// `sprigctl watch <path> [--json] [--duration SECONDS]` — stream filesystem
-/// events for a directory.
+/// `sprigctl watch <path> [--json] [--duration SECONDS] [--polling-interval SECS]`
+/// — stream filesystem events for a directory.
 ///
-/// macOS uses ``WatcherKit/FSEventsWatcher``. Other platforms exit with a
-/// friendly message until a portable watcher (polling or per-OS adapter) lands.
+/// On macOS, uses ``WatcherKit/FSEventsWatcher`` for kernel-level FSEvents
+/// notifications. On Linux/Windows (or anywhere ``--polling`` is forced),
+/// falls back to ``WatcherKit/PollingFileWatcher`` which rescans paths at
+/// ``pollingInterval`` and diffs the snapshots.
 struct WatchCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "watch",
-        abstract: "Stream filesystem change events for a directory (macOS only today)."
+        abstract: "Stream filesystem change events for a directory."
     )
 
     @Flag(name: .long, help: "Emit JSON lines instead of a human-readable summary.")
@@ -23,6 +25,18 @@ struct WatchCommand: AsyncParsableCommand {
     )
     var duration: Double?
 
+    @Flag(
+        name: .long,
+        help: "Force the portable polling watcher even on macOS (useful for network volumes)."
+    )
+    var polling: Bool = false
+
+    @Option(
+        name: .long,
+        help: "Polling interval in seconds when the polling watcher is in use. Default 1.0."
+    )
+    var pollingInterval: Double = 1.0
+
     @Argument(help: "Directory to watch (defaults to the current directory).")
     var path: String?
 
@@ -30,14 +44,14 @@ struct WatchCommand: AsyncParsableCommand {
         let rootURL = URL(fileURLWithPath: path ?? FileManager.default.currentDirectoryPath)
 
         #if os(macOS)
-            try await watch(root: rootURL, with: FSEventsWatcher())
+            if polling {
+                try await watch(root: rootURL, with: PollingFileWatcher(pollInterval: pollingInterval))
+            } else {
+                try await watch(root: rootURL, with: FSEventsWatcher())
+            }
         #else
-            var err = StderrStream()
-            print(
-                "sprigctl watch requires macOS. A portable polling watcher is planned — see ADR 0048 / docs/architecture/fs-watching.md.",
-                to: &err
-            )
-            throw ExitCode(2)
+            // Non-macOS: there's no FSEvents, so polling is the only option.
+            try await watch(root: rootURL, with: PollingFileWatcher(pollInterval: pollingInterval))
         #endif
     }
 

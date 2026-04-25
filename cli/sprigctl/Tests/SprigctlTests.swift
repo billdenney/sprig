@@ -114,16 +114,24 @@ struct SprigctlTests {
         #expect(out.stdout.lowercased().contains("watch"))
         #expect(out.stdout.contains("--json"))
         #expect(out.stdout.contains("--duration"))
+        #expect(out.stdout.contains("--polling"))
+        #expect(out.stdout.contains("--polling-interval"))
     }
 
     #if !os(macOS)
-        @Test("sprigctl watch on non-macOS exits non-zero with a clear message")
-        func sprigctlWatchOnNonMacOS() async throws {
-            let tmp = try mkRepo("watch-nonmac")
+        @Test("sprigctl watch on non-macOS uses the polling watcher and exits cleanly with --duration")
+        func sprigctlWatchPollingExits() async throws {
+            let tmp = try mkRepo("watch-polling")
             defer { try? FileManager.default.removeItem(at: tmp) }
-            let out = try await run(["watch", tmp.path])
-            #expect(out.exitCode != 0)
-            #expect(out.stderr.lowercased().contains("macos"))
+            // 0.6s is enough for: initial snapshot → sleep 0.05s poll → file
+            // appears → next snapshot diffs it → emit, then duration expires.
+            let out = try await run([
+                "watch",
+                "--duration", "0.6",
+                "--polling-interval", "0.05",
+                tmp.path
+            ])
+            #expect(out.exitCode == 0)
         }
     #endif
 
