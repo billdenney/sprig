@@ -254,4 +254,58 @@ struct SprigctlTests {
         // renders to stderr.
         #expect(out.stderr.contains("not a git repository") || out.stderr.contains("fatal"))
     }
+
+    // MARK: - repos subcommand
+
+    @Test("sprigctl repos --help shows usage")
+    func sprigctlReposHelp() async throws {
+        let out = try await run(["repos", "--help"])
+        #expect(out.exitCode == 0)
+        #expect(out.stdout.contains("repos"))
+        #expect(out.stdout.contains("--json"))
+        #expect(out.stdout.contains("--max-depth"))
+    }
+
+    @Test("sprigctl repos finds .git directories under a tree")
+    func sprigctlReposFindsRepos() async throws {
+        let root = try mkRepo("repos-tree")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Build: alpha/.git, nested/beta/.git, plus a noise dir.
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("alpha/.git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("nested/beta/.git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("not-a-repo"),
+            withIntermediateDirectories: true
+        )
+
+        let out = try await run(["repos", root.path])
+        #expect(out.exitCode == 0)
+        #expect(out.stdout.contains("alpha"))
+        #expect(out.stdout.contains("beta"))
+        #expect(!out.stdout.contains("not-a-repo"))
+    }
+
+    @Test("sprigctl repos --json emits a JSON array of paths")
+    func sprigctlReposJSON() async throws {
+        let root = try mkRepo("repos-json")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("only-one/.git"),
+            withIntermediateDirectories: true
+        )
+
+        let out = try await run(["repos", "--json", root.path])
+        #expect(out.exitCode == 0)
+        let data = try #require(out.stdout.data(using: .utf8))
+        let arr = try #require(try JSONSerialization.jsonObject(with: data) as? [String])
+        #expect(arr.count == 1)
+        #expect(arr.first?.contains("only-one") == true)
+    }
 }
