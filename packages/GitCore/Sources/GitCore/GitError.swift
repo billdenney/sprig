@@ -30,6 +30,12 @@ public enum GitError: Error, Sendable, CustomStringConvertible {
     /// Some precondition wasn't met (e.g. cwd is not a git working tree).
     case precondition(String)
 
+    /// `git cat-file` reported the object as missing from the repo.
+    case objectNotFound(String)
+
+    /// A long-lived helper (e.g. ``CatFileBatch``) was used after `close()`.
+    case closed(String)
+
     public var description: String {
         switch self {
         case let .binaryNotFound(probed):
@@ -44,6 +50,10 @@ public enum GitError: Error, Sendable, CustomStringConvertible {
             "parse failure in \(ctx): '\(snippet)'"
         case let .precondition(msg):
             "precondition: \(msg)"
+        case let .objectNotFound(name):
+            "object not found: \(name)"
+        case let .closed(name):
+            "\(name) is closed"
         }
     }
 }
