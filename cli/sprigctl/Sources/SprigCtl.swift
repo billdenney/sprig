@@ -16,6 +16,11 @@ struct SprigCtl: AsyncParsableCommand {
         commandName: "sprigctl",
         abstract: "Sprig's command-line companion for introspecting git state.",
         version: "0.1.0",
-        subcommands: [VersionCommand.self, StatusCommand.self, WatchCommand.self]
+        subcommands: [
+            VersionCommand.self,
+            StatusCommand.self,
+            WatchCommand.self,
+            ReposCommand.self
+        ]
     )
 }
