@@ -24,13 +24,21 @@ struct SprigctlTests {
             }
             dir = dir.deletingLastPathComponent()
         }
+        // Windows binaries get a .exe suffix.
+        #if os(Windows)
+            let exeNames = ["sprigctl.exe", "sprigctl"]
+        #else
+            let exeNames = ["sprigctl"]
+        #endif
         for config in ["debug", "release"] {
-            let candidate = dir
-                .appendingPathComponent(".build")
-                .appendingPathComponent(config)
-                .appendingPathComponent("sprigctl")
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                return candidate
+            for exeName in exeNames {
+                let candidate = dir
+                    .appendingPathComponent(".build")
+                    .appendingPathComponent(config)
+                    .appendingPathComponent(exeName)
+                if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                    return candidate
+                }
             }
         }
         throw SprigctlBinaryNotFound()
@@ -83,13 +91,36 @@ struct SprigctlTests {
 
     private func spawnGit(_ args: [String], cwd: URL) async throws {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git"] + args
+        process.executableURL = try URL(fileURLWithPath: Self.gitBinaryPath())
+        process.arguments = args
         process.currentDirectoryURL = cwd
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
+    }
+
+    /// Resolve the git binary by walking PATH (case-insensitively, the same
+    /// way `GitCore.Runner` does). Avoids hardcoding `/usr/bin/env` which
+    /// is POSIX-only.
+    private static func gitBinaryPath() throws -> String {
+        let env = ProcessInfo.processInfo.environment
+        let pathEnv = env.first { $0.key.caseInsensitiveCompare("PATH") == .orderedSame }?.value ?? ""
+        let separator: Character
+        #if os(Windows)
+            separator = ";"
+            let exeName = "git.exe"
+        #else
+            separator = ":"
+            let exeName = "git"
+        #endif
+        for dir in pathEnv.split(separator: separator).map(String.init) {
+            let candidate = (dir as NSString).appendingPathComponent(exeName)
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        throw SprigctlBinaryNotFound()
     }
 
     private func write(_ text: String, to url: URL) throws {

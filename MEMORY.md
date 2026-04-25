@@ -16,11 +16,12 @@ Facts recorded here are things that would take noticeable time to rediscover fro
 
 ## Cross-platform invariants
 
-Sprig is macOS-only at 1.0 **but** the codebase is structured so future Windows/Linux ports are additive (see ADR 0048, ADR 0053, `docs/architecture/cross-platform.md`).
+The macOS app is the user-facing 1.0 product, **but the engine is portable and runs first-class on macOS, Linux, and Windows** (see ADR 0048, ADR 0053, `docs/architecture/cross-platform.md` for the full matrix).
 
-- `packages/` compiles on macOS, Linux, and Windows Swift 6.3 from day 1.
-- `apps/{windows,linux}/` exist as placeholders; populating them is a port, not a restructure.
-- Linux/Windows adapter impls live next to macOS impls under `packages/<Pkg>/Sources/{Linux,Windows}/` and may be `fatalError` stubs pre-1.0.
+- `packages/` and `cli/sprigctl/` compile + pass tests on macOS, Linux, **and Windows** Swift 6.3 — every PR. CI Windows is required-green, not advisory.
+- `apps/{windows,linux}/` exist as placeholders for future shells (FinderSync-equivalents); populating them is a port, not a restructure.
+- Tier-2 adapters: portable fallback (e.g. `PollingFileWatcher`) lives in `Sources/<Pkg>/`; native impls in `Sources/{Mac,Linux,Windows}/`. Native Linux/Windows watchers are planned but the polling watcher already gives functional parity.
+- **Don't write `/usr/bin/env`, hardcoded `/` separators, or bare `git` (vs `git.exe`)** — Windows CI will catch it. Use case-insensitive PATH walks.
 
 ## Known quirks and gotchas
 
