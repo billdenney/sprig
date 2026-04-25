@@ -128,7 +128,17 @@ struct SprigctlTests {
     #endif
 
     #if os(macOS)
-        @Test("sprigctl watch --duration 0.2 exits cleanly")
+        /// Disabled on CI: FSEvents + Swift 6.0.3 on hosted macos-14 runners
+        /// intermittently hangs swift-test. Re-enable once we have a
+        /// self-hosted macOS runner with diagnostics. The non-CI path keeps
+        /// the sanity check for local developer verification on a Mac.
+        @Test(
+            "sprigctl watch --duration 0.2 exits cleanly",
+            .disabled(
+                if: ProcessInfo.processInfo.environment["CI"] != nil,
+                "FSEvents hang on hosted macos-14; see test comment"
+            )
+        )
         func sprigctlWatchShortDurationExits() async throws {
             let tmp = try mkRepo("watch-mac")
             defer { try? FileManager.default.removeItem(at: tmp) }

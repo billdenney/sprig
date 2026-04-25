@@ -1,30 +1,95 @@
 #!/usr/bin/env bash
-# Run the local test matrix.
+# Sprig — local verification entrypoint.
+#
+# This script is the single command we run to verify a change before pushing.
+# It activates the pinned Swift toolchain (so callers don't need to `source`
+# anything), then runs build + tests + lint+format check. Any failure exits
+# non-zero. A killed run (Ctrl-C, timeout) is also non-zero, so this is safe
+# to call from CI helpers and pre-push hooks.
+#
+# Subcommands:
+#   ./script/test                  # default: build + test + lint+format
+#   ./script/test build            # just `swift build`
+#   ./script/test unit             # just `swift test`
+#   ./script/test lint             # just SwiftLint + SwiftFormat --lint
+#   ./script/test integration      # tests filtered to Integration suite
+#   ./script/test e2e              # XCUITest (macOS + signed build only)
+#
+# Env knobs:
+#   SWIFT_TEST_TIMEOUT   per-`swift test` wall-clock seconds (default 240)
+#   SKIP_LINT            set to 1 to skip the lint stage in the default run
+#   CI                   when set, recognized by tests that opt-out under CI
+#                        (e.g. the FSEvents sanity test)
 set -euo pipefail
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-SUITE="${1:---suite=unit}"
+# --- Activate pinned Swift toolchain (no-op if not using swiftly) ---------
+if [[ -f "$HOME/.local/share/swiftly/env.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$HOME/.local/share/swiftly/env.sh"
+fi
 
-case "$SUITE" in
-    --suite=unit|"")
-        echo "==> swift test (unit)"
-        swift test
-        ;;
-    --suite=integration)
-        echo "==> swift test (integration)"
-        swift test --filter Integration
-        ;;
-    --suite=e2e)
-        echo "==> XCUITest (requires macOS + signed build)"
-        xcodebuild test -project apps/macos/SprigApp/SprigApp.xcodeproj \
-            -scheme SprigAppUITests -destination 'platform=macOS'
-        ;;
-    --suite=all)
-        swift test
+# --- Optional wall-clock guard so a hung test doesn't block forever -------
+SWIFT_TEST_TIMEOUT="${SWIFT_TEST_TIMEOUT:-240}"
+run_with_timeout() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout --foreground --kill-after=10 "$SWIFT_TEST_TIMEOUT" "$@"
+    else
+        "$@"
+    fi
+}
+
+cmd_build() {
+    echo "==> swift build"
+    swift build
+}
+
+cmd_unit() {
+    echo "==> swift test (timeout ${SWIFT_TEST_TIMEOUT}s)"
+    run_with_timeout swift test
+}
+
+cmd_integration() {
+    echo "==> swift test --filter Integration (timeout ${SWIFT_TEST_TIMEOUT}s)"
+    run_with_timeout swift test --filter Integration
+}
+
+cmd_e2e() {
+    echo "==> XCUITest (requires macOS + signed build)"
+    xcodebuild test -project apps/macos/SprigApp/SprigApp.xcodeproj \
+        -scheme SprigAppUITests -destination 'platform=macOS'
+}
+
+cmd_lint() {
+    echo "==> ./script/lint"
+    "$ROOT/script/lint"
+}
+
+cmd_default() {
+    cmd_build
+    cmd_unit
+    if [[ "${SKIP_LINT:-0}" != "1" ]]; then
+        cmd_lint
+    fi
+    echo "All checks passed."
+}
+
+case "${1:-default}" in
+    default|--default|"")    cmd_default ;;
+    build|--build)           cmd_build ;;
+    unit|--unit|--suite=unit) cmd_unit ;;
+    integration|--integration|--suite=integration) cmd_integration ;;
+    e2e|--e2e|--suite=e2e)   cmd_e2e ;;
+    lint|--lint)             cmd_lint ;;
+    --suite=all|all)         cmd_default ;;
+    -h|--help|help)
+        sed -n '2,20p' "$0"
         ;;
     *)
-        echo "Unknown suite: $SUITE" >&2
+        echo "Unknown subcommand: $1" >&2
+        echo "Run './script/test --help' to see the supported forms." >&2
         exit 2
         ;;
 esac
