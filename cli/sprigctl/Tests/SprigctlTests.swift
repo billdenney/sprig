@@ -1,236 +1,74 @@
 import Foundation
 import Testing
 
-/// Runs the built `sprigctl` executable against temp repos and validates the
-/// stdout/stderr/exit behavior end-to-end.
-///
-/// The binary is located via the `SPRIGCTL_BIN` env var when set (used by CI
-/// for cross-configuration testing); otherwise the tests probe the standard
-/// SwiftPM `.build/<config>/sprigctl` locations.
-@Suite("sprigctl end-to-end")
-struct SprigctlTests {
-    // MARK: - Locating the built binary
+// Test helpers live in `SprigctlSupport.swift` (`Sprigctl` enum). The
+// suites below are split by subcommand so each one stays under
+// SwiftLint's type-body-length cap and the failure surface in CI maps
+// cleanly to "which subcommand broke."
 
-    private func locateBinary() throws -> URL {
-        if let override = ProcessInfo.processInfo.environment["SPRIGCTL_BIN"] {
-            return URL(fileURLWithPath: override)
-        }
-        // SwiftPM puts executables in .build/<config>/<name>. Try debug then release.
-        // Walk up from the test's working directory until we find Package.swift.
-        var dir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        for _ in 0 ..< 10 {
-            if FileManager.default.fileExists(atPath: dir.appendingPathComponent("Package.swift").path) {
-                break
-            }
-            dir = dir.deletingLastPathComponent()
-        }
-        // Windows binaries get a .exe suffix.
-        #if os(Windows)
-            let exeNames = ["sprigctl.exe", "sprigctl"]
-        #else
-            let exeNames = ["sprigctl"]
-        #endif
-        for config in ["debug", "release"] {
-            for exeName in exeNames {
-                let candidate = dir
-                    .appendingPathComponent(".build")
-                    .appendingPathComponent(config)
-                    .appendingPathComponent(exeName)
-                if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                    return candidate
-                }
-            }
-        }
-        throw SprigctlBinaryNotFound()
-    }
+// MARK: - General
 
-    private struct SprigctlBinaryNotFound: Error {}
-
-    // MARK: - Subprocess helper
-
-    private struct Captured {
-        var stdout: String
-        var stderr: String
-        var exitCode: Int32
-    }
-
-    private func run(_ args: [String], cwd: URL? = nil) async throws -> Captured {
-        let binary = try locateBinary()
-        let process = Process()
-        process.executableURL = binary
-        process.arguments = args
-        process.currentDirectoryURL = cwd
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-        try process.run()
-        process.waitUntilExit()
-        let out = try outPipe.fileHandleForReading.readToEnd() ?? Data()
-        let err = try errPipe.fileHandleForReading.readToEnd() ?? Data()
-        return Captured(
-            stdout: String(data: out, encoding: .utf8) ?? "",
-            stderr: String(data: err, encoding: .utf8) ?? "",
-            exitCode: process.terminationStatus
-        )
-    }
-
-    private func mkRepo(_ label: String) throws -> URL {
-        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("sprig-sprigctl-\(label)-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        return tmp
-    }
-
-    private func initRepo(at url: URL) async throws {
-        try await spawnGit(["init", "-b", "main"], cwd: url)
-        try await spawnGit(["config", "user.email", "test@sprig.app"], cwd: url)
-        try await spawnGit(["config", "user.name", "Sprig Test"], cwd: url)
-        try await spawnGit(["config", "commit.gpgsign", "false"], cwd: url)
-    }
-
-    private func spawnGit(_ args: [String], cwd: URL) async throws {
-        let process = Process()
-        process.executableURL = try URL(fileURLWithPath: Self.gitBinaryPath())
-        process.arguments = args
-        process.currentDirectoryURL = cwd
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-    }
-
-    /// Resolve the git binary by walking PATH (case-insensitively, the same
-    /// way `GitCore.Runner` does). Avoids hardcoding `/usr/bin/env` which
-    /// is POSIX-only.
-    private static func gitBinaryPath() throws -> String {
-        let env = ProcessInfo.processInfo.environment
-        let pathEnv = env.first { $0.key.caseInsensitiveCompare("PATH") == .orderedSame }?.value ?? ""
-        let separator: Character
-        #if os(Windows)
-            separator = ";"
-            let exeName = "git.exe"
-        #else
-            separator = ":"
-            let exeName = "git"
-        #endif
-        for dir in pathEnv.split(separator: separator).map(String.init) {
-            let candidate = (dir as NSString).appendingPathComponent(exeName)
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        throw SprigctlBinaryNotFound()
-    }
-
-    private func write(_ text: String, to url: URL) throws {
-        try text.data(using: .utf8)!.write(to: url)
-    }
-
-    // MARK: - Tests
-
+@Suite("sprigctl — general")
+struct SprigctlGeneralTests {
     @Test("sprigctl --help exits 0 and lists subcommands")
-    func sprigctlHelpExits0AndListsSubcommands() async throws {
-        let out = try await run(["--help"])
+    func helpExits0AndListsSubcommands() async throws {
+        let out = try await Sprigctl.run(["--help"])
         #expect(out.exitCode == 0)
         #expect(out.stdout.contains("status"))
         #expect(out.stdout.contains("version"))
         #expect(out.stdout.contains("watch"))
+        #expect(out.stdout.contains("repos"))
+        #expect(out.stdout.contains("log"))
     }
-
-    @Test("sprigctl watch --help shows usage")
-    func sprigctlWatchHelp() async throws {
-        let out = try await run(["watch", "--help"])
-        #expect(out.exitCode == 0)
-        #expect(out.stdout.lowercased().contains("watch"))
-        #expect(out.stdout.contains("--json"))
-        #expect(out.stdout.contains("--duration"))
-        #expect(out.stdout.contains("--polling"))
-        #expect(out.stdout.contains("--polling-interval"))
-    }
-
-    #if !os(macOS)
-        @Test("sprigctl watch on non-macOS uses the polling watcher and exits cleanly with --duration")
-        func sprigctlWatchPollingExits() async throws {
-            let tmp = try mkRepo("watch-polling")
-            defer { try? FileManager.default.removeItem(at: tmp) }
-            // 0.6s is enough for: initial snapshot → sleep 0.05s poll → file
-            // appears → next snapshot diffs it → emit, then duration expires.
-            let out = try await run([
-                "watch",
-                "--duration", "0.6",
-                "--polling-interval", "0.05",
-                tmp.path
-            ])
-            #expect(out.exitCode == 0)
-        }
-    #endif
-
-    #if os(macOS)
-        /// Disabled on CI: FSEvents + Swift 6.0.3 on hosted macos-14 runners
-        /// intermittently hangs swift-test. Re-enable once we have a
-        /// self-hosted macOS runner with diagnostics. The non-CI path keeps
-        /// the sanity check for local developer verification on a Mac.
-        @Test(
-            "sprigctl watch --duration 0.2 exits cleanly",
-            .disabled(
-                if: ProcessInfo.processInfo.environment["CI"] != nil,
-                "FSEvents hang on hosted macos-14; see test comment"
-            )
-        )
-        func sprigctlWatchShortDurationExits() async throws {
-            let tmp = try mkRepo("watch-mac")
-            defer { try? FileManager.default.removeItem(at: tmp) }
-            let out = try await run(["watch", "--duration", "0.2", tmp.path])
-            // Duration-capped run should return 0 (or at worst a benign non-error
-            // exit from the stream finishing). We only assert it doesn't hang.
-            #expect(out.exitCode == 0)
-        }
-    #endif
 
     @Test("sprigctl version prints sprigctl + git versions")
-    func sprigctlVersionPrintsSprigctlGitVersions() async throws {
-        let out = try await run(["version"])
+    func versionPrintsSprigctlGitVersions() async throws {
+        let out = try await Sprigctl.run(["version"])
         #expect(out.exitCode == 0)
         #expect(out.stdout.contains("sprigctl"))
         #expect(out.stdout.contains("git"))
     }
+}
 
-    @Test("sprigctl status on a fresh repo prints clean summary")
-    func sprigctlStatusOnAFreshRepoPrintsCleanSummary() async throws {
-        let repo = try mkRepo("clean")
+// MARK: - Status
+
+@Suite("sprigctl status")
+struct SprigctlStatusTests {
+    @Test("on a fresh repo prints clean summary")
+    func freshRepo() async throws {
+        let repo = try Sprigctl.mkRepo("clean")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await initRepo(at: repo)
-        try write("hi\n", to: repo.appendingPathComponent("README.md"))
-        try await spawnGit(["add", "README.md"], cwd: repo)
-        try await spawnGit(["commit", "-m", "initial"], cwd: repo)
+        try await Sprigctl.initRepo(at: repo)
+        try Sprigctl.write("hi\n", to: repo.appendingPathComponent("README.md"))
+        try await Sprigctl.spawnGit(["add", "README.md"], cwd: repo)
+        try await Sprigctl.spawnGit(["commit", "-m", "initial"], cwd: repo)
 
-        let out = try await run(["status", repo.path])
+        let out = try await Sprigctl.run(["status", repo.path])
         #expect(out.exitCode == 0)
         #expect(out.stdout.contains("branch: main"))
         #expect(out.stdout.contains("(clean)"))
     }
 
-    @Test("sprigctl status reports untracked files in human output")
-    func sprigctlStatusReportsUntrackedFilesInHumanOutput() async throws {
-        let repo = try mkRepo("untracked")
+    @Test("reports untracked files in human output")
+    func untrackedFiles() async throws {
+        let repo = try Sprigctl.mkRepo("untracked")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await initRepo(at: repo)
-        try write("hello\n", to: repo.appendingPathComponent("hello.txt"))
+        try await Sprigctl.initRepo(at: repo)
+        try Sprigctl.write("hello\n", to: repo.appendingPathComponent("hello.txt"))
 
-        let out = try await run(["status", repo.path])
+        let out = try await Sprigctl.run(["status", repo.path])
         #expect(out.exitCode == 0)
         #expect(out.stdout.contains("??  hello.txt"))
     }
 
-    @Test("sprigctl status --json emits parseable JSON with entries array")
-    func sprigctlStatusJsonEmitsParseableJSONWithEntriesArray() async throws {
-        let repo = try mkRepo("json")
+    @Test("--json emits parseable JSON with entries array")
+    func json() async throws {
+        let repo = try Sprigctl.mkRepo("json")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await initRepo(at: repo)
-        try write("hello\n", to: repo.appendingPathComponent("hello.txt"))
+        try await Sprigctl.initRepo(at: repo)
+        try Sprigctl.write("hello\n", to: repo.appendingPathComponent("hello.txt"))
 
-        let out = try await run(["status", "--json", repo.path])
+        let out = try await Sprigctl.run(["status", "--json", repo.path])
         #expect(out.exitCode == 0)
         let data = try #require(out.stdout.data(using: .utf8))
         let parsed = try #require(
@@ -242,36 +80,85 @@ struct SprigctlTests {
         #expect(entries.first?["path"] as? String == "hello.txt")
     }
 
-    @Test("sprigctl status on a non-repo path exits non-zero with a useful error")
-    func sprigctlStatusOnANonRepoPathExitsNonZeroWithAUsefulError() async throws {
-        let tmp = try mkRepo("notarepo")
+    @Test("on a non-repo path exits non-zero with a useful error")
+    func nonRepoPath() async throws {
+        let tmp = try Sprigctl.mkRepo("notarepo")
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let out = try await run(["status", tmp.path])
+        let out = try await Sprigctl.run(["status", tmp.path])
         #expect(out.exitCode != 0)
-        // git prints "fatal: not a git repository" on stderr; our Runner
-        // threads that through as GitError.nonZeroExit which ArgumentParser
-        // renders to stderr.
         #expect(out.stderr.contains("not a git repository") || out.stderr.contains("fatal"))
     }
+}
 
-    // MARK: - repos subcommand
+// MARK: - Watch
 
-    @Test("sprigctl repos --help shows usage")
-    func sprigctlReposHelp() async throws {
-        let out = try await run(["repos", "--help"])
+@Suite("sprigctl watch")
+struct SprigctlWatchTests {
+    @Test("watch --help shows usage")
+    func help() async throws {
+        let out = try await Sprigctl.run(["watch", "--help"])
+        #expect(out.exitCode == 0)
+        #expect(out.stdout.lowercased().contains("watch"))
+        #expect(out.stdout.contains("--json"))
+        #expect(out.stdout.contains("--duration"))
+        #expect(out.stdout.contains("--polling"))
+        #expect(out.stdout.contains("--polling-interval"))
+    }
+
+    #if !os(macOS)
+        @Test("on non-macOS uses the polling watcher and exits cleanly with --duration")
+        func pollingExits() async throws {
+            let tmp = try Sprigctl.mkRepo("watch-polling")
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            let out = try await Sprigctl.run([
+                "watch",
+                "--duration", "0.6",
+                "--polling-interval", "0.05",
+                tmp.path
+            ])
+            #expect(out.exitCode == 0)
+        }
+    #endif
+
+    #if os(macOS)
+        /// Disabled on CI: FSEvents + Swift 6.0.3 on hosted macos-14 runners
+        /// intermittently hangs swift-test. Re-enable once we have a self-
+        /// hosted macOS runner with diagnostics. Local Mac developers (no
+        /// CI env-var) still run this for sanity.
+        @Test(
+            "watch --duration 0.2 exits cleanly",
+            .disabled(
+                if: ProcessInfo.processInfo.environment["CI"] != nil,
+                "FSEvents hang on hosted macos-14"
+            )
+        )
+        func macShortDurationExits() async throws {
+            let tmp = try Sprigctl.mkRepo("watch-mac")
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            let out = try await Sprigctl.run(["watch", "--duration", "0.2", tmp.path])
+            #expect(out.exitCode == 0)
+        }
+    #endif
+}
+
+// MARK: - Repos
+
+@Suite("sprigctl repos")
+struct SprigctlReposTests {
+    @Test("repos --help shows usage")
+    func help() async throws {
+        let out = try await Sprigctl.run(["repos", "--help"])
         #expect(out.exitCode == 0)
         #expect(out.stdout.contains("repos"))
         #expect(out.stdout.contains("--json"))
         #expect(out.stdout.contains("--max-depth"))
     }
 
-    @Test("sprigctl repos finds .git directories under a tree")
-    func sprigctlReposFindsRepos() async throws {
-        let root = try mkRepo("repos-tree")
+    @Test("finds .git directories under a tree")
+    func findsRepos() async throws {
+        let root = try Sprigctl.mkRepo("repos-tree")
         defer { try? FileManager.default.removeItem(at: root) }
-
-        // Build: alpha/.git, nested/beta/.git, plus a noise dir.
         try FileManager.default.createDirectory(
             at: root.appendingPathComponent("alpha/.git"),
             withIntermediateDirectories: true
@@ -285,27 +172,106 @@ struct SprigctlTests {
             withIntermediateDirectories: true
         )
 
-        let out = try await run(["repos", root.path])
+        let out = try await Sprigctl.run(["repos", root.path])
         #expect(out.exitCode == 0)
         #expect(out.stdout.contains("alpha"))
         #expect(out.stdout.contains("beta"))
         #expect(!out.stdout.contains("not-a-repo"))
     }
 
-    @Test("sprigctl repos --json emits a JSON array of paths")
-    func sprigctlReposJSON() async throws {
-        let root = try mkRepo("repos-json")
+    @Test("--json emits a JSON array of paths")
+    func json() async throws {
+        let root = try Sprigctl.mkRepo("repos-json")
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(
             at: root.appendingPathComponent("only-one/.git"),
             withIntermediateDirectories: true
         )
 
-        let out = try await run(["repos", "--json", root.path])
+        let out = try await Sprigctl.run(["repos", "--json", root.path])
         #expect(out.exitCode == 0)
         let data = try #require(out.stdout.data(using: .utf8))
         let arr = try #require(try JSONSerialization.jsonObject(with: data) as? [String])
         #expect(arr.count == 1)
         #expect(arr.first?.contains("only-one") == true)
+    }
+}
+
+// MARK: - Log
+
+@Suite("sprigctl log")
+struct SprigctlLogTests {
+    @Test("log --help shows usage")
+    func help() async throws {
+        let out = try await Sprigctl.run(["log", "--help"])
+        #expect(out.exitCode == 0)
+        #expect(out.stdout.contains("log"))
+        #expect(out.stdout.contains("--max"))
+        #expect(out.stdout.contains("--json"))
+    }
+
+    @Test("prints subjects in reverse-chronological order")
+    func subjects() async throws {
+        let repo = try Sprigctl.mkRepo("log-subjects")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await Sprigctl.initRepo(at: repo)
+        for i in 0 ..< 3 {
+            try Sprigctl.write("v\(i)\n", to: repo.appendingPathComponent("a.txt"))
+            try await Sprigctl.spawnGit(["add", "a.txt"], cwd: repo)
+            try await Sprigctl.spawnGit(["commit", "-m", "commit \(i)"], cwd: repo)
+        }
+
+        let out = try await Sprigctl.run(["log", repo.path])
+        #expect(out.exitCode == 0)
+        let i2 = out.stdout.range(of: "commit 2")
+        let i1 = out.stdout.range(of: "commit 1")
+        let i0 = out.stdout.range(of: "commit 0")
+        #expect(i2 != nil)
+        #expect(i1 != nil)
+        #expect(i0 != nil)
+        if let r2 = i2, let r1 = i1, let r0 = i0 {
+            #expect(r2.lowerBound < r1.lowerBound)
+            #expect(r1.lowerBound < r0.lowerBound)
+        }
+    }
+
+    @Test("--json emits a parseable array of commit objects")
+    func json() async throws {
+        let repo = try Sprigctl.mkRepo("log-json")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await Sprigctl.initRepo(at: repo)
+        try Sprigctl.write("seed\n", to: repo.appendingPathComponent("a.txt"))
+        try await Sprigctl.spawnGit(["add", "a.txt"], cwd: repo)
+        try await Sprigctl.spawnGit(["commit", "-m", "the only commit"], cwd: repo)
+
+        let out = try await Sprigctl.run(["log", "--json", repo.path])
+        #expect(out.exitCode == 0)
+        let data = try #require(out.stdout.data(using: .utf8))
+        let arr = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        )
+        #expect(arr.count == 1)
+        #expect(arr.first?["subject"] as? String == "the only commit")
+        #expect(arr.first?["isMerge"] as? Bool == false)
+    }
+
+    @Test("--max 1 returns at most one commit")
+    func max() async throws {
+        let repo = try Sprigctl.mkRepo("log-max")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await Sprigctl.initRepo(at: repo)
+        for i in 0 ..< 3 {
+            try Sprigctl.write("v\(i)\n", to: repo.appendingPathComponent("a.txt"))
+            try await Sprigctl.spawnGit(["add", "a.txt"], cwd: repo)
+            try await Sprigctl.spawnGit(["commit", "-m", "c\(i)"], cwd: repo)
+        }
+
+        let out = try await Sprigctl.run(["log", "--max", "1", "--json", repo.path])
+        #expect(out.exitCode == 0)
+        let data = try #require(out.stdout.data(using: .utf8))
+        let arr = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        )
+        #expect(arr.count == 1)
     }
 }
