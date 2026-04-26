@@ -1,8 +1,10 @@
 # Sprig
 
-A macOS-native, Finder-first Git client. Think TortoiseGit, but for Mac — deep shell integration, overlay badges, right-click context menus for every Git operation, task-specific windows that open when you need them and close when you don't.
+A shell-integrated Git client modelled on TortoiseGit — overlay badges and right-click context menus for every Git operation, with task-specific windows that open when you need them and close when you don't.
 
-> **Status:** pre-MVP scaffolding. Not yet usable as an app.
+The **engine and `sprigctl` CLI are first-class on macOS, Linux, and Windows** today; every PR runs the full test suite on all three. The **GUI shell ships first on macOS** (Finder integration, `apps/macos/`); a Windows GUI shell (Explorer integration via `apps/windows/`) is a planned 1.0 deliverable. Linux GUI integration (Nautilus / Dolphin / etc.) is post-1.0.
+
+> **Status:** pre-MVP scaffolding. Not yet usable as a GUI app. `sprigctl` is functional on all three platforms (status, watch, repos subcommands today; log lands soon).
 
 ## Why Sprig?
 
@@ -23,30 +25,45 @@ A macOS-native, Finder-first Git client. Think TortoiseGit, but for Mac — deep
 
 ## Getting started
 
-### Prerequisites (for contributors)
+### Prerequisites
 
-- macOS 14 Sonoma or later (macOS 15 Sequoia recommended).
-- Xcode 16 or later with the Command Line Tools installed.
-- Swift 6.3 toolchain.
-- `git` 2.39 or later (Apple-bundled or Homebrew).
+**Working with the engine + `sprigctl` CLI** (macOS / Linux / Windows):
+
+- Swift 6.0 toolchain or newer (the repo pins 6.3.1 in `.swift-version`; matched by CI on all three OSes).
+- `git` 2.39 or newer on PATH.
+
+**Building the macOS GUI app** (`apps/macos/`), in addition:
+
+- macOS 14 Sonoma or newer (macOS 15 Sequoia recommended).
+- Xcode 16 or newer with Command Line Tools installed.
+
+The Windows GUI shell (`apps/windows/`) is in the design phase; once it lands the prerequisites will include the Windows 10 SDK and a swift-cross-ui-compatible toolchain.
 
 ### Build and run
 
 ```bash
 git clone https://github.com/<org>/sprig.git
 cd sprig
-./script/bootstrap
-./script/test
-# macOS app build is in apps/macos/SprigApp.xcodeproj
+./script/bootstrap   # installs Swift toolchain via swiftly if available
+./script/test        # build + tests + lint+format on whichever OS you're on
+
+# Engine + CLI work everywhere:
+swift build
+.build/debug/sprigctl status .
+
+# macOS app build (macOS only):
+# open apps/macos/SprigApp.xcodeproj
 ```
 
 ## Repository layout
 
-This repo is organized into three tiers so that a future Windows or Linux port is additive rather than requiring a restructure. See [`docs/architecture/cross-platform.md`](docs/architecture/cross-platform.md) for the full design.
+The repo is organized into three tiers so that platform shells are additive — the engine never needs to move when a new shell lands. See [`docs/architecture/cross-platform.md`](docs/architecture/cross-platform.md) for the full design.
 
-- [`apps/macos/`](apps/macos/) — the macOS app (SwiftUI + AppKit shell, LaunchAgent, FinderSync extension, installer).
-- [`apps/windows/`](apps/windows/), [`apps/linux/`](apps/linux/) — placeholders for future ports.
-- [`packages/`](packages/) — Swift packages that form the **portable core** and **platform adapters**. Every package builds on macOS, Linux, and Windows toolchains from day 1 (Linux/Windows adapter impls may be `fatalError` stubs pre-1.0).
+- [`apps/macos/`](apps/macos/) — the macOS GUI shell (SwiftUI + AppKit, LaunchAgent, FinderSync extension, DMG installer). Populated.
+- [`apps/windows/`](apps/windows/) — the Windows GUI shell (swift-cross-ui main app, Explorer shell extension, Windows Service for the agent, MSIX installer). Stub placeholder; planned 1.0 deliverable.
+- [`apps/linux/`](apps/linux/) — Linux GUI shell (Nautilus extension first, others post-1.0). Stub placeholder; post-1.0.
+- [`packages/`](packages/) — Swift packages that form the **portable core** (Tier 1) and **platform adapters** (Tier 2). Every package builds and tests on macOS, Linux, and Windows toolchains every PR. Adapter packages have `Sources/{Mac,Linux,Windows}/` subdirs; portable fallbacks live alongside (e.g. `PollingFileWatcher`).
+- [`cli/sprigctl/`](cli/sprigctl/) — the `sprigctl` command-line companion. First-class on all three OSes.
 - [`docs/`](docs/) — architecture docs, ADRs, research, planning, UX notes.
 - [`tests/`](tests/) — integration, E2E, snapshot, benchmark, AI-eval suites.
 
@@ -54,7 +71,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to propose changes and [`docs/d
 
 ## Roadmap
 
-Sprig ships in milestones. MVP is **M0–M4**: Finder badges, a right-click context menu for the 10 most-used Git commands, and a full merge conflict resolver. See [`docs/planning/roadmap.md`](docs/planning/roadmap.md) for the full plan.
+Sprig ships in milestones. The MVP gate ships the macOS shell with Finder badges, a right-click context menu for the 10 most-used Git commands, and a full merge conflict resolver. The Windows shell is a 1.0 deliverable that ships alongside macOS at `v1.0`. See [`docs/planning/roadmap.md`](docs/planning/roadmap.md) for the full milestone definitions.
 
 ## Contributing
 
@@ -64,6 +81,13 @@ Pull requests welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and the 
 
 [Apache-2.0](LICENSE). See [`NOTICE`](NOTICE) for third-party attributions.
 
-## Porting Sprig to Windows or Linux
+## Platform support at a glance
 
-Sprig's architecture is designed to make ports additive: portable packages already build on all three platforms; only the app shell, file-manager extension, and installer need to be rewritten per OS. See [`docs/architecture/cross-platform.md`](docs/architecture/cross-platform.md).
+| Surface | macOS | Windows | Linux |
+|---|---|---|---|
+| Engine (`packages/*`) | ✅ first-class | ✅ first-class | ✅ first-class |
+| `sprigctl` CLI | ✅ first-class | ✅ first-class | ✅ first-class |
+| GUI shell (overlay icons + context menu + task windows) | ✅ Finder integration | 🛠️ planned 1.0 deliverable (Explorer integration) | 🕐 post-1.0 (Nautilus-first) |
+| CI required-green | ✅ | ✅ | ✅ (`packages/` + tests) |
+
+See [`docs/architecture/cross-platform.md`](docs/architecture/cross-platform.md) for the engine architecture and how shell ports plug in without restructuring the codebase.

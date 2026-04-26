@@ -17,7 +17,7 @@ cd sprig
 ./script/test            # runs the full local test matrix
 ```
 
-You should now be able to open `apps/macos/SprigApp/SprigApp.xcodeproj` in Xcode and build the app. (Building the full macOS app requires macOS; the portable `packages/` graph builds on Linux too — that's how our CI catches cross-platform regressions.)
+You should now be able to open `apps/macos/SprigApp/SprigApp.xcodeproj` in Xcode and build the app. Building the macOS app itself requires macOS, but the engine (`packages/`) and the `sprigctl` CLI (`cli/sprigctl/`) build, test, and lint on macOS, Linux, and Windows — every PR runs the full test suite on all three. That's how we catch cross-platform regressions before they reach `main`.
 
 ## Branching
 
