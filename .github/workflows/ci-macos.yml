@@ -56,3 +56,9 @@ jobs:
 
       - name: Run tests
         run: swift test
+
+      - name: Smoke-build benchmarks
+        # Just verify the benchmark target compiles. Full benchmark runs
+        # happen nightly on the self-hosted runner (.github/workflows/
+        # benchmarks.yml); hosted runners are too noisy for perf gates.
+        run: swift build --target SprigCoreBenchmarks

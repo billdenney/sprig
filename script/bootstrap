@@ -16,6 +16,20 @@ if ! command -v git >/dev/null 2>&1; then
     exit 1
 fi
 
+# package-benchmark links libjemalloc on Linux for malloc-tracking metrics.
+# It's vendored on macOS (no action needed) and absent on Windows (the
+# benchmark target is excluded from the package on Windows; see Package.swift).
+if [[ "$(uname -s)" == "Linux" ]]; then
+    if ! [[ -e /usr/include/jemalloc/jemalloc.h ]]; then
+        echo "libjemalloc-dev not installed."
+        echo "  On Debian/Ubuntu: sudo apt-get install -y libjemalloc-dev"
+        echo "  On Fedora:        sudo dnf install -y jemalloc-devel"
+        echo "  On Arch:          sudo pacman -S jemalloc"
+        echo "Without it, 'swift build --target SprigCoreBenchmarks' will fail."
+        echo "(Other targets build fine.)"
+    fi
+fi
+
 echo "==> Resolving SwiftPM dependencies"
 swift package resolve
 

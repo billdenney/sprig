@@ -29,11 +29,10 @@ Exit criteria:
 - [x] `GitCore.Runner` shipped with case-insensitive PATH lookup, env scrubbing, UTF-8 locale forcing, typed errors.
 - [x] `GitCore.CatFileBatch` actor-isolated long-lived `git cat-file --batch` wrapper.
 - [x] `GitCore.PorcelainV2Parser` parses `git status --porcelain=v2 -z` byte-for-byte against a fixture corpus.
-- [x] `GitCore.LogParser` parses `git log -z --format=...` against the LogParser format string.
 - [x] `WatcherKit.FSEventsWatcher` (macOS) live; `WatcherKit.PollingFileWatcher` portable; `WatcherKit.MockFileWatcher` for tests.
 - [x] `WatcherKit.EventCoalescer` priority-weighted dedupe, with full unit-test coverage of priority interactions and overflow.
-- [x] `cli/sprigctl` ships subcommands: `version`, `status`, `watch`, `repos`, `log`.
-- [ ] `tests/benchmarks/` first-cut benchmarks: `PorcelainV2Parser.parse` 1k/10k/100k, `LogParser.parse` 1k/10k, `PollingFileWatcher.takeSnapshot` 1k/10k/100k, `EventCoalescer` ingest→drain throughput, end-to-end `sprigctl status` 1k/10k/100k.
+- [x] `cli/sprigctl` ships subcommands: `version`, `status`, `watch`, `repos`. (`log` deferred — no `GitCore.LogParser` shipped yet; lands as a follow-up before M1 exit.)
+- [~] `tests/benchmarks/` first-cut benchmarks: `PorcelainV2Parser.parse` 1k/10k/100k and `EventCoalescer` ingest→drain at 1k/10k landed (Benchmarks/SprigCoreBenchmarks/, package-benchmark harness). Pending: `PollingFileWatcher.takeSnapshot` 1k/10k/100k, end-to-end `sprigctl status` 1k/10k/100k, `LogParser.parse` (after LogParser ships).
 - [ ] Benchmarks pass on a synthesized 100k-file fixture within ADR 0021 budgets (CPU, RAM, status latency).
 - [ ] `swift run sprigctl status <fixture>` matches `git status --porcelain=v2 -z` byte-for-byte across every `tests/fixtures/repos/*` fixture.
 - [ ] Watcher processes 10k synthetic file-change events at <2% CPU on macOS-14 hosted runner (proxy for ADR 0021 steady-state CPU).

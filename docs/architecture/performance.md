@@ -28,21 +28,25 @@ These are gates that block 1.0 — we don't ship if any of them are red on the k
 5. **`feature.manyFiles` + commit-graph + multi-pack-index** auto-applied to managed repos (ADR 0026). Speeds up `git log` and ancestry queries.
 6. **`--porcelain=v2 -z` everywhere.** Single git invocation, deterministic byte format, no per-line forking.
 
-## Benchmark suite (`tests/benchmarks/`)
+## Benchmark suite (`Benchmarks/SprigCoreBenchmarks/`)
 
-Implementation status: the directory exists with a README; concrete benchmarks land alongside the M1 perf-validation work. Plan:
+**Harness:** [`ordo-one/package-benchmark`](https://github.com/ordo-one/package-benchmark). Linux + macOS friendly, integrates with SwiftPM, supports JMH-format output for trend tracking. Threshold-based regression detection (configurable per benchmark) gates the nightly compare workflow; PR runs are smoke-build only (the target compiles on every macOS + Linux CI run).
 
-- **Synthesized 100k-file repo.** Generated on demand in a temp dir; not vendored. Faster CI than checking in a multi-GB fixture, and reproducible.
-- **`package-benchmark`** (Ordo One) as the harness. Linux-friendly, integrates with SwiftPM, supports JMH-format output for trend tracking. Hashing-based regression detection (10% slowdown on a tracked metric fails the build, configurable per benchmark).
-- **Metric units**: wall-clock via `mach_absolute_time` / `clock_gettime`; CPU via `getrusage`; RSS via `mallinfo` / `task_info`. `package-benchmark` wraps these.
+**Why not Windows:** package-benchmark relies on filename conventions (benchmark-name → file path) that collide with NTFS reserved characters. Windows is out for benchmarks until `ordo-one/package-benchmark#308` lands; the `Package.swift` excludes the benchmark target on Windows via `#if os(Windows)`.
+
+**Linux requirement:** `libjemalloc-dev` is needed for the malloc-tracking metric (vendored on macOS; absent by default on Linux). The Linux CI job installs it; `script/bootstrap` warns if it's missing.
+
+**Metric units:** wall-clock via `mach_absolute_time` / `clock_gettime`; CPU via `getrusage`; malloc via jemalloc instrumentation; RSS via `task_info` / `/proc/self/statm`. `package-benchmark` wraps these.
+
+**Synthesized 100k-file repo:** generated on demand in a temp dir; not vendored. Faster CI than checking in a multi-GB fixture, and reproducible.
 
 Initial benchmark set (M1 deliverable):
 
-- `PorcelainV2Parser.parse` against fixtures of 1k / 10k / 100k entries.
-- `LogParser.parse` against 1k / 10k commits.
-- `PollingFileWatcher.takeSnapshot` against 1k / 10k / 100k file synthesized trees.
-- `EventCoalescer` round-trip throughput (ingest → drain) at 1k / 10k events.
-- End-to-end `sprigctl status` against synthesized repos at 1k / 10k / 100k files.
+- ✅ `PorcelainV2Parser.parse` against synthesized 1k / 10k / 100k entry buffers.
+- ✅ `EventCoalescer` round-trip throughput (ingest → drain) at 1k / 10k events.
+- ⏳ `PollingFileWatcher.takeSnapshot` against 1k / 10k / 100k file synthesized trees (follow-up PR; needs a shared synthesized-repo helper).
+- ⏳ End-to-end `sprigctl status` against synthesized repos at 1k / 10k / 100k files.
+- ⏳ `LogParser.parse` against 1k / 10k commits — pending the LogParser implementation itself.
 
 Later additions:
 
