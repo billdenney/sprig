@@ -16,19 +16,32 @@ if ! command -v git >/dev/null 2>&1; then
     exit 1
 fi
 
-# package-benchmark links libjemalloc on Linux for malloc-tracking metrics.
-# It's vendored on macOS (no action needed) and absent on Windows (the
-# benchmark target is excluded from the package on Windows; see Package.swift).
-if [[ "$(uname -s)" == "Linux" ]]; then
-    if ! [[ -e /usr/include/jemalloc/jemalloc.h ]]; then
-        echo "libjemalloc-dev not installed."
-        echo "  On Debian/Ubuntu: sudo apt-get install -y libjemalloc-dev"
-        echo "  On Fedora:        sudo dnf install -y jemalloc-devel"
-        echo "  On Arch:          sudo pacman -S jemalloc"
-        echo "Without it, 'swift build --target SprigCoreBenchmarks' will fail."
-        echo "(Other targets build fine.)"
-    fi
-fi
+# package-benchmark links jemalloc for malloc-tracking metrics on every
+# platform that supports it (macOS + Linux; Windows excluded entirely from
+# the benchmark target, see Package.swift). Resolved via pkg-config +
+# system jemalloc rather than vendored, so we need the dev package on
+# macOS too — even though earlier docs claimed it was bundled.
+case "$(uname -s)" in
+    Linux)
+        if ! [[ -e /usr/include/jemalloc/jemalloc.h ]]; then
+            echo "libjemalloc-dev not installed."
+            echo "  Debian/Ubuntu: sudo apt-get install -y libjemalloc-dev"
+            echo "  Fedora:        sudo dnf install -y jemalloc-devel"
+            echo "  Arch:          sudo pacman -S jemalloc"
+            echo "Without it, 'swift build --target SprigCoreBenchmarks' will fail."
+            echo "(Other targets build fine.)"
+        fi
+        ;;
+    Darwin)
+        if ! command -v pkg-config >/dev/null 2>&1 \
+            || ! pkg-config --exists jemalloc 2>/dev/null; then
+            echo "jemalloc not installed (or not pkg-config-discoverable)."
+            echo "  Homebrew: brew install jemalloc"
+            echo "Without it, 'swift build --target SprigCoreBenchmarks' will fail."
+            echo "(Other targets build fine.)"
+        fi
+        ;;
+esac
 
 echo "==> Resolving SwiftPM dependencies"
 swift package resolve

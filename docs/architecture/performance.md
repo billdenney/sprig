@@ -34,7 +34,7 @@ These are gates that block 1.0 — we don't ship if any of them are red on the k
 
 **Why not Windows:** package-benchmark relies on filename conventions (benchmark-name → file path) that collide with NTFS reserved characters. Windows is out for benchmarks until `ordo-one/package-benchmark#308` lands; the `Package.swift` excludes the benchmark target on Windows via `#if os(Windows)`.
 
-**Linux requirement:** `libjemalloc-dev` is needed for the malloc-tracking metric (vendored on macOS; absent by default on Linux). The Linux CI job installs it; `script/bootstrap` warns if it's missing.
+**System dependency:** `jemalloc` is required on both macOS and Linux for the malloc-tracking metric (resolved via `pkg-config` against the system install — no vendored shim). CI installs it (`brew install jemalloc` on macOS, `apt-get install libjemalloc-dev` on Linux); `script/bootstrap` warns if it's missing locally.
 
 **Metric units:** wall-clock via `mach_absolute_time` / `clock_gettime`; CPU via `getrusage`; malloc via jemalloc instrumentation; RSS via `task_info` / `/proc/self/statm`. `package-benchmark` wraps these.
 
