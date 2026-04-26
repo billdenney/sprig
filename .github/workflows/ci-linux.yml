@@ -11,13 +11,16 @@ jobs:
       image: swift:6.3.1-noble   # pinned; matches .swift-version
     steps:
       - uses: actions/checkout@v6
-      - name: Install git (GitCore tests shell out to the system git)
-        # The swift:6.3.1-noble image doesn't include git by default.
-        # Tests in GitCoreTests spawn real git for version probes,
-        # init/status round-trips, and merge-conflict fixtures.
+      - name: Install git + libjemalloc-dev
+        # `git` — GitCore tests shell out to the system git for version
+        #   probes, init/status round-trips, and merge-conflict fixtures.
+        #   The swift:6.3.1-noble image doesn't ship git.
+        # `libjemalloc-dev` — package-benchmark links jemalloc on Linux
+        #   for accurate malloc-tracking metrics. Bundled on macOS, missing
+        #   on Linux without this. See docs/architecture/performance.md.
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends git
+          apt-get install -y --no-install-recommends git libjemalloc-dev
           git --version
       - name: Build packages (portable subset)
         # Tier 1 + protocol shells of Tier 2 must compile on Linux.
@@ -25,3 +28,9 @@ jobs:
         run: swift build
       - name: Run tests (portable subset)
         run: swift test
+
+      - name: Smoke-build benchmarks
+        # Just verify the benchmark target compiles. Full benchmark runs
+        # happen nightly on the self-hosted runner (.github/workflows/
+        # benchmarks.yml); hosted runners are too noisy for perf gates.
+        run: swift build --target SprigCoreBenchmarks

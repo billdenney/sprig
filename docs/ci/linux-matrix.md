@@ -18,17 +18,20 @@ Linux CI is **required-green on every PR**. Per ADR 0048 / 0053 it's the load-be
 
 The Swift version is held in lockstep with `.swift-version` at the repo root. Bumping the toolchain is one of two specific edits: change `.swift-version`, change the Docker image tag in `ci-linux.yml`, push.
 
-## Why we install git rather than bundling it
+## Why we install git + libjemalloc-dev rather than bundling them
 
-The `swift:6.3.1-noble` image does not ship `git`. Our integration tests in `GitCoreTests` (init/status round-trips, merge-conflict fixtures) and `LogIntegrationTests` and `CatFileBatchTests` all spawn real git, so we install it as the first step of the workflow:
+The `swift:6.3.1-noble` image does not ship `git` or `libjemalloc-dev`. Both are installed as the first workflow step:
 
 ```yaml
-- name: Install git (GitCore tests shell out to the system git)
+- name: Install git + libjemalloc-dev
   run: |
     apt-get update
-    apt-get install -y --no-install-recommends git
+    apt-get install -y --no-install-recommends git libjemalloc-dev
     git --version
 ```
+
+- **`git`** — `GitCoreTests` integration tests (init/status round-trips, merge-conflict fixtures) and `CatFileBatchTests` spawn real git.
+- **`libjemalloc-dev`** — `package-benchmark` links `jemalloc` on Linux for malloc-tracking metrics. Vendored on macOS; absent on Linux without this. See [`../architecture/performance.md`](../architecture/performance.md).
 
 Pinning a specific git version isn't worth the maintenance — Noble's package is recent enough to clear our 2.39 floor (ADR 0047), and tracking upstream gives us early detection of any porcelain-format drift.
 

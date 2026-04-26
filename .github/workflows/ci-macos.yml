@@ -42,8 +42,12 @@ jobs:
             exit 1
           fi
 
-      - name: Install lint tooling
-        run: brew install swiftlint swiftformat
+      - name: Install lint + benchmark tooling
+        # `jemalloc` — package-benchmark links jemalloc on macOS too (the
+        # `pkgConfig: "jemalloc"` system-library target in
+        # ordo-one/package-jemalloc resolves via pkg-config + Homebrew).
+        # No vendored macOS shim despite earlier docs suggesting otherwise.
+        run: brew install swiftlint swiftformat jemalloc
 
       - name: SwiftLint
         run: swiftlint --strict
@@ -56,3 +60,9 @@ jobs:
 
       - name: Run tests
         run: swift test
+
+      - name: Smoke-build benchmarks
+        # Just verify the benchmark target compiles. Full benchmark runs
+        # happen nightly on the self-hosted runner (.github/workflows/
+        # benchmarks.yml); hosted runners are too noisy for perf gates.
+        run: swift build --target SprigCoreBenchmarks
