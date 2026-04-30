@@ -11,6 +11,12 @@ jobs:
       matrix:
         macos: [macos-14, macos-15]
     runs-on: ${{ matrix.macos }}
+    # Hard wall-clock cap. Hosted macOS runners have intermittently stalled
+    # in `swift test` (FSEvents-related; see SprigctlWatchTests's CI-disabled
+    # case). Without a cap, a stall consumes 6 h of runner time before
+    # GHA's default timeout kicks in. 15 min is comfortably above the
+    # ~3 min healthy total job time.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -58,8 +64,22 @@ jobs:
       - name: Build packages
         run: swift build --configuration debug
 
-      - name: Run tests
-        run: swift test
+      - name: Run tests (under watchdog)
+        # Wraps `swift test` in a watchdog that captures stack traces and
+        # filesystem-syscall traces if the run stalls. See
+        # script/ci/macos-test-watchdog.sh for the strategy. Diagnostics
+        # land in $RUNNER_TEMP/sprig-macos-diag and are uploaded by the
+        # next step regardless of pass/fail.
+        run: ./script/ci/macos-test-watchdog.sh
+
+      - name: Upload macOS test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-diag-${{ matrix.macos }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sprig-macos-diag
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Smoke-build benchmarks
         # Just verify the benchmark target compiles. Full benchmark runs

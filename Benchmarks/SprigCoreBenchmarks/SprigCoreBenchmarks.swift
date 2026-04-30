@@ -2,13 +2,19 @@
 // ordo-one/package-benchmark against pure-Swift hot paths so we can detect
 // regressions before they reach the watcher / agent.
 //
-// Why these benchmarks first
-// --------------------------
-// Both targets here run on synthesized in-memory data — no temp directories,
-// no real git, no FSEvents — so they're stable on hosted CI runners and on
-// developer laptops. Filesystem-bound benchmarks (PollingFileWatcher tree
-// walks, end-to-end `sprigctl status`) will land in a follow-up PR with a
-// shared synthesized-repo helper.
+// Coverage today
+// --------------
+// In-memory benchmarks (no filesystem, stable on hosted CI):
+//   - PorcelainV2Parser.parse  @ 1k / 10k / 100k entries
+//   - LogParser.parse          @ 1k / 10k commits
+//   - EventCoalescer           @ 1k / 10k events ingest→drain
+//
+// Filesystem benchmarks (synthesize a temp tree once at suite registration,
+// teardown via process exit; tmpfs is fine on Linux CI):
+//   - PollingFileWatcher.takeSnapshot @ 1k / 10k / 100k file tree
+//
+// Pending: end-to-end `sprigctl status` (needs a synthesized git repo +
+// process spawn — moves to a follow-up PR).
 //
 // Reference: docs/architecture/performance.md, ADR 0021.
 
@@ -16,6 +22,7 @@ import Benchmark
 import Foundation
 import GitCore
 import PlatformKit
+import WatcherKit
 
 /// Reasonable default config: capture wall-clock + CPU + allocations + peak
 /// RSS, run for at most 1 s per scale, and sample 10 iterations. The numbers
@@ -31,7 +38,9 @@ let benchmarks: @Sendable () -> Void = {
     )
 
     porcelainV2Benchmarks()
+    logParserBenchmarks()
     eventCoalescerBenchmarks()
+    pollingFileWatcherBenchmarks()
 }
 
 // MARK: - PorcelainV2Parser
@@ -74,6 +83,57 @@ private func porcelainV2Benchmarks() {
     }
 }
 
+// MARK: - LogParser
+
+/// Builds a NUL-terminated buffer of `commitCount` synthesized log entries
+/// matching `LogParser.formatString`. Fields are separated by U+001F (Unit
+/// Separator) and each entry is NUL-terminated, exactly as `git log -z
+/// --format=...` emits.
+private func makeLogBuffer(commitCount: Int) -> Data {
+    var data = Data()
+    let unitSeparator = "\u{1F}"
+    // Stable ISO-8601 timestamps so the parser's date-parsing path is
+    // exercised consistently across iterations.
+    let authorDate = "2026-04-26T12:00:00+00:00"
+    let committerDate = "2026-04-26T12:00:01+00:00"
+    let authorName = "Sprig Bench"
+    let authorEmail = "bench@sprig.app"
+    let body = "Body line 1\nBody line 2\nBody line 3\n"
+
+    for index in 0 ..< commitCount {
+        let sha = String(format: "%040x", index)
+        // Mix in some merge commits (every 7th) so the parents-split path
+        // sees both 1-parent and 2-parent forms.
+        let parents = if index > 0, index % 7 == 0 {
+            "\(String(format: "%040x", index - 1)) \(String(format: "%040x", index - 2))"
+        } else if index > 0 {
+            String(format: "%040x", index - 1)
+        } else {
+            ""
+        }
+        let subject = "Commit subject for index \(index)"
+        let fields: [String] = [
+            sha, parents, authorDate, committerDate,
+            authorName, authorEmail, authorName, authorEmail,
+            subject, body
+        ]
+        data.append(fields.joined(separator: unitSeparator).data(using: .utf8)!)
+        data.append(0)
+    }
+    return data
+}
+
+private func logParserBenchmarks() {
+    for commitCount in [1000, 10000] {
+        let buffer = makeLogBuffer(commitCount: commitCount)
+        Benchmark("LogParser.parse — \(commitCount) commits") { benchmark in
+            for _ in benchmark.scaledIterations {
+                blackHole(try? LogParser.parse(buffer))
+            }
+        }
+    }
+}
+
 // MARK: - EventCoalescer
 
 /// Builds `count` watch events, alternating modified/created kinds across
@@ -109,6 +169,50 @@ private func eventCoalescerBenchmarks() {
                 var coalescer = EventCoalescer()
                 coalescer.ingest(events)
                 blackHole(coalescer.drain(upTo: cutoff))
+            }
+        }
+    }
+}
+
+// MARK: - PollingFileWatcher.takeSnapshot
+
+/// Synthesizes a directory tree of `fileCount` empty files, fanned out into
+/// `dirsPerLevel`-wide directories so the walk traverses both deep and
+/// broad. Returns the root URL; tree is cleaned up at process exit (the
+/// benchmarking process spawns once per `swift package benchmark` run).
+private func synthesizeTree(fileCount: Int, dirsPerLevel: Int = 32) -> URL {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("sprig-bench-tree-\(fileCount)-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+    // Two-level directory layout: dirsPerLevel × dirsPerLevel × N files
+    // distributes 100k files across ~1000 leaf dirs (~100 files each),
+    // similar to a real-world repo shape.
+    let filesPerLeaf = max(1, fileCount / (dirsPerLevel * dirsPerLevel))
+    var written = 0
+    outer: for outerIndex in 0 ..< dirsPerLevel {
+        for innerIndex in 0 ..< dirsPerLevel {
+            let dir = root
+                .appendingPathComponent("d\(outerIndex)")
+                .appendingPathComponent("d\(innerIndex)")
+            try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for fileIndex in 0 ..< filesPerLeaf {
+                let file = dir.appendingPathComponent("f\(fileIndex).txt")
+                FileManager.default.createFile(atPath: file.path, contents: nil)
+                written += 1
+                if written >= fileCount { break outer }
+            }
+        }
+    }
+    return root
+}
+
+private func pollingFileWatcherBenchmarks() {
+    for fileCount in [1000, 10000, 100_000] {
+        let root = synthesizeTree(fileCount: fileCount)
+        Benchmark("PollingFileWatcher.takeSnapshot — \(fileCount) files") { benchmark in
+            for _ in benchmark.scaledIterations {
+                blackHole(PollingFileWatcher.takeSnapshot(of: [root]))
             }
         }
     }
