@@ -11,6 +11,12 @@ jobs:
       matrix:
         macos: [macos-14, macos-15]
     runs-on: ${{ matrix.macos }}
+    # Hard wall-clock cap. Hosted macOS runners have intermittently stalled
+    # in `swift test` (FSEvents-related; see SprigctlWatchTests's CI-disabled
+    # case). Without a cap, a stall consumes 6 h of runner time before
+    # GHA's default timeout kicks in. 15 min is comfortably above the
+    # ~3 min healthy total job time.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
