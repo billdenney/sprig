@@ -168,7 +168,7 @@ How we hit them:
 
 - **Unit tests** for the menu-construction logic and badge-priority resolution live in Tier-1 packages (`RepoState`, `StatusKit`) — that logic is portable.
 - **Snapshot tests** for badge rendering against a synthesized RepoState live per-platform in the shell-extension targets (XCTest for macOS; a small `windows-tests/` harness for Windows once the extension lands).
-- **Integration tests** against a real Finder use AppleScript to right-click and assert menu structure; on Windows we'll use UI Automation. These live in `tests/e2e/` with platform guards.
+- **End-to-end tests** against a real Finder (AppleScript-driven right-clicks) and a real Explorer (Windows UI Automation) require self-hosted runners we don't currently operate; the suite is **not present today**. When a self-hosted macOS-arm64 runner is provisioned (per [`../ci/self-hosted.md`](../ci/self-hosted.md)), the suite gets re-introduced at `tests/e2e/` with platform guards.
 - **Performance tests** measure the badge-query and menu-construction p99 against a 100k-file fixture repo on each OS. They run nightly per [`performance.md`](performance.md).
 
 ## Milestone alignment

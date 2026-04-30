@@ -1,26 +1,29 @@
 # Self-hosted runner provisioning
 
-Why we run a small self-hosted fleet alongside GitHub-hosted runners, what each box does, and what's open. **Authoritative content lands before M2** when the first non-hosted job (XCUITest E2E) is wired up. Until then this is a sketch.
+What a self-hosted runner fleet would look like, and what it unlocks. **No self-hosted runners are currently operated** — every job runs on GitHub-hosted runners today. As a consequence, the E2E suite (XCUITest), the perf-gate benchmark workflow, and the release pipeline are all parked: no `tests/e2e/`, no nightly benchmark comparison, no signed/notarized builds from CI.
+
+This document describes the future provisioning plan. It activates when the maintainer has the budget for hosting + cert maintenance, or when a sponsor steps in. **Authoritative content lands before M9** (1.0 release pipeline). Until then this is a sketch.
 
 ADR cross-references: 0021 (perf budgets), 0046 (release cadence), 0054 (Windows shell at 1.0).
 
 Companion: [`linux-matrix.md`](linux-matrix.md), [`../architecture/performance.md`](../architecture/performance.md).
 
-## What's hosted vs self-hosted
+## What's hosted today vs what self-hosted would unlock
 
-| Job | Where | Why |
-|---|---|---|
-| `ci-macos` (build + test + lint) | hosted `macos-14` / `macos-15` | Standard hosted runners are fine; CPU variance is acceptable for boolean pass/fail tests |
-| `ci-linux` (build + test) | hosted `ubuntu-24.04` (in `swift:6.3.1-noble` container) | Same |
-| `ci-windows` (build + test) | hosted `windows-2022` | Same |
-| **E2E** (XCUITest driving signed builds) | self-hosted macOS-arm64 | Needs a real Finder, real signing cert, real notarization — none available on hosted runners |
-| **Benchmarks** (perf gates) | self-hosted macOS-arm64 | Hosted runners vary ~3× CPU between runs (ADR 0021); not stable enough for perf regression detection |
-| **Release pipeline** (sign + notarize + publish) | self-hosted macOS-arm64 | Developer ID signing key cannot leave a trusted machine |
-| **Windows E2E** (UI Automation against MSIX) | self-hosted Windows | Once M2-Win lands; currently TBD |
+| Job | Today | Future (self-hosted required) | Why self-hosted |
+|---|---|---|---|
+| `ci-macos` (build + test + lint) | ✅ hosted `macos-14` / `macos-15` | — | Standard hosted runners are fine; CPU variance is acceptable for boolean pass/fail tests |
+| `ci-linux` (build + test) | ✅ hosted `ubuntu-24.04` (in `swift:6.3.1-noble`) | — | Same |
+| `ci-windows` (build + test) | ✅ hosted `windows-2022` | — | Same |
+| Benchmark **smoke build** (every PR) | ✅ hosted | — | Just verifies the benchmark target compiles |
+| **E2E** (XCUITest driving signed builds) | ❌ not implemented | self-hosted macOS-arm64 | Needs a real Finder, real signing cert, real notarization — none available on hosted runners |
+| **Benchmarks** (perf gates / regression detection) | ❌ not implemented | self-hosted macOS-arm64 | Hosted runners vary ~3× CPU between runs (ADR 0021); not stable enough for perf regression detection |
+| **Release pipeline** (sign + notarize + publish) | ❌ not implemented | self-hosted macOS-arm64 | Developer ID signing key cannot leave a trusted machine |
+| **Windows E2E** (UI Automation against MSIX) | ❌ not implemented | self-hosted Windows | Once M2-Win lands; currently TBD |
 
-## Planned macOS-arm64 runner
+## Planned macOS-arm64 runner (provisioning TBD)
 
-Hardware: a Mac mini M2 Pro, 16 GB RAM, 512 GB SSD. Sized for two concurrent jobs (E2E + benchmark) with headroom. Plan to evaluate after first three months of M2 usage; upgrade to M4 Pro if benchmark queueing becomes a bottleneck.
+Hardware: a Mac mini M2 Pro, 16 GB RAM, 512 GB SSD. Sized for two concurrent jobs (E2E + benchmark) with headroom. Plan to evaluate after first three months of operation; upgrade to M4 Pro if benchmark queueing becomes a bottleneck.
 
 OS: latest macOS at all times (we develop against the floor of macOS 14 but the runner stays current to catch forward-compat issues early).
 

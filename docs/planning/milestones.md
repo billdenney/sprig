@@ -52,7 +52,7 @@ Exit criteria:
 - [ ] `SprigFinder` extension shipping the 10-state badge set (or 5/8 per user's reveal-level preference).
 - [ ] Right-click menu shows the MVP-10 verbs (clone, status, commit, push, pull, fetch, branch-switch, stage/unstage, diff, log) plus `Sprig ▶` submenu.
 - [ ] Verbs that need a dialog open temporary sheets (full task windows arrive in M3-Mac).
-- [ ] Badges update within 500 ms of a git write op in a fixture repo (XCUITest).
+- [ ] Badges update within 500 ms of a git write op in a fixture repo (verification mechanism TBD — XCUITest needs a self-hosted macOS-arm64 runner we don't yet operate; until provisioned, manual-verification + integration-test proxy at the IPC layer).
 - [ ] Steady-state CPU <1%, memory <50 MB on 100k-file fixture (ADR 0021 sub-budget for the alpha).
 - [ ] FinderSync extension memory <30 MB resident under load.
 
@@ -93,7 +93,7 @@ Goal: 3-way merge view, conflict list, hunk-level accept/reject, "abort merge" s
 Critical exit gates (preview):
 
 - 20+ real-world conflict fixtures (text, binary, LFS, CRLF, rename-vs-edit, submodule pointer) resolve without data loss on both shells.
-- Snapshot-ref safety net (ADR 0033) restores state after every destructive op tested in E2E.
+- Snapshot-ref safety net (ADR 0033) restores state after every destructive op (integration tests against `SafetyKit` + the `GitCore.Runner` chain; full E2E re-introduced once a self-hosted runner is provisioned).
 - External-mergetool delegation tested for FileMerge + VS Code (macOS), `WinMerge` + VS Code (Windows).
 - AI not yet enabled at this milestone — bare merge UX is the MVP gate.
 
