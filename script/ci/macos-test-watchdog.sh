@@ -40,13 +40,12 @@ TEST_LOG="$DIAG_DIR/test.log"
 echo "==> Diagnostics directory: $DIAG_DIR"
 echo "==> Swift test starting at $(date -u +%FT%TZ)"
 
-# `swift test` defaults to --no-parallel; we pass it explicitly for clarity.
 # Swift-testing emits realtime per-test markers to stdout:
 #   ◇ Test "..." started.
 #   ✔ Test "..." passed after 0.001 seconds.
 # Those lines ARE our event stream — when a hang occurs, the last
 # `◇ started` without a matching `✔/✘` line names the culprit.
-swift test --no-parallel > "$TEST_LOG" 2>&1 &
+swift test > "$TEST_LOG" 2>&1 &
 TEST_PID=$!
 echo "==> swift test pid=$TEST_PID"
 

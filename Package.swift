@@ -111,7 +111,9 @@ let package = Package(
             ),
             .testTarget(
                 name: "sprigctlTests",
-                dependencies: ["sprigctl"],
+                // GitCore for ProcessTerminationGate (race-safe replacement
+                // for Process.waitUntilExit) used by SprigctlSupport.
+                dependencies: ["sprigctl", "GitCore"],
                 path: "cli/sprigctl/Tests"
             )
         ]

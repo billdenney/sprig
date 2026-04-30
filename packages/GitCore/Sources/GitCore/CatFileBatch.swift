@@ -24,6 +24,7 @@ public actor CatFileBatch {
     private var process: Process?
     private var stdin: FileHandle?
     private var stdout: FileHandle?
+    private var terminationGate: ProcessTerminationGate?
 
     /// Open `git cat-file --batch` against the given working directory.
     ///
@@ -47,9 +48,17 @@ public actor CatFileBatch {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
+        // Wire termination signaling BEFORE `run()` so `close()` can
+        // await child exit race-safely instead of using
+        // `waitUntilExit()` (which deadlocks for fast exits on macOS —
+        // see ProcessExit.swift).
+        let gate = ProcessTerminationGate()
+        process.terminationHandler = { _ in gate.signal() }
+
         try process.run()
 
         self.process = process
+        terminationGate = gate
         stdin = inPipe.fileHandleForWriting
         stdout = outPipe.fileHandleForReading
     }
@@ -103,9 +112,13 @@ public actor CatFileBatch {
         guard let process else { return }
         try? stdin?.close()
         stdin = nil
-        process.waitUntilExit()
+        // Race-safe wait via the gate set up in init() — never call
+        // `process.waitUntilExit()` here; it deadlocks on macOS for
+        // fast exits (the child exits as soon as it sees stdin EOF).
+        await terminationGate?.wait(processIsRunning: { process.isRunning })
         try? stdout?.close()
         stdout = nil
+        terminationGate = nil
         self.process = nil
     }
 

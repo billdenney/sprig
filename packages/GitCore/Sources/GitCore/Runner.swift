@@ -85,15 +85,21 @@ public struct Runner: Sendable {
             process.standardInput = FileHandle.nullDevice
         }
 
-        // Run and collect asynchronously — wait() blocks, so we wrap in a task
-        // that reads both pipes concurrently and awaits termination.
+        // Pre-register termination signaling BEFORE `run()`. Plain
+        // `Process.waitUntilExit()` deadlocks on macOS for fast-exiting
+        // children (the `NSTaskDidTerminateNotification` setup loses the
+        // race against the child's exit and the runloop waits forever).
+        // See `ProcessExit.swift` for the full diagnosis.
+        let terminationGate = ProcessTerminationGate()
+        process.terminationHandler = { _ in terminationGate.signal() }
+
         try process.run()
 
         async let stdoutBytes = Self.readToEnd(outPipe.fileHandleForReading)
         async let stderrBytes = Self.readToEnd(errPipe.fileHandleForReading)
         let stdout = try await stdoutBytes
         let stderr = try await stderrBytes
-        process.waitUntilExit()
+        await terminationGate.wait(processIsRunning: { process.isRunning })
 
         let reason = process.terminationReason
         let status = process.terminationStatus

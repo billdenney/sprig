@@ -1,4 +1,5 @@
 import Foundation
+import GitCore // for ProcessTerminationGate
 
 /// Test helpers shared across the sprigctl test suites. Kept namespaced
 /// in an enum so they can be invoked as `Sprigctl.run(...)` without one
@@ -46,6 +47,13 @@ enum Sprigctl {
     }
 
     /// Run the sprigctl binary with `args`, capture stdout/stderr/exit.
+    ///
+    /// Uses the `ProcessTerminationGate` pattern (see GitCore's
+    /// ProcessExit.swift) instead of `process.waitUntilExit()` — the
+    /// latter deadlocks on macOS for fast-exiting children. Pipes are
+    /// also drained via async tasks BEFORE the wait; doing it after
+    /// (the previous code) risks a separate pipe-buffer deadlock when
+    /// stdout/stderr exceeds ~64 KB and the child blocks writing.
     static func run(_ args: [String], cwd: URL? = nil) async throws -> Captured {
         let binary = try locateBinary()
         let process = Process()
@@ -56,15 +64,39 @@ enum Sprigctl {
         let errPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
+
+        let gate = ProcessTerminationGate()
+        process.terminationHandler = { _ in gate.signal() }
+
         try process.run()
-        process.waitUntilExit()
-        let out = try outPipe.fileHandleForReading.readToEnd() ?? Data()
-        let err = try errPipe.fileHandleForReading.readToEnd() ?? Data()
+
+        async let outBytes = readToEnd(outPipe.fileHandleForReading)
+        async let errBytes = readToEnd(errPipe.fileHandleForReading)
+        let out = try await outBytes
+        let err = try await errBytes
+        await gate.wait(processIsRunning: { process.isRunning })
+
         return Captured(
             stdout: String(data: out, encoding: .utf8) ?? "",
             stderr: String(data: err, encoding: .utf8) ?? "",
             exitCode: process.terminationStatus
         )
+    }
+
+    /// Async pipe drain — same shape as GitCore.Runner's private helper
+    /// but inlined here so the test target doesn't need `@testable
+    /// import GitCore`.
+    private static func readToEnd(_ handle: FileHandle) async throws -> Data {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+            DispatchQueue.global().async {
+                do {
+                    let data = try handle.readToEnd() ?? Data()
+                    continuation.resume(returning: data)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 
     static func mkRepo(_ label: String) throws -> URL {
@@ -88,8 +120,13 @@ enum Sprigctl {
         process.currentDirectoryURL = cwd
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+        // `try await process.runAndAwaitExit()` — race-safe replacement
+        // for `try process.run(); process.waitUntilExit()`. Even though
+        // we route stdio to /dev/null and don't risk pipe-buffer
+        // deadlocks here, the underlying `waitUntilExit()` race against
+        // fast-exiting children still bites (`git config <key> <val>`
+        // exits in <50 ms).
+        try await process.runAndAwaitExit()
     }
 
     /// Resolve git via case-insensitive PATH walk — same approach
