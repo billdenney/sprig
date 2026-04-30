@@ -122,17 +122,20 @@ struct SprigctlWatchTests {
     #endif
 
     #if os(macOS)
-        /// Disabled on CI: FSEvents + Swift 6.0.3 on hosted macos-14 runners
-        /// intermittently hangs swift-test. Re-enable once we have a self-
-        /// hosted macOS runner with diagnostics. Local Mac developers (no
-        /// CI env-var) still run this for sanity.
-        @Test(
-            "watch --duration 0.2 exits cleanly",
-            .disabled(
-                if: ProcessInfo.processInfo.environment["CI"] != nil,
-                "FSEvents hang on hosted macos-14"
-            )
-        )
+        /// End-to-end check that `sprigctl watch --duration 0.2` exits
+        /// cleanly when backed by `FSEventsWatcher` on macOS. This is the
+        /// only test that exercises `WatcherKit/Mac/WatcherKitMac.swift`
+        /// in CI.
+        ///
+        /// History: previously CI-disabled with "FSEvents hang on hosted
+        /// macos-14" — but the watchdog stack traces on PR #16 showed the
+        /// hang was actually `[NSConcreteTask waitUntilExit]` inside
+        /// `Sprigctl.run`, not FSEvents itself. That race is now fixed
+        /// (`ProcessTerminationGate` set up before `process.run()` in
+        /// `SprigctlSupport`), so we re-enable here. The job-level
+        /// `timeout-minutes: 15` is the safety net if a residual flake
+        /// surfaces; the macOS test watchdog will capture diagnostics.
+        @Test("watch --duration 0.2 exits cleanly")
         func macShortDurationExits() async throws {
             let tmp = try Sprigctl.mkRepo("watch-mac")
             defer { try? FileManager.default.removeItem(at: tmp) }
