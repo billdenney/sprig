@@ -75,6 +75,17 @@ AI features (merge conflict suggestions, commit message drafting, PR description
 - AI evaluation tests in `tests/ai-evals/` run the held-out conflict corpus against every configured provider.
 - Benchmarks in `tests/benchmarks/` gate the 100k-file performance budget (<2% CPU steady, <150 MB RAM, <100 ms badge latency).
 
+### Disabled CI tests must be tracked and re-enabled ASAP
+
+When a CI test has to be disabled (intermittent flake, environment-dependent failure, missing dependency), the disable is **provisional**, never permanent. Two requirements at the moment of disabling:
+
+1. **An in-code comment at the disable site** describing the symptom, the suspected root cause, and what would unblock re-enabling. The disable should fail review without one.
+2. **A tracking entry in [`docs/planning/disabled-tests.md`](docs/planning/disabled-tests.md)** naming the test, the date disabled, the PR + commit, a link to diagnostic artifacts if any, and an owner.
+
+Re-enabling cadence: as soon as the underlying bug is fixed (or the environment requirement met), the **next PR** flips the disable off. Don't bundle "fix bug" and "re-enable test" into the same PR — split them so reverting either is independent. Re-enabling is a one-line PR with the citation back to the fixing PR; that's the proof the fix actually worked.
+
+The intent: a disable is a debt note we promise to pay quickly. We never accumulate dead disabled-on-CI tests; if we did, the diff between "what CI tests" and "what we ship" would silently widen. Disabled tests get reviewed at every milestone exit ([`docs/planning/milestones.md`](docs/planning/milestones.md)).
+
 ## Plan file (source of truth)
 
 The approved plan lives at `/home/bill/.claude/plans/please-switch-to-plan-glittery-corbato.md`. When in doubt, consult it. The plan is the union of all ratified ADRs and the roadmap.
