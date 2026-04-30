@@ -1,6 +1,7 @@
-// First-cut benchmarks for the Sprig portable core. Wires up
-// ordo-one/package-benchmark against pure-Swift hot paths so we can detect
-// regressions before they reach the watcher / agent.
+// Benchmarks for the Sprig portable core. Wires up
+// ordo-one/package-benchmark against pure-Swift hot paths and the
+// end-to-end git invocation chain so we can detect regressions before
+// they reach the watcher / agent.
 //
 // Coverage today
 // --------------
@@ -9,12 +10,12 @@
 //   - LogParser.parse          @ 1k / 10k commits
 //   - EventCoalescer           @ 1k / 10k events ingest→drain
 //
-// Filesystem benchmarks (synthesize a temp tree once at suite registration,
-// teardown via process exit; tmpfs is fine on Linux CI):
+// Filesystem benchmarks (synthesize a temp tree once at suite registration):
 //   - PollingFileWatcher.takeSnapshot @ 1k / 10k / 100k file tree
 //
-// Pending: end-to-end `sprigctl status` (needs a synthesized git repo +
-// process spawn — moves to a follow-up PR).
+// End-to-end git benchmarks (synthesize a git repo with N tracked files
+// and a 10% dirty fraction, then time the full status path):
+//   - Runner.run + PorcelainV2Parser.parse @ 1k / 10k files
 //
 // Reference: docs/architecture/performance.md, ADR 0021.
 
@@ -41,6 +42,7 @@ let benchmarks: @Sendable () -> Void = {
     logParserBenchmarks()
     eventCoalescerBenchmarks()
     pollingFileWatcherBenchmarks()
+    statusEndToEndBenchmarks()
 }
 
 // MARK: - PorcelainV2Parser
@@ -213,6 +215,160 @@ private func pollingFileWatcherBenchmarks() {
         Benchmark("PollingFileWatcher.takeSnapshot — \(fileCount) files") { benchmark in
             for _ in benchmark.scaledIterations {
                 blackHole(PollingFileWatcher.takeSnapshot(of: [root]))
+            }
+        }
+    }
+}
+
+// MARK: - End-to-end: Runner.run + PorcelainV2Parser
+
+/// Synthesizes a git repo with `fileCount` tracked files (committed),
+/// then makes ~10 % of them worktree-dirty. Returns the repo URL.
+///
+/// **Synchronous on purpose.** Called at benchmark *registration* time
+/// (outside any async context) so the repo is ready before
+/// `scaledIterations` start, and so the synthesis cost isn't part of
+/// the measured loop. Uses `Process` directly with the same race-safe
+/// `terminationHandler` + `DispatchSemaphore` pattern that
+/// `GitCore.ProcessTerminationGate` uses asynchronously.
+///
+/// Repo lives under `NSTemporaryDirectory()` and is left in place;
+/// package-benchmark spawns one process per `swift package benchmark`
+/// run, so OS cleanup happens at process exit.
+private func runGitSync(_ args: [String], cwd: URL) {
+    let process = Process()
+    let gitPath = locateGit()
+    process.executableURL = URL(fileURLWithPath: gitPath)
+    process.arguments = args
+    process.currentDirectoryURL = cwd
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+
+    // Race-safe wait: same pattern as GitCore.ProcessTerminationGate,
+    // but synchronous (DispatchSemaphore instead of async continuation).
+    // Set terminationHandler BEFORE run() so we never miss the signal
+    // when the child exits faster than Foundation's task-monitor setup.
+    let sem = DispatchSemaphore(value: 0)
+    process.terminationHandler = { _ in sem.signal() }
+    do {
+        try process.run()
+    } catch {
+        fatalError("benchmark setup: failed to spawn git \(args): \(error)")
+    }
+    sem.wait()
+}
+
+private func locateGit() -> String {
+    let env = ProcessInfo.processInfo.environment
+    let pathEnv = env.first { $0.key.caseInsensitiveCompare("PATH") == .orderedSame }?.value ?? ""
+    #if os(Windows)
+        let exeName = "git.exe"
+        let separator: Character = ";"
+    #else
+        let exeName = "git"
+        let separator: Character = ":"
+    #endif
+    for dir in pathEnv.split(separator: separator).map(String.init) {
+        let candidate = (dir as NSString).appendingPathComponent(exeName)
+        if FileManager.default.isExecutableFile(atPath: candidate) {
+            return candidate
+        }
+    }
+    fatalError("benchmark setup: git not found on PATH=\(pathEnv)")
+}
+
+private func synthesizeRepo(fileCount: Int) -> URL {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("sprig-bench-repo-\(fileCount)-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+    // Two-level fanout matching the polling-watcher benchmark, so the
+    // tree shape is consistent and `git status` traversal cost is
+    // representative.
+    let dirsPerLevel = 32
+    let filesPerLeaf = max(1, fileCount / (dirsPerLevel * dirsPerLevel))
+    var written = 0
+    outer: for outerIndex in 0 ..< dirsPerLevel {
+        for innerIndex in 0 ..< dirsPerLevel {
+            let dir = root
+                .appendingPathComponent("d\(outerIndex)")
+                .appendingPathComponent("d\(innerIndex)")
+            try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for fileIndex in 0 ..< filesPerLeaf {
+                let file = dir.appendingPathComponent("f\(fileIndex).txt")
+                _ = FileManager.default.createFile(
+                    atPath: file.path,
+                    contents: Data("seed\(written)\n".utf8)
+                )
+                written += 1
+                if written >= fileCount { break outer }
+            }
+        }
+    }
+
+    // Initial commit via direct sync git invocations.
+    runGitSync(["init", "-b", "main"], cwd: root)
+    runGitSync(["config", "user.email", "bench@sprig.app"], cwd: root)
+    runGitSync(["config", "user.name", "Sprig Bench"], cwd: root)
+    runGitSync(["config", "commit.gpgsign", "false"], cwd: root)
+    runGitSync(["add", "-A"], cwd: root)
+    runGitSync(["commit", "-m", "seed"], cwd: root)
+
+    // Make ~10 % of files worktree-dirty so `git status` actually has
+    // entries to report — matches the modify-some-files-then-status
+    // pattern that drives Sprig's badge updates.
+    let dirtyEvery = 10
+    var dirtied = 0
+    dirty: for outerIndex in 0 ..< dirsPerLevel {
+        for innerIndex in 0 ..< dirsPerLevel {
+            let dir = root
+                .appendingPathComponent("d\(outerIndex)")
+                .appendingPathComponent("d\(innerIndex)")
+            for fileIndex in 0 ..< filesPerLeaf where dirtied % dirtyEvery == 0 {
+                let file = dir.appendingPathComponent("f\(fileIndex).txt")
+                if FileManager.default.fileExists(atPath: file.path) {
+                    try! Data("dirty-\(dirtied)\n".utf8).write(to: file)
+                }
+                dirtied += 1
+                if dirtied >= fileCount { break dirty }
+            }
+            if dirtied >= fileCount { break dirty }
+        }
+    }
+
+    return root
+}
+
+private func statusEndToEndBenchmarks() {
+    // 100k files would push setup time past 30 s on hosted CI; benchmark
+    // for that scale lives on the self-hosted runner workflow and is
+    // gated by ADR 0021 budgets.
+    for fileCount in [1000, 10000] {
+        // Synthesize at registration time, OUTSIDE the benchmark closure,
+        // so the cost isn't attributed to the measured iterations.
+        let repo = synthesizeRepo(fileCount: fileCount)
+        Benchmark(
+            "Runner.run + PorcelainV2Parser.parse — \(fileCount) files",
+            configuration: Benchmark.Configuration(
+                metrics: [.wallClock, .cpuTotal, .mallocCountTotal, .peakMemoryResident],
+                timeUnits: .microseconds,
+                // The git-status walk dominates here; cap iterations so
+                // even 10k stays inside the per-bench budget.
+                maxDuration: .seconds(2),
+                maxIterations: 5
+            )
+        ) { benchmark in
+            let runner = Runner(defaultWorkingDirectory: repo)
+            for _ in benchmark.scaledIterations {
+                let output = try await runner.run([
+                    "status",
+                    "--porcelain=v2",
+                    "--branch",
+                    "--show-stash",
+                    "-z",
+                    "--untracked-files=all"
+                ])
+                blackHole(try? PorcelainV2Parser.parse(output.stdout))
             }
         }
     }

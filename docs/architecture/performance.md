@@ -46,7 +46,7 @@ Initial benchmark set (M1 deliverable):
 - ✅ `LogParser.parse` against synthesized 1k / 10k commits (NUL-terminated, U+001F-separated, matches `git log -z --format=<LogParser.formatString>`).
 - ✅ `EventCoalescer` round-trip throughput (ingest → drain) at 1k / 10k events.
 - ✅ `PollingFileWatcher.takeSnapshot` against synthesized 1k / 10k / 100k file trees (two-level fanout, `tmpfs` on Linux CI).
-- ⏳ End-to-end `sprigctl status` against synthesized repos at 1k / 10k / 100k files.
+- ✅ End-to-end `Runner.run + PorcelainV2Parser.parse` against synthesized 1k / 10k file repos (10 % worktree-dirty fraction, two-level fanout). 100k-file scale deferred to the self-hosted nightly workflow.
 
 Later additions:
 

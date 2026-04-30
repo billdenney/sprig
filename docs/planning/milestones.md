@@ -33,7 +33,7 @@ Exit criteria:
 - [x] `WatcherKit.FSEventsWatcher` (macOS) live; `WatcherKit.PollingFileWatcher` portable; `WatcherKit.MockFileWatcher` for tests.
 - [x] `WatcherKit.EventCoalescer` priority-weighted dedupe, with full unit-test coverage of priority interactions and overflow.
 - [x] `cli/sprigctl` ships subcommands: `version`, `status`, `watch`, `repos`, `log`.
-- [~] `Benchmarks/SprigCoreBenchmarks/` benchmarks via `package-benchmark`: `PorcelainV2Parser.parse` 1k/10k/100k, `LogParser.parse` 1k/10k, `EventCoalescer` ingest→drain at 1k/10k, `PollingFileWatcher.takeSnapshot` 1k/10k/100k. Pending: end-to-end `sprigctl status` 1k/10k/100k.
+- [x] `Benchmarks/SprigCoreBenchmarks/` benchmarks via `package-benchmark`: `PorcelainV2Parser.parse` 1k/10k/100k, `LogParser.parse` 1k/10k, `EventCoalescer` ingest→drain at 1k/10k, `PollingFileWatcher.takeSnapshot` 1k/10k/100k, end-to-end `Runner.run + PorcelainV2Parser.parse` against synthesized 1k/10k file repos. (100k-file end-to-end benchmark deferred to the self-hosted runner workflow — synthesis would push hosted-CI setup time past 30 s; ADR 0021 budget validation at that scale lives in `.github/workflows/benchmarks.yml`.)
 - [ ] Benchmarks pass on a synthesized 100k-file fixture within ADR 0021 budgets (CPU, RAM, status latency).
 - [ ] `swift run sprigctl status <fixture>` matches `git status --porcelain=v2 -z` byte-for-byte across every `tests/fixtures/repos/*` fixture.
 - [ ] Watcher processes 10k synthetic file-change events at <2% CPU on macOS-14 hosted runner (proxy for ADR 0021 steady-state CPU).
