@@ -73,7 +73,13 @@ public final class PollingFileWatcher: FileWatcher, @unchecked Sendable {
 
     /// Recursive directory walk producing per-path metadata. Static so the
     /// polling Task closure doesn't capture `self`.
-    static func takeSnapshot(of roots: [URL]) -> [URL: FileMetadata] {
+    ///
+    /// Public so benchmarks (`Benchmarks/SprigCoreBenchmarks/`) and the
+    /// future `RepoState` synchronizer can call into it without going
+    /// through the full ``start(paths:)`` lifecycle. The returned
+    /// dictionary is the implementation's snapshot fingerprint — its
+    /// shape is **not stable API**; ``FileMetadata`` may grow fields.
+    public static func takeSnapshot(of roots: [URL]) -> [URL: FileMetadata] {
         var out: [URL: FileMetadata] = [:]
         for root in roots {
             walk(root, into: &out)
@@ -125,13 +131,23 @@ public final class PollingFileWatcher: FileWatcher, @unchecked Sendable {
     }
 }
 
-// MARK: - Internal types
+// MARK: - Public types
 
 /// File metadata fingerprint — what we compare across snapshots.
-struct FileMetadata: Equatable {
-    let size: UInt64
-    let mtime: Date
-    let isDir: Bool
+///
+/// Public so callers of ``PollingFileWatcher/takeSnapshot(of:)`` can
+/// inspect the snapshot. **The set of fields is not stable**; we may
+/// add inode, dev, or symlink-target fields here as the watcher grows.
+public struct FileMetadata: Equatable, Sendable {
+    public let size: UInt64
+    public let mtime: Date
+    public let isDir: Bool
+
+    public init(size: UInt64, mtime: Date, isDir: Bool) {
+        self.size = size
+        self.mtime = mtime
+        self.isDir = isDir
+    }
 }
 
 /// Tracks the polling task so `stop()` can cancel it deterministically.

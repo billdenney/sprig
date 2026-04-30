@@ -43,10 +43,10 @@ These are gates that block 1.0 — we don't ship if any of them are red on the k
 Initial benchmark set (M1 deliverable):
 
 - ✅ `PorcelainV2Parser.parse` against synthesized 1k / 10k / 100k entry buffers.
+- ✅ `LogParser.parse` against synthesized 1k / 10k commits (NUL-terminated, U+001F-separated, matches `git log -z --format=<LogParser.formatString>`).
 - ✅ `EventCoalescer` round-trip throughput (ingest → drain) at 1k / 10k events.
-- ⏳ `PollingFileWatcher.takeSnapshot` against 1k / 10k / 100k file synthesized trees (follow-up PR; needs a shared synthesized-repo helper).
+- ✅ `PollingFileWatcher.takeSnapshot` against synthesized 1k / 10k / 100k file trees (two-level fanout, `tmpfs` on Linux CI).
 - ⏳ End-to-end `sprigctl status` against synthesized repos at 1k / 10k / 100k files.
-- ⏳ `LogParser.parse` against 1k / 10k commits — pending the LogParser implementation itself.
 
 Later additions:
 

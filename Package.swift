@@ -29,7 +29,8 @@ let tier2Targets: [String] = [
             dependencies: [
                 .product(name: "Benchmark", package: "package-benchmark"),
                 "GitCore",
-                "PlatformKit"
+                "PlatformKit",
+                "WatcherKit"
             ],
             path: "Benchmarks/SprigCoreBenchmarks",
             plugins: [
@@ -38,11 +39,12 @@ let tier2Targets: [String] = [
         )
     ]
     let benchmarkDependencies: [Package.Dependency] = [
-        // package-benchmark pulls libjemalloc on Linux (vendored on macOS); the
-        // Linux CI job + script/bootstrap install `libjemalloc-dev` so the
-        // dependency resolves. We can't disable the Jemalloc trait at this
-        // tools-version — package traits require swift-tools-version 6.1, and
-        // bumping that breaks Xcode 16.0–16.2 in macOS CI (#11 history).
+        // package-benchmark depends on jemalloc as a system library (resolved
+        // via pkg-config on both macOS and Linux — there's no vendored shim).
+        // CI installs it: `apt-get install libjemalloc-dev` on Linux,
+        // `brew install jemalloc` on macOS. We can't disable the Jemalloc
+        // trait at this tools-version — package traits require swift-tools-
+        // version 6.1, and bumping that breaks Xcode 16.0–16.2 in macOS CI.
         .package(
             url: "https://github.com/ordo-one/package-benchmark.git",
             from: "1.31.0"
