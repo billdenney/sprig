@@ -10,6 +10,18 @@ let tier1Targets: [String] = [
     "PlatformKit", "DiagKit", "StatusKit", "TaskWindowKit", "UIKitShared"
 ]
 
+/// Per-target dependency overrides for Tier-1 packages. Default Tier-1
+/// targets have no inter-package deps; entries here are explicit
+/// cross-Tier-1 dependencies (always Tier-1 → Tier-1; never Tier-1 →
+/// Tier-2 or Tier-3, which would violate ADR 0048's tier discipline).
+let tier1Dependencies: [String: [Target.Dependency]] = [
+    // RepoState consumes parsed `PorcelainV2Status` values from GitCore
+    // when applying `git status` snapshots, and re-uses GitCore's
+    // typed-error vocabulary. Both are portable Tier-1 packages, so
+    // this dependency is in-tier and adds no platform coupling.
+    "RepoState": ["GitCore"]
+]
+
 let tier2Targets: [String] = [
     "WatcherKit", "CredentialKit", "NotifyKit", "UpdateKit",
     "LauncherKit", "TransportKit", "AgentKit"
@@ -70,12 +82,17 @@ let package = Package(
         )
     ] + benchmarkDependencies,
     targets:
-    tier1Targets.flatMap { name in
-        [
-            .target(name: name, path: "packages/\(name)/Sources/\(name)"),
+    tier1Targets.flatMap { name -> [Target] in
+        let deps: [Target.Dependency] = tier1Dependencies[name] ?? []
+        return [
+            .target(
+                name: name,
+                dependencies: deps,
+                path: "packages/\(name)/Sources/\(name)"
+            ),
             .testTarget(
                 name: "\(name)Tests",
-                dependencies: [.target(name: name)],
+                dependencies: [.target(name: name)] + deps,
                 path: "packages/\(name)/Tests/\(name)Tests"
             )
         ]
