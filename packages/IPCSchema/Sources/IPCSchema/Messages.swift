@@ -63,7 +63,14 @@ public struct SubscribePayload: Codable, Sendable, Equatable {
 
 // MARK: - AgentResponse
 
-/// Replies to client requests + unsolicited events.
+/// Solicited replies the agent sends in response to a
+/// ``ClientRequest``. Each reply's envelope carries the request's
+/// `id` so the client can correlate.
+///
+/// **Push notifications** (badge changes, subscription terminations)
+/// flow through ``AgentEvent``, not this enum — agent-initiated
+/// messages need a separate type so the receiver dispatches them via
+/// the subscription handlers, not the request-response correlator.
 public enum AgentResponse: Sendable, Equatable {
     /// Reply to ``ClientRequest/badgeQuery``. `badge` is nil when the
     /// path has no badge (clean / outside any watched repo). The
@@ -110,6 +117,64 @@ public struct ErrorPayload: Codable, Sendable, Equatable {
     public init(code: String, message: String) {
         self.code = code
         self.message = message
+    }
+}
+
+// MARK: - AgentEvent
+
+/// Unsolicited push messages the agent sends to subscribed clients
+/// without a matching ``ClientRequest``. Distinct from
+/// ``AgentResponse`` so the receiver dispatches via subscription
+/// handlers rather than the request-response correlator.
+///
+/// Each event's envelope still has a unique `id` for log correlation
+/// and dedup, but the client never echoes it.
+public enum AgentEvent: Sendable, Equatable {
+    /// A path's badge changed. Sent to every client that
+    /// ``ClientRequest/subscribe``-d to a root containing this path.
+    /// `badge` is nil when the path is now clean / no longer carries
+    /// a badge (the prior badge should be cleared in the client's
+    /// cache).
+    case badgeChanged(BadgeChangedPayload)
+
+    /// The agent is terminating a subscription. Sent unilaterally
+    /// when the agent is shutting down, the watched repo went away,
+    /// or the subscription's roots became invalid (volume unmounted,
+    /// permissions revoked, etc.).
+    case subscriptionEnded(SubscriptionEndedPayload)
+}
+
+public struct BadgeChangedPayload: Codable, Sendable, Equatable {
+    /// Which subscription this event belongs to (echoes the id the
+    /// agent assigned in ``SubscribeAckPayload``). Lets a client with
+    /// multiple subscriptions route the event to the right handler.
+    public var subscriptionId: UUID
+
+    /// Absolute path whose badge changed.
+    public var path: String
+
+    /// New badge identifier — wire-stable rawValue of
+    /// `RepoState.BadgeIdentifier`. nil for "now clean."
+    public var badge: String?
+
+    public init(subscriptionId: UUID, path: String, badge: String?) {
+        self.subscriptionId = subscriptionId
+        self.path = path
+        self.badge = badge
+    }
+}
+
+public struct SubscriptionEndedPayload: Codable, Sendable, Equatable {
+    public var subscriptionId: UUID
+
+    /// Stable termination reason. Wire-stable; clients pattern-match.
+    /// Known values today: `"agent_shutdown"`, `"repo_removed"`,
+    /// `"volume_unmounted"`, `"unauthorized"`, `"internal"`.
+    public var reason: String
+
+    public init(subscriptionId: UUID, reason: String) {
+        self.subscriptionId = subscriptionId
+        self.reason = reason
     }
 }
 
@@ -187,6 +252,39 @@ extension AgentResponse: EnvelopeMessage {
             try container.encode(payload, forKey: .payload)
         case let .error(payload):
             try container.encode(Kind.error.rawValue, forKey: .kind)
+            try container.encode(payload, forKey: .payload)
+        }
+    }
+}
+
+extension AgentEvent: EnvelopeMessage {
+    private enum Kind: String {
+        case badgeChanged
+        case subscriptionEnded
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: MessageCodingKeys.self)
+        let rawKind = try container.decode(String.self, forKey: .kind)
+        guard let kind = Kind(rawValue: rawKind) else {
+            throw IPCError.unknownMessageKind(rawKind)
+        }
+        switch kind {
+        case .badgeChanged:
+            self = try .badgeChanged(container.decode(BadgeChangedPayload.self, forKey: .payload))
+        case .subscriptionEnded:
+            self = try .subscriptionEnded(container.decode(SubscriptionEndedPayload.self, forKey: .payload))
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: MessageCodingKeys.self)
+        switch self {
+        case let .badgeChanged(payload):
+            try container.encode(Kind.badgeChanged.rawValue, forKey: .kind)
+            try container.encode(payload, forKey: .payload)
+        case let .subscriptionEnded(payload):
+            try container.encode(Kind.subscriptionEnded.rawValue, forKey: .kind)
             try container.encode(payload, forKey: .payload)
         }
     }
