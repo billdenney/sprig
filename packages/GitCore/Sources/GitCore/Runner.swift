@@ -59,6 +59,21 @@ public struct Runner: Sendable {
     /// - Returns: stdout/stderr/exit code.
     /// - Throws: ``GitError`` for binary-not-found, non-zero exits (only when
     ///   `throwOnNonZero` is true), signals, or I/O failures.
+    ///
+    /// **Multi-agent caveat (R15 audit, F1).** When another git agent
+    /// (terminal `git add`, another GUI, CI on the same machine) is
+    /// holding `.git/index.lock` / `.git/packed-refs.lock` / etc., a
+    /// Sprig-initiated **write** op fails with stderr like
+    /// `fatal: Unable to create '/path/.git/index.lock': File exists.`
+    /// This surfaces as ``GitError/nonZeroExit``. Read-only ops
+    /// (`git status`, `git log`) are unaffected — they read-lock the
+    /// index briefly but don't conflict with concurrent writes.
+    ///
+    /// Until the planned `retryOnLockContention` parameter lands,
+    /// callers initiating writes during likely-concurrent windows
+    /// should either (a) check
+    /// ``GitMetadataPaths/gitOperationInFlight(in:gitVersion:)`` first
+    /// and defer, or (b) catch the `nonZeroExit` and retry.
     public func run(
         _ arguments: [String],
         cwd: URL? = nil,

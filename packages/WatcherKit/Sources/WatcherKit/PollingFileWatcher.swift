@@ -25,6 +25,21 @@ import PlatformKit
 /// - It runs until either (a) ``stop()`` is called, or (b) the consumer
 ///   cancels its iterating task (which fires `onTermination` and
 ///   cancels the polling task).
+///
+/// ## Watching `.git/` for external-agent state changes (R15 audit, F5)
+///
+/// The internal walk uses `FileManager.contentsOfDirectory` with
+/// `.skipsHiddenFiles`, so a `.git` directory inside a watched root is
+/// **not** descended into automatically. Per ADR 0056, Sprig wants to
+/// detect external git mutations (terminal `git commit`, etc.) which
+/// happen entirely inside `.git/`.
+///
+/// **The agent must pass `.git/` (resolved via
+/// `GitCore.GitMetadataPaths.resolveGitDir(forWorktree:)`) as a
+/// SEPARATE root in `paths`** — once explicitly added as a root, the
+/// walk descends into it normally. The same applies to every
+/// submodule's gitDir (via `submoduleWorktrees(at:)`) and every
+/// linked worktree's gitDir (via `linkedWorktrees(at:)`).
 public final class PollingFileWatcher: FileWatcher, @unchecked Sendable {
     /// Wall-clock time between rescans.
     public let pollInterval: TimeInterval
