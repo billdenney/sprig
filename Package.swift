@@ -100,7 +100,19 @@ let package = Package(
 
         +
         tier2Targets.flatMap { name -> [Target] in
-            [
+            // Per-target test-only deps for Tier-2 packages. Test targets
+            // can pull in additional Tier-1 packages without those becoming
+            // production deps of the adapter.
+            let extraTestDeps: [Target.Dependency] = switch name {
+            case "TransportKit":
+                // Integration tests demonstrate `Transport` + `IPCSchema`
+                // composition end-to-end (encode envelope → send → receive
+                // → decode envelope → respond).
+                ["IPCSchema"]
+            default:
+                []
+            }
+            return [
                 .target(
                     name: name,
                     dependencies: ["PlatformKit"],
@@ -109,7 +121,7 @@ let package = Package(
                 ),
                 .testTarget(
                     name: "\(name)Tests",
-                    dependencies: [.target(name: name), "PlatformKit"],
+                    dependencies: [.target(name: name), "PlatformKit"] + extraTestDeps,
                     path: "packages/\(name)/Tests/\(name)Tests"
                 )
             ]
