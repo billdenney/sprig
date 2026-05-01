@@ -128,6 +128,37 @@ public struct PathTrie<Value: Sendable>: Sendable {
         return bestValue
     }
 
+    /// Collect every stored value along the path from the trie root to
+    /// `path`, root-first (closest-to-trie-root first). Useful for
+    /// "every ancestor contributes to the answer" patterns —
+    /// subscription matching (every subscriber whose root covers this
+    /// path), accumulated tags, layered config.
+    ///
+    /// Distinguished from ``nearestValue(at:)`` which returns a single
+    /// value (the deepest ancestor). Use this when callers need *all*
+    /// values along the chain, not just the most-specific one.
+    ///
+    /// Walk stops at the first missing component — ancestors past that
+    /// point can't contribute (the path doesn't pass through them), and
+    /// values stored at deeper paths than `path` are never collected
+    /// (they aren't ancestors of `path`).
+    public func ancestorValues(at path: URL) -> [Value] {
+        let components = Self.decompose(path)
+        var node = root
+        var collected: [Value] = []
+        if let value = node.value {
+            collected.append(value)
+        }
+        for component in components {
+            guard let next = node.children[component] else { break }
+            node = next
+            if let value = node.value {
+                collected.append(value)
+            }
+        }
+        return collected
+    }
+
     // MARK: internals
 
     /// Decompose a URL into the path components a trie walk uses. We

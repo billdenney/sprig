@@ -92,6 +92,76 @@ struct PathTrieTests {
         #expect(trie.nearestValue(at: url("/repo-b/file.txt")) == nil)
     }
 
+    // MARK: ancestor-values walk (the load-bearing subscription lookup)
+
+    @Test("ancestorValues on empty trie returns []")
+    func ancestorValuesEmpty() {
+        let trie = PathTrie<String>()
+        #expect(trie.ancestorValues(at: url("/repo/file.txt")) == [])
+    }
+
+    @Test("ancestorValues collects every value along the path, root-first")
+    func ancestorValuesRootFirst() {
+        var trie = PathTrie<String>()
+        trie.insert("repo-level", at: url("/repo"))
+        trie.insert("dir-level", at: url("/repo/dir"))
+        trie.insert("file-level", at: url("/repo/dir/file.txt"))
+        #expect(
+            trie.ancestorValues(at: url("/repo/dir/file.txt"))
+                == ["repo-level", "dir-level", "file-level"]
+        )
+    }
+
+    @Test("ancestorValues skips intermediate nodes that have no value")
+    func ancestorValuesSkipsValuelessNodes() {
+        var trie = PathTrie<String>()
+        trie.insert("repo-level", at: url("/repo"))
+        // No value at /repo/dir; routing-only.
+        trie.insert("file-level", at: url("/repo/dir/file.txt"))
+        #expect(
+            trie.ancestorValues(at: url("/repo/dir/file.txt"))
+                == ["repo-level", "file-level"]
+        )
+    }
+
+    @Test("ancestorValues stops at the first missing path component")
+    func ancestorValuesStopsAtMissing() {
+        var trie = PathTrie<String>()
+        trie.insert("repo-level", at: url("/repo"))
+        trie.insert("dir-level", at: url("/repo/dir"))
+        // Query path diverges after /repo/dir — the deeper "/repo/other"
+        // segment isn't in the trie; we should still get the matched
+        // ancestors, but no further values.
+        #expect(
+            trie.ancestorValues(at: url("/repo/dir/other/leaf"))
+                == ["repo-level", "dir-level"]
+        )
+    }
+
+    @Test("ancestorValues does not collect values stored deeper than the query path")
+    func ancestorValuesIgnoresDescendants() {
+        var trie = PathTrie<String>()
+        trie.insert("repo-level", at: url("/repo"))
+        trie.insert("deeper", at: url("/repo/dir/file.txt"))
+        // Query at /repo/dir — `deeper` is at /repo/dir/file.txt, deeper
+        // than the query path, so it must not appear.
+        #expect(trie.ancestorValues(at: url("/repo/dir")) == ["repo-level"])
+    }
+
+    @Test("ancestorValues returns [] when the query shares no prefix with any entry")
+    func ancestorValuesNoSharedPrefix() {
+        var trie = PathTrie<String>()
+        trie.insert("repo-a", at: url("/repo-a"))
+        #expect(trie.ancestorValues(at: url("/repo-b/file.txt")) == [])
+    }
+
+    @Test("ancestorValues includes the value at the exact path when present")
+    func ancestorValuesIncludesExact() {
+        var trie = PathTrie<String>()
+        trie.insert("exact", at: url("/repo/dir/file.txt"))
+        #expect(trie.ancestorValues(at: url("/repo/dir/file.txt")) == ["exact"])
+    }
+
     // MARK: removal
 
     @Test("remove returns the removed value and updates count")
