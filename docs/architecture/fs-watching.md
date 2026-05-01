@@ -113,6 +113,58 @@ The unit tests in `EventCoalescerTests` exercise every priority interaction and 
 
 Tick-driven design (vs. timer-driven inside the coalescer) keeps testing deterministic — no `Task.sleep` in the test suite, just call `ingest` then `drain` with a chosen cutoff `Date`.
 
+## External git agents (ADR 0056)
+
+Sprig is rarely the only thing modifying a repo. The user runs `git commit` in a terminal, a CI worker on the same box pushes commits, another GUI tool clicks "stash". For Sprig's badges to stay accurate, the watcher has to detect changes that don't touch the worktree at all — `git commit` rewrites refs and the index but leaves worktree files byte-identical.
+
+Five complementary mechanisms in `GitCore.GitMetadataPaths`:
+
+### 1. Watch `.git/` recursively, in addition to the worktree
+
+The watcher subscribes to events under both. Storage-layout differences (loose refs vs packed-refs vs reftable in 2.45+) are absorbed transparently — any change inside `.git/` triggers the (filtered, debounced) refresh path.
+
+### 2. Resolve `.git` files to their actual gitdir
+
+`<worktree>/.git` is sometimes a *file* containing `gitdir: <path>` rather than a directory:
+
+- **Submodules**: `<super>/<sub>/.git` → `<super>/.git/modules/<sub>/`
+- **Linked worktrees** (`git worktree add`): `<linked>/.git` → `<original>/.git/worktrees/<name>/`
+
+`GitMetadataPaths.resolveGitDir(forWorktree:)` handles both shapes. Pointer paths can be relative or absolute. We don't follow nested pointer chains — git doesn't support them.
+
+### 3. Recursive submodule + linked-worktree discovery
+
+`GitMetadataPaths.submoduleWorktrees(at:runner:)` runs `git submodule status --recursive` and returns absolute URLs for every submodule worktree, top-level *and* nested. Includes uninitialized submodules so callers can render the `submodule-init-needed` badge.
+
+`GitMetadataPaths.linkedWorktrees(at:)` reads `<gitDir>/worktrees/*/gitdir` files and returns each linked worktree's root URL.
+
+The agent watches `<worktree>` + `<gitDir>` + every discovered submodule's `.git/` + every linked worktree's `.git/`. For a 5-level-deep submodule structure, that's 6 watch trees per top-level repo.
+
+### 4. Filter lock and temp files at the per-event layer
+
+`GitMetadataPaths.isLockOrTempPath(_:in:gitVersion:)` returns true for paths that are git's transient artifacts:
+
+- **`*.lock`** — atomic-write-rename pattern. Final rename to non-`.lock` is the real event.
+- **`objects/pack/tmp_*` / `objects/pack/.tmp-*`** — pack-write temps from `git fetch`/`git gc`/`git repack`.
+- **`objects/incoming-*/`** — fetch staging directory (git 2.40+).
+
+Filtering happens inside the watcher's coalescer so RepoState sees only "real" change events.
+
+### 5. Defer status refreshes while a git operation is in flight
+
+`GitMetadataPaths.gitOperationInFlight(in:gitVersion:)` returns true when any of `index.lock`, `HEAD.lock`, `packed-refs.lock`, `config.lock`, or `shallow.lock` exists. The coalescer checks this before draining a tick: if a lock is present, defer to next tick. Typical lock duration is <100 ms, so the cost is one tick of badge-update latency. The benefit is correctness — we never query `git status` mid-mutation and never observe inconsistent state.
+
+### Version-aware hooks (reserved)
+
+The four critical APIs accept an optional `GitVersion` parameter that today's implementation ignores. The plumbing is there for future divergent rules — when git's lockfile patterns or storage layout change, updates land at the existing API surface without call-site refactors.
+
+### What's deferred
+
+- **Initial-clone detection**: skip refresh when `.git/HEAD` exists but `git rev-parse HEAD` fails. M2 agent work.
+- **`core.fsmonitor` protocol versioning**: M3.
+- **`core.fsmonitor` trust-but-verify** (periodic real `git status --no-fsmonitor` to catch hook drift): M3.
+- **Sprig-spawned-git suppression**: when Sprig is itself running `git status`, skip the watcher refresh queued by our own `.git/` writes. M2 agent work.
+
 ## `core.fsmonitor` integration (planned M2/M3)
 
 Per ADR 0024, Sprig is the single source of truth for filesystem state on repos it watches. Integration plan:
