@@ -74,6 +74,11 @@ public struct Runner: Sendable {
     /// should either (a) check
     /// ``GitMetadataPaths/gitOperationInFlight(in:gitVersion:)`` first
     /// and defer, or (b) catch the `nonZeroExit` and retry.
+    ///
+    // TODO(R15-F1): add a `retryOnLockContention: RetryPolicy = .none`
+    // parameter that auto-detects the `Unable to create '*.lock': File
+    // exists` stderr signature and retries with exponential backoff.
+    // Tracker: docs/planning/audit-followups.md
     public func run(
         _ arguments: [String],
         cwd: URL? = nil,
