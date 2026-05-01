@@ -92,6 +92,45 @@ public actor RepoStateStore {
         }
     }
 
+    /// Atomic capture → apply → capture → diff.
+    ///
+    /// Returns the set of paths whose badge changed between the prior
+    /// snapshot and this one. Callers route each ``PathBadgeChange``
+    /// through ``SubscriptionRegistry/matchingSubscriptions(for:)``
+    /// and emit one ``IPCSchema/AgentEvent/badgeChanged`` event per
+    /// (subscriber, change) pair.
+    ///
+    /// Atomic with respect to actor isolation — no other `apply` can
+    /// interleave between the before-capture and after-capture, so
+    /// the diff describes exactly the transition this call applied.
+    /// Callers don't need to maintain their own "prior badges"
+    /// dictionary.
+    ///
+    /// **Cost.** O(n) where n is the number of badged paths in either
+    /// snapshot. The two `currentBadges()` walks dominate. Acceptable
+    /// for the M2 budget (badge counts are bounded by porcelain output
+    /// size, typically <1000 in steady state); a more incremental
+    /// path can land later if the perf budget tightens.
+    @discardableResult
+    public func applyAndDiff(_ status: PorcelainV2Status) -> [PathBadgeChange] {
+        let before = currentBadgesSnapshot()
+        apply(status)
+        let after = currentBadgesSnapshot()
+        return BadgeDiff.compute(before: before, after: after)
+    }
+
+    /// Snapshot of every (path → badge) pair currently in the store.
+    ///
+    /// Useful for diagnostics, snapshot-then-restore patterns, and
+    /// any caller that wants to compute a diff out-of-band rather
+    /// than via ``applyAndDiff(_:)``. Most agent code should prefer
+    /// `applyAndDiff` so the snapshots are taken under the actor.
+    ///
+    /// Cost: O(n) — walks every entry in the trie.
+    public func currentBadges() -> [URL: BadgeIdentifier] {
+        currentBadgesSnapshot()
+    }
+
     // MARK: queries
 
     /// Badge for `path`. Returns nil if no entry exists at the path
@@ -147,5 +186,22 @@ public actor RepoStateStore {
         case let .untracked(path): path
         case let .ignored(path): path
         }
+    }
+
+    /// Walk the trie and rebuild absolute URLs from each entry's path
+    /// components. The trie's component form (split on `/`) round-
+    /// trips back to a POSIX absolute URL via
+    /// `URL(fileURLWithPath: "/" + components.joined(...))`. On
+    /// Windows this needs revisiting alongside `PathTrie.decompose`
+    /// (M2-Win). Comparing against the original absolute URL we
+    /// inserted gives us a key that tests round-trip correctly.
+    private func currentBadgesSnapshot() -> [URL: BadgeIdentifier] {
+        var result: [URL: BadgeIdentifier] = [:]
+        for entry in trie.entries() {
+            let path = "/" + entry.components.joined(separator: "/")
+            let url = URL(fileURLWithPath: path).standardized
+            result[url] = entry.value
+        }
+        return result
     }
 }

@@ -92,6 +92,41 @@ public struct PathTrie<Value: Sendable>: Sendable {
         count = 0
     }
 
+    // MARK: enumeration
+
+    /// Yield every stored `(components, value)` pair, depth-first with
+    /// children visited in lexicographic key order. Order is
+    /// deterministic for a given trie state.
+    ///
+    /// Components are returned in the same form ``decompose(_:)``
+    /// produces: split on `/`, with empty entries filtered. Callers
+    /// reconstitute back to URLs as needed (typically with the
+    /// containing repo root as anchor) — the trie itself is path-form
+    /// agnostic.
+    ///
+    /// Cost: O(n) where n is the number of stored entries (every node
+    /// is visited once). Callers diff-checking large repos should
+    /// cache the result rather than reissuing this on every query.
+    public func entries() -> [(components: [String], value: Value)] {
+        var result: [(components: [String], value: Value)] = []
+        Self.collect(node: root, prefix: [], into: &result)
+        return result
+    }
+
+    private static func collect(
+        node: Node,
+        prefix: [String],
+        into result: inout [(components: [String], value: Value)]
+    ) {
+        if let value = node.value {
+            result.append((components: prefix, value: value))
+        }
+        for key in node.children.keys.sorted() {
+            guard let child = node.children[key] else { continue }
+            collect(node: child, prefix: prefix + [key], into: &result)
+        }
+    }
+
     // MARK: lookup
 
     /// Exact-path lookup. Returns nil if the path has no stored value,

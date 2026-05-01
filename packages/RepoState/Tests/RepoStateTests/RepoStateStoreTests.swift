@@ -199,4 +199,123 @@ struct RepoStateStoreTests {
         #expect(await store.badge(for: withDot) == .untracked)
         #expect(await store.badge(for: withDotDot) == .untracked)
     }
+
+    // MARK: currentBadges() snapshot
+
+    @Test("currentBadges returns an empty map on a fresh store")
+    func currentBadgesEmpty() async {
+        let root = makeRepoRoot()
+        let store = RepoStateStore(repoRoot: root)
+        #expect(await store.currentBadges().isEmpty)
+    }
+
+    @Test("currentBadges round-trips every applied entry as an absolute URL")
+    func currentBadgesRoundTrip() async {
+        let root = makeRepoRoot().standardized
+        let store = RepoStateStore(repoRoot: root)
+        await store.apply(status(entries: [
+            .untracked(path: "new.txt"),
+            ordinary(index: .unmodified, worktree: .modified, path: "dir/edited.txt")
+        ]))
+        let snapshot = await store.currentBadges()
+        #expect(snapshot.count == 2)
+        #expect(snapshot[root.appendingPathComponent("new.txt").standardized] == .untracked)
+        #expect(snapshot[root.appendingPathComponent("dir/edited.txt").standardized] == .modified)
+    }
+
+    // MARK: applyAndDiff()
+
+    @Test("applyAndDiff against an empty store reports every new entry as nil → badge")
+    func applyAndDiffFirstApply() async {
+        let root = makeRepoRoot().standardized
+        let store = RepoStateStore(repoRoot: root)
+        let changes = await store.applyAndDiff(status(entries: [
+            .untracked(path: "new.txt")
+        ]))
+        #expect(changes.count == 1)
+        #expect(changes[0].path == root.appendingPathComponent("new.txt").standardized)
+        #expect(changes[0].before == nil)
+        #expect(changes[0].after == .untracked)
+    }
+
+    @Test("applyAndDiff reports nothing when the snapshot is identical to the prior one")
+    func applyAndDiffNoChange() async {
+        let root = makeRepoRoot()
+        let store = RepoStateStore(repoRoot: root)
+        let snap = status(entries: [.untracked(path: "x.txt")])
+        await store.apply(snap)
+        let changes = await store.applyAndDiff(snap)
+        #expect(changes.isEmpty)
+    }
+
+    @Test("applyAndDiff captures cleared paths as before-non-nil → after-nil")
+    func applyAndDiffCleared() async {
+        let root = makeRepoRoot().standardized
+        let store = RepoStateStore(repoRoot: root)
+        await store.apply(status(entries: [.untracked(path: "x.txt")]))
+        // The new snapshot has no entries — x.txt became clean.
+        let changes = await store.applyAndDiff(status())
+        #expect(changes.count == 1)
+        #expect(changes[0].path == root.appendingPathComponent("x.txt").standardized)
+        #expect(changes[0].before == .untracked)
+        #expect(changes[0].after == nil)
+    }
+
+    @Test("applyAndDiff reports a transitioning badge with both before and after set")
+    func applyAndDiffTransitionedBadge() async {
+        let root = makeRepoRoot().standardized
+        let store = RepoStateStore(repoRoot: root)
+        await store.apply(status(entries: [.untracked(path: "x.txt")]))
+        // Same path, different badge — became modified after staging.
+        let changes = await store.applyAndDiff(status(entries: [
+            ordinary(index: .added, worktree: .unmodified, path: "x.txt")
+        ]))
+        #expect(changes.count == 1)
+        #expect(changes[0].path == root.appendingPathComponent("x.txt").standardized)
+        #expect(changes[0].before == .untracked)
+        #expect(changes[0].after == .added)
+    }
+
+    @Test("applyAndDiff returns changes sorted by path for stable iteration")
+    func applyAndDiffSortedOutput() async {
+        let root = makeRepoRoot().standardized
+        let store = RepoStateStore(repoRoot: root)
+        // Changes affecting multiple paths in non-alphabetic insert order.
+        let changes = await store.applyAndDiff(status(entries: [
+            .untracked(path: "z.txt"),
+            .untracked(path: "a.txt"),
+            .untracked(path: "m.txt")
+        ]))
+        let paths = changes.map(\.path.path)
+        #expect(paths == paths.sorted())
+    }
+
+    @Test("applyAndDiff over an unrelated transition reports only the changed path")
+    func applyAndDiffMixedSnapshot() async {
+        let root = makeRepoRoot().standardized
+        let store = RepoStateStore(repoRoot: root)
+        // Initial: a untracked, b untracked.
+        await store.apply(status(entries: [
+            .untracked(path: "a.txt"),
+            .untracked(path: "b.txt")
+        ]))
+        // Next: a still untracked, b became modified-staged, c is new.
+        let changes = await store.applyAndDiff(status(entries: [
+            .untracked(path: "a.txt"),
+            ordinary(index: .added, worktree: .unmodified, path: "b.txt"),
+            .untracked(path: "c.txt")
+        ]))
+        let byPath = Dictionary(uniqueKeysWithValues: changes.map {
+            ($0.path.lastPathComponent, $0)
+        })
+        #expect(changes.count == 2)
+        // a.txt didn't change → not in diff
+        #expect(byPath["a.txt"] == nil)
+        // b.txt transitioned untracked → added
+        #expect(byPath["b.txt"]?.before == .untracked)
+        #expect(byPath["b.txt"]?.after == .added)
+        // c.txt newly appeared
+        #expect(byPath["c.txt"]?.before == nil)
+        #expect(byPath["c.txt"]?.after == .untracked)
+    }
 }

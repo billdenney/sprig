@@ -162,6 +162,58 @@ struct PathTrieTests {
         #expect(trie.ancestorValues(at: url("/repo/dir/file.txt")) == ["exact"])
     }
 
+    // MARK: entries() enumeration
+
+    @Test("entries on an empty trie returns []")
+    func entriesEmpty() {
+        let trie = PathTrie<String>()
+        #expect(trie.entries().isEmpty)
+    }
+
+    @Test("entries returns one tuple per stored path")
+    func entriesCountMatchesInsertions() {
+        var trie = PathTrie<String>()
+        trie.insert("a", at: url("/repo/a.txt"))
+        trie.insert("b", at: url("/repo/b.txt"))
+        trie.insert("c", at: url("/repo/dir/c.txt"))
+        #expect(trie.entries().count == 3)
+    }
+
+    @Test("entries skips routing-only nodes that don't carry a value")
+    func entriesSkipsValuelessNodes() {
+        var trie = PathTrie<String>()
+        // Only the leaf has a value; intermediate nodes /repo/, /repo/dir/
+        // are routing-only.
+        trie.insert("leaf", at: url("/repo/dir/leaf.txt"))
+        let entries = trie.entries()
+        #expect(entries.count == 1)
+        #expect(entries[0].value == "leaf")
+        #expect(entries[0].components == ["repo", "dir", "leaf.txt"])
+    }
+
+    @Test("entries yields children in lexicographic key order (deterministic)")
+    func entriesLexOrder() {
+        var trie = PathTrie<Int>()
+        trie.insert(3, at: url("/repo/c"))
+        trie.insert(1, at: url("/repo/a"))
+        trie.insert(2, at: url("/repo/b"))
+        let names = trie.entries().map { $0.components.last! }
+        #expect(names == ["a", "b", "c"])
+    }
+
+    @Test("entries visits an ancestor's value before its descendants (depth-first)")
+    func entriesDepthFirstAncestorFirst() {
+        var trie = PathTrie<String>()
+        trie.insert("dir-value", at: url("/repo/dir"))
+        trie.insert("file-value", at: url("/repo/dir/file.txt"))
+        let entries = trie.entries()
+        #expect(entries.count == 2)
+        // /repo/dir comes before /repo/dir/file.txt because depth-first
+        // emits a node's value (when present) before recursing into kids.
+        #expect(entries[0].value == "dir-value")
+        #expect(entries[1].value == "file-value")
+    }
+
     // MARK: removal
 
     @Test("remove returns the removed value and updates count")
