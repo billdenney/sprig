@@ -131,4 +131,11 @@ public enum IPCError: Error, Equatable, Sendable {
     /// type the receiver doesn't know. Forward-compat case: a newer
     /// agent sending a message kind a receiver doesn't yet handle.
     case unknownMessageKind(String)
+
+    /// The envelope's outer JSON couldn't be parsed at all (truncated
+    /// bytes, non-JSON, missing required `kind` / `id` /
+    /// `schemaVersion` fields). Description carries the underlying
+    /// `DecodingError`'s short summary for log / diagnostic use; do
+    /// not pattern-match the string.
+    case parseFailure(description: String)
 }
