@@ -39,6 +39,12 @@ import Foundation
 /// ``close()``-ing and re-initializing on any suspicion of repack.
 /// A future `restart()` convenience method (close + re-init in one
 /// call) is tracked in `docs/planning/multi-agent-audit-2026-05.md`.
+// TODO(R15-F2): add `restart() async` method that closes the existing
+// process and spins up a new one. Wire watcher events on
+// `<gitDir>/objects/pack/` to call it on every CatFileBatch instance
+// for that repo (M2 agent work). Must close before M3 ships any
+// feature that reads pack-resident objects regularly. Tracker:
+// docs/planning/audit-followups.md
 public actor CatFileBatch {
     private var process: Process?
     private var stdin: FileHandle?

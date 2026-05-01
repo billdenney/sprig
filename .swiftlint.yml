@@ -12,6 +12,22 @@ excluded:
   - .swiftpm
   - DerivedData
 
+# Rules we deliberately turn off:
+# - `todo` — we DO allow TODO markers when they're tied to an audit
+#   finding (e.g. `// TODO(R15-F1):`) tracked in
+#   `docs/planning/audit-followups.md`. Bare TODOs are still
+#   discouraged via code review; the audit-tracker discipline (per
+#   CLAUDE.md "Audit follow-ups must be tracked and closed") replaces
+#   SwiftLint's blanket ban.
+# - `orphaned_doc_comment` — interleaving `///` doc-comments with
+#   `// TODO(...)` markers right above the documented declaration is
+#   a deliberate pattern. The rule's "every /// must immediately
+#   precede a declaration" stance produces false positives in this
+#   shape.
+disabled_rules:
+  - todo
+  - orphaned_doc_comment
+
 line_length:
   warning: 140
   error: 200

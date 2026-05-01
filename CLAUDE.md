@@ -86,6 +86,17 @@ Re-enabling cadence: as soon as the underlying bug is fixed (or the environment 
 
 The intent: a disable is a debt note we promise to pay quickly. We never accumulate dead disabled-on-CI tests; if we did, the diff between "what CI tests" and "what we ship" would silently widen. Disabled tests get reviewed at every milestone exit ([`docs/planning/milestones.md`](docs/planning/milestones.md)).
 
+### Audit follow-ups must be tracked and closed
+
+Every audit (per [`docs/planning/risk-register.md`](docs/planning/risk-register.md)'s audit obligations) produces findings. The deferred fixes — failure modes we've identified but aren't fixing immediately — go in [`docs/planning/audit-followups.md`](docs/planning/audit-followups.md). Same discipline as disabled tests: durable in-repo tracker beats scattered issues, every entry has a trigger condition that closes it, and milestone exits review what's still open.
+
+When you add a deferred fix:
+
+1. **In-code marker:** `// TODO(<RiskID>-F<N>): <one-line>` at every relevant call site, pointing at `docs/planning/audit-followups.md`. Don't leave bare `TODO`s — the audit ID is what makes them grep-able.
+2. **Tracker entry** under "Pending" in `audit-followups.md` with severity, symptom, proposed fix, trigger to ship, and owner.
+
+When the fix lands, the closing PR removes the in-code TODO markers and moves the tracker entry to "Closed" in the same diff. Splitting them creates orphan markers.
+
 ## Plan file (source of truth)
 
 The approved plan lives at `/home/bill/.claude/plans/please-switch-to-plan-glittery-corbato.md`. When in doubt, consult it. The plan is the union of all ratified ADRs and the roadmap.

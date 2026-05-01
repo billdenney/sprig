@@ -74,6 +74,11 @@ public actor RepoStateStore {
     /// `apply(_:sequence:)` overload with a monotonic guard will
     /// belt-and-suspenders against agent bugs (tracked in
     /// `docs/planning/multi-agent-audit-2026-05.md`, F3).
+    // TODO(R15-F3): add `apply(_:sequence:)` overload taking a
+    // monotonic UInt64 (or Date). Store keeps the highest seen and
+    // no-ops older inputs. Trigger: when the agent's coalescer
+    // dispatches multiple concurrent `git status` calls. Tracker:
+    // docs/planning/audit-followups.md
     public func apply(_ status: PorcelainV2Status) {
         trie.removeAll()
         branchInfo = status.branch
@@ -106,6 +111,11 @@ public actor RepoStateStore {
     /// path's casing to whatever git emitted before calling. Per-
     /// platform normalization at the trie boundary is a planned
     /// M2 agent improvement (audit doc F4).
+    // TODO(R15-F4): add a per-platform path-normalizer at the trie
+    // boundary. Detect volume case-sensitivity via
+    // `volumeSupportsCaseSensitiveNames`; on case-insensitive volumes,
+    // case-fold before insert and lookup. Tracker:
+    // docs/planning/audit-followups.md
     public func badge(for path: URL) -> BadgeIdentifier? {
         trie.nearestValue(at: path.standardized)
     }
