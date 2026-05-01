@@ -65,5 +65,6 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0053 | Day-1 cross-platform scaffolding commitment                                | accepted |
 | 0054 | 1.0 platform tier — macOS + Windows GUI shells, Linux engine-only          | accepted (partially supersedes 0009, 0030, 0034) |
 | 0055 | Windows GUI stack — swift-cross-ui                                         | accepted |
+| 0056 | External-git-agent awareness — watch `.git/`, defer on lock files          | accepted |
 
 ADRs 0001–0053 were ratified simultaneously in the initial scaffolding, based on the planning dialogue captured in the master plan file. Subsequent ADRs (0054+) follow the normal one-per-PR cadence.

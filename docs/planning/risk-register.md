@@ -104,6 +104,18 @@ Severity = likelihood × impact, both 1 (low) – 5 (high). 25 = existential, 1 
 - **Mitigation:** 24-hour recovery target (`docs/ci/self-hosted.md`). Fallback path: temporary build on maintainer's primary Mac. Keychain backup procedure with annual restore drill.
 - **Owner:** maintainer.
 
+### R15 — Multi-agent git interactions in prior code (severity 9)
+
+- **Likelihood:** 4. ADR 0056 introduced explicit handling for external git agents (terminal `git commit`, second GUI, CI on the same box). Prior code — `RepoStateStore`, `WatcherKit`, `GitCore.Runner`, the benchmark fixtures — was written under the implicit assumption that Sprig is the only writer. Some of those design choices may misbehave when an external agent mutates state concurrently.
+- **Impact:** Variable. Best case: a one-line bug surfaces during M2 integration testing. Worst case: a load-bearing assumption (e.g., "snapshot replace is fine because we always have the latest porcelain output") breaks under concurrent writes and produces wrong badges.
+- **Mitigation:** **Audit obligation** — a follow-up PR after this one reviews every Tier 1 / Tier 2 site that talks to git or interprets repo state, asking "what happens if a different agent has mutated `.git/` between two of our reads?" Specific files to audit:
+  - `GitCore.Runner` — index-lock contention with concurrent `git add`; retry policy?
+  - `GitCore.CatFileBatch` — long-lived process; what if `git gc` rewrites packs underneath?
+  - `RepoStateStore.apply` — whole-snapshot replace; coherent across two refreshes if external commit lands between?
+  - `WatcherKit.PollingFileWatcher` — `URL.resourceValues` caching + concurrent renames
+  - `Benchmarks/SprigCoreBenchmarks` — synthesizers assume single-writer; load test with concurrent writes?
+- **Owner:** maintainer (audit) + me (drives the audit PR).
+
 ## Retired / closed risks
 
 (none yet — this section will populate as risks resolve or get reframed)
