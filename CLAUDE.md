@@ -70,10 +70,10 @@ AI features (merge conflict suggestions, commit message drafting, PR description
 
 - Unit tests colocated with each SPM package under `Tests/<Pkg>Tests/`.
 - Integration tests in `tests/integration/` spawn real git across the pinned version matrix (2.39 Apple-bundled, current Homebrew, latest upstream).
-- E2E tests in `tests/e2e/` drive a signed build via XCUITest on a self-hosted macOS runner.
 - Snapshot tests in `tests/snapshots/` cover diff and merge rendering.
 - AI evaluation tests in `tests/ai-evals/` run the held-out conflict corpus against every configured provider.
 - Benchmarks in `tests/benchmarks/` gate the 100k-file performance budget (<2% CPU steady, <150 MB RAM, <100 ms badge latency).
+- **No E2E suite today.** XCUITest-driven end-to-end testing of the macOS shell needs a self-hosted macOS-arm64 runner (real Finder + signing cert + notarization), which we don't have. When that runner is provisioned, the suite gets re-introduced under `tests/e2e/` with a matching workflow; until then we rely on integration tests + snapshot tests for the surfaces we can cover on hosted CI.
 
 ### Disabled CI tests must be tracked and re-enabled ASAP
 

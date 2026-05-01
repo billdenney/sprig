@@ -65,7 +65,7 @@ The repo is organized into three tiers so that platform shells are additive — 
 - [`packages/`](packages/) — Swift packages that form the **portable core** (Tier 1) and **platform adapters** (Tier 2). Every package builds and tests on macOS, Linux, and Windows toolchains every PR. Adapter packages have `Sources/{Mac,Linux,Windows}/` subdirs; portable fallbacks live alongside (e.g. `PollingFileWatcher`).
 - [`cli/sprigctl/`](cli/sprigctl/) — the `sprigctl` command-line companion. First-class on all three OSes.
 - [`docs/`](docs/) — architecture docs, ADRs, research, planning, UX notes.
-- [`tests/`](tests/) — integration, E2E, snapshot, benchmark, AI-eval suites.
+- [`tests/`](tests/) — integration, snapshot, benchmark, AI-eval suites.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to propose changes and [`docs/decisions/`](docs/decisions/) for the Architecture Decision Records (ADRs) that shaped the design.
 

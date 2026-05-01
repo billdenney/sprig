@@ -73,10 +73,10 @@ See `tests/README.md` for the full test strategy. Summary:
 
 - **Unit tests** colocated per package (`packages/<Pkg>/Tests/<Pkg>Tests/`).
 - **Integration tests** in `tests/integration/` spawn real `git` across a version matrix.
-- **E2E tests** in `tests/e2e/` use XCUITest on a self-hosted macOS runner.
 - **Snapshot tests** in `tests/snapshots/` cover diff and merge rendering.
 - **Benchmarks** in `tests/benchmarks/` gate the performance budget.
 - **AI evals** in `tests/ai-evals/` run a held-out conflict corpus when AIKit or prompts change.
+- **No E2E suite today.** XCUITest against the real macOS shell needs a self-hosted runner we don't yet operate; the suite gets re-introduced under `tests/e2e/` when one is provisioned.
 
 ## Good first issues
 
