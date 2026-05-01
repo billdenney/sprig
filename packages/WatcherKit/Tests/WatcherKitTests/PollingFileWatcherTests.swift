@@ -120,6 +120,20 @@ struct PollingFileWatcherRealFSTests {
         }
     }
 
+    /// Pre-write delay for the live-watcher tests below. The watcher's
+    /// first snapshot is taken inside a Task scheduled when `start()`
+    /// returns; the file modification has to happen *after* that
+    /// snapshot or there's nothing for the diff to surface.
+    ///
+    /// 500 ms is generous: macOS / Linux runners settle in ~30–50 ms,
+    /// so this is mostly headroom. The headroom matters on Windows
+    /// hosted runners — main runs on commits 85ca3791 (PR #22) and
+    /// 2214e364 (PR #23) failed all three tests with `events → []`,
+    /// indicating the snapshot Task hadn't started before the
+    /// 100/150 ms file write fired. Bumping to 500 ms eliminates the
+    /// race; it adds ~1.5 s to total suite time, which is fine.
+    private static let preWriteDelayNs: UInt64 = 500_000_000
+
     @Test("creating a file produces a .created event")
     func createDetected() async throws {
         let root = try makeTempDir("create")
@@ -130,7 +144,7 @@ struct PollingFileWatcherRealFSTests {
 
         // Allow the initial snapshot to settle, then introduce a file.
         Task {
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
             try? Data("hi\n".utf8).write(to: root.appendingPathComponent("hello.txt"))
         }
 
@@ -154,7 +168,7 @@ struct PollingFileWatcherRealFSTests {
         let stream = watcher.start(paths: [root])
 
         Task {
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
             try? Data("one\ntwo\n".utf8).write(to: file)
         }
 
@@ -178,7 +192,7 @@ struct PollingFileWatcherRealFSTests {
         let stream = watcher.start(paths: [root])
 
         Task {
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
             try? FileManager.default.removeItem(at: file)
         }
 
