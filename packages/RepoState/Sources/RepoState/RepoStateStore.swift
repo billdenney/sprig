@@ -61,6 +61,19 @@ public actor RepoStateStore {
     /// in porcelain output) get implicit "no entry → no badge"
     /// treatment, so the shell extension queries rely on
     /// ``badge(for:)`` returning nil to know "this path is clean."
+    ///
+    /// **Multi-agent caveat (R15 audit, F3).** Callers MUST serialize
+    /// `apply()` calls. The actor isolation guarantees one `apply()`
+    /// runs at a time, but doesn't reject *older* snapshots. If two
+    /// `git status` invocations land out of order (the t=10 result
+    /// finishes before the t=0 result), the later call clobbers
+    /// fresher state with stale data.
+    ///
+    /// The agent's coalescer prevents this by having only one
+    /// `git status` in flight at a time. A future
+    /// `apply(_:sequence:)` overload with a monotonic guard will
+    /// belt-and-suspenders against agent bugs (tracked in
+    /// `docs/planning/multi-agent-audit-2026-05.md`, F3).
     public func apply(_ status: PorcelainV2Status) {
         trie.removeAll()
         branchInfo = status.branch
@@ -83,6 +96,16 @@ public actor RepoStateStore {
     /// Uses ``PathTrie/nearestValue(at:)`` so that ignored
     /// directories propagate their `.ignored` badge to all children
     /// without needing one entry per child.
+    ///
+    /// **Case-sensitivity caveat (R15 audit, F4).** Lookups are
+    /// byte-exact. macOS HFS+ and Windows NTFS are case-insensitive
+    /// by default; git stores paths case-sensitively. If porcelain
+    /// reports `Foo.swift` and the shell extension queries
+    /// `foo.swift`, the lookup misses. Callers operating on
+    /// case-insensitive volumes are responsible for normalizing the
+    /// path's casing to whatever git emitted before calling. Per-
+    /// platform normalization at the trie boundary is a planned
+    /// M2 agent improvement (audit doc F4).
     public func badge(for path: URL) -> BadgeIdentifier? {
         trie.nearestValue(at: path.standardized)
     }

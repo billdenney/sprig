@@ -20,6 +20,25 @@ import Foundation
 /// object name written to stdin, git emits one of:
 /// - `<sha> <type> <size>\n<content bytes>\n` for found objects
 /// - `<input> missing\n` for unknown ones
+///
+/// ## Multi-agent caveat (R15 audit, F2)
+///
+/// `git cat-file --batch` mmaps pack files when it first reads
+/// pack-resident objects. When **another git agent** (`git gc` from
+/// the terminal, a CI run, another GUI) rewrites or removes those
+/// packs, our process keeps the stale mappings. Subsequent reads can:
+///
+/// - Return wrong bytes (mmap'd region of an orphaned pack).
+/// - Fail with `objectNotFound` (the object got moved to a new pack).
+/// - Race the rewrite and corrupt content silently.
+///
+/// This is a documented git limitation. Callers must restart the
+/// `CatFileBatch` instance after a known repacking event. The agent
+/// will wire this to watcher events on `<gitDir>/objects/pack/` once
+/// the M2 agent code lands; until then, callers are responsible for
+/// ``close()``-ing and re-initializing on any suspicion of repack.
+/// A future `restart()` convenience method (close + re-init in one
+/// call) is tracked in `docs/planning/multi-agent-audit-2026-05.md`.
 public actor CatFileBatch {
     private var process: Process?
     private var stdin: FileHandle?
