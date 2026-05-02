@@ -23,14 +23,25 @@ public struct Runner: Sendable {
     /// default (see ``scrubbedEnvironment(base:)``).
     public var environmentOverrides: [String: String?]
 
+    /// Optional log that records every `git` invocation as a
+    /// ``LoggedCommand``. When nil, no logging happens (the default
+    /// preserves existing test/CLI behavior). When non-nil, the
+    /// runner appends an entry on every ``run(_:cwd:stdin:throwOnNonZero:)``
+    /// call after the process exits. Per ADR 0057, the agent owns
+    /// one of these and shares it across every per-repo runner so
+    /// the Commands panel sees the full agent-wide command history.
+    public var log: RunnerLog?
+
     public init(
         gitPath: String? = nil,
         defaultWorkingDirectory: URL? = nil,
-        environmentOverrides: [String: String?] = [:]
+        environmentOverrides: [String: String?] = [:],
+        log: RunnerLog? = nil
     ) {
         self.gitPath = gitPath
         self.defaultWorkingDirectory = defaultWorkingDirectory
         self.environmentOverrides = environmentOverrides
+        self.log = log
     }
 
     /// Captured output of a completed invocation.
@@ -86,10 +97,80 @@ public struct Runner: Sendable {
         throwOnNonZero: Bool = true
     ) async throws -> Output {
         let resolvedPath = try resolveGitPath()
+        let resolvedCwd = cwd ?? defaultWorkingDirectory
+        let result = try await spawnAndWait(
+            executablePath: resolvedPath,
+            arguments: arguments,
+            cwd: resolvedCwd,
+            stdin: stdin
+        )
+
+        // Record to the log on every exit path (success, non-zero,
+        // signal). The log is a diagnostic record of *what was run*;
+        // it's not gated on success. Only the throw paths below
+        // surface errors to the caller; the log captures equally.
+        await recordToLogIfConfigured(result: result)
+
+        if result.terminationReason == .uncaughtSignal {
+            throw GitError.signalled(
+                command: arguments,
+                signal: result.exitCode,
+                stderr: result.stderrString
+            )
+        }
+        if throwOnNonZero, result.exitCode != 0 {
+            throw GitError.nonZeroExit(
+                command: arguments,
+                exitCode: result.exitCode,
+                stderr: result.stderrString,
+                stdout: result.stdoutString
+            )
+        }
+        return Output(
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exitCode: result.exitCode,
+            commandLine: result.argv
+        )
+    }
+
+    /// Captured output of a single completed Process invocation.
+    /// Internal — `Output` is the public-API equivalent (without the
+    /// log-record fields).
+    private struct SpawnResult {
+        let argv: [String]
+        let cwd: URL?
+        let startedAt: Date
+        let finishedAt: Date
+        let exitCode: Int32
+        let terminationReason: Process.TerminationReason
+        let stdout: Data
+        let stderr: Data
+
+        var stdoutString: String {
+            String(data: stdout, encoding: .utf8) ?? ""
+        }
+
+        var stderrString: String {
+            String(data: stderr, encoding: .utf8) ?? ""
+        }
+    }
+
+    /// Spawn a child process and capture its full output. Extracted
+    /// from ``run(_:cwd:stdin:throwOnNonZero:)`` so that function
+    /// stays under the function-body-length lint cap. Throws only
+    /// for I/O failures during spawn or pipe reads — exit-status
+    /// interpretation is the caller's job.
+    private func spawnAndWait(
+        executablePath: String,
+        arguments: [String],
+        cwd: URL?,
+        stdin: Data?
+    ) async throws -> SpawnResult {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: resolvedPath)
+        process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
-        process.currentDirectoryURL = cwd ?? defaultWorkingDirectory
+        process.currentDirectoryURL = cwd
         process.environment = scrubbedEnvironment(base: ProcessInfo.processInfo.environment)
 
         let outPipe = Pipe()
@@ -106,47 +187,49 @@ public struct Runner: Sendable {
         }
 
         // Pre-register termination signaling BEFORE `run()`. Plain
-        // `Process.waitUntilExit()` deadlocks on macOS for fast-exiting
-        // children (the `NSTaskDidTerminateNotification` setup loses the
-        // race against the child's exit and the runloop waits forever).
-        // See `ProcessExit.swift` for the full diagnosis.
+        // `Process.waitUntilExit()` deadlocks on macOS for fast-
+        // exiting children (the `NSTaskDidTerminateNotification`
+        // setup loses the race against the child's exit and the
+        // runloop waits forever). See `ProcessExit.swift` for the
+        // full diagnosis.
         let terminationGate = ProcessTerminationGate()
         process.terminationHandler = { _ in terminationGate.signal() }
 
         try process.run()
+        let startedAt = Date()
 
         async let stdoutBytes = Self.readToEnd(outPipe.fileHandleForReading)
         async let stderrBytes = Self.readToEnd(errPipe.fileHandleForReading)
         let stdout = try await stdoutBytes
         let stderr = try await stderrBytes
         await terminationGate.wait(processIsRunning: { process.isRunning })
+        let finishedAt = Date()
 
-        let reason = process.terminationReason
-        let status = process.terminationStatus
-
-        if reason == .uncaughtSignal {
-            throw GitError.signalled(
-                command: arguments,
-                signal: status,
-                stderr: String(data: stderr, encoding: .utf8) ?? ""
-            )
-        }
-
-        if throwOnNonZero, status != 0 {
-            throw GitError.nonZeroExit(
-                command: arguments,
-                exitCode: status,
-                stderr: String(data: stderr, encoding: .utf8) ?? "",
-                stdout: String(data: stdout, encoding: .utf8) ?? ""
-            )
-        }
-
-        return Output(
+        return SpawnResult(
+            argv: [executablePath] + arguments,
+            cwd: cwd,
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            exitCode: process.terminationStatus,
+            terminationReason: process.terminationReason,
             stdout: stdout,
-            stderr: stderr,
-            exitCode: status,
-            commandLine: [resolvedPath] + arguments
+            stderr: stderr
         )
+    }
+
+    /// Append a ``LoggedCommand`` to ``log`` (no-op if `log` is nil).
+    private func recordToLogIfConfigured(result: SpawnResult) async {
+        guard let log else { return }
+        let entry = LoggedCommand(
+            argv: result.argv,
+            cwd: result.cwd?.path,
+            startedAt: result.startedAt,
+            finishedAt: result.finishedAt,
+            exitCode: result.exitCode,
+            stderrTail: LoggedCommand.truncateStderr(result.stderrString),
+            stdoutByteCount: result.stdout.count
+        )
+        await log.record(entry)
     }
 
     /// Convenience: `git --version`, parsed.
