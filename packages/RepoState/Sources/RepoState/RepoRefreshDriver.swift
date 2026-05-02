@@ -59,6 +59,20 @@ public actor RepoRefreshDriver {
     /// worktree event before re-checking.
     private var hasPendingDeferred = false
 
+    /// Wall-clock timestamp of the *first* `.deferred` outcome in the
+    /// current run of consecutive deferrals. Cleared back to nil the
+    /// moment a refresh succeeds or fails (i.e. the deferral streak
+    /// ends). Stays at the *first* timestamp across a streak, not the
+    /// most-recent — so callers can compute "how long has this repo
+    /// been stuck mid-mutation?" via `Date().timeIntervalSince(first)`.
+    ///
+    /// Forward-compat for **ADR 0066** (stale `index.lock` recovery):
+    /// the agent's main loop will check this on every tick, and when
+    /// elapsed > 60s it surfaces a Notification Center alert offering
+    /// one-click clear of the stale lock. Driver itself takes no
+    /// action on the timestamp — it's an observable for the agent.
+    public private(set) var firstDeferralAt: Date?
+
     /// Total number of refresh-closure invocations the driver made.
     /// Diagnostic only — the agent's `sprigctl status` plumbing reads
     /// this via the actor's getter.
@@ -139,8 +153,16 @@ public actor RepoRefreshDriver {
         switch outcome {
         case .deferred:
             hasPendingDeferred = true
+            // Set firstDeferralAt only if this starts a new streak.
+            // Across a streak we keep the *first* timestamp so callers
+            // can measure total elapsed deferred time, not just the
+            // gap since the most-recent attempt.
+            if firstDeferralAt == nil {
+                firstDeferralAt = Date()
+            }
         case .applied, .failed:
             hasPendingDeferred = false
+            firstDeferralAt = nil
         }
         return outcome
     }
