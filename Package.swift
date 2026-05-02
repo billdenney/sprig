@@ -17,9 +17,11 @@ let tier1Targets: [String] = [
 let tier1Dependencies: [String: [Target.Dependency]] = [
     // RepoState consumes parsed `PorcelainV2Status` values from GitCore
     // when applying `git status` snapshots, and re-uses GitCore's
-    // typed-error vocabulary. Both are portable Tier-1 packages, so
-    // this dependency is in-tier and adds no platform coupling.
-    "RepoState": ["GitCore"]
+    // typed-error vocabulary. It also produces `AgentEvent` envelopes
+    // (in `BadgeChangeBroadcaster`) using `IPCSchema`'s wire types.
+    // All three are portable Tier-1 packages, so this dependency is
+    // in-tier and adds no platform coupling.
+    "RepoState": ["GitCore", "IPCSchema"]
 ]
 
 let tier2Targets: [String] = [
