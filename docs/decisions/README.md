@@ -42,7 +42,7 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0030 | Finder-first architecture — no main app file tree                          | accepted |
 | 0031 | Submodules — badges plus right-click plus SubmoduleManager window          | accepted |
 | 0032 | Git extension support plan                                                 | accepted |
-| 0033 | Destructive-op safety — tiered with snapshot refs                          | accepted |
+| 0033 | Destructive-op safety — tiered with snapshot refs                          | accepted (amended 2026-05-02 to add visible Recover task window per §13.3-A) |
 | 0034 | No menu-bar helper                                                         | accepted |
 | 0035 | AI feature scope for M7                                                    | accepted |
 | 0036 | AI privacy default — local-first with per-action cloud confirmation        | accepted |
@@ -66,5 +66,17 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0054 | 1.0 platform tier — macOS + Windows GUI shells, Linux engine-only          | accepted (partially supersedes 0009, 0030, 0034) |
 | 0055 | Windows GUI stack — swift-cross-ui                                         | accepted |
 | 0056 | External-git-agent awareness — watch `.git/`, defer on lock files          | accepted |
+| 0057 | "Commands" panel — default-on, in every task window                        | accepted |
+| 0058 | Transient-flag chips on action buttons — tiered by op stakes               | accepted |
+| 0059 | FinderSync resilience — heartbeat, sprigctl finder CLI, iCloud Drive guards | accepted |
+| 0060 | Windows shell extension hardening                                          | accepted |
+| 0061 | Sub-hunk / region staging in CommitComposer                                | accepted |
+| 0062 | Stacked-PR UI — right-click verbs + Stack Manager task window              | accepted |
+| 0063 | Forge integration — task-window verbs (no "PRs" tab)                       | accepted |
+| 0064 | Auto-fetch — AC / metered / battery-aware backoff                          | accepted |
+| 0065 | Stash safety — export `refs/stash` as patches before repo removal          | accepted |
+| 0066 | Stale `index.lock` recovery flow (60s threshold + one-click clear)         | accepted |
 
 ADRs 0001–0053 were ratified simultaneously in the initial scaffolding, based on the planning dialogue captured in the master plan file. Subsequent ADRs (0054+) follow the normal one-per-PR cadence.
+
+ADRs 0057–0066 (and the 0033 amendment) were ratified together via maintainer Q&A on 2026-05-02 after a competitive review of 50+ git GUIs filtered through the Finder/Explorer-first invariant. See master plan §13 for the synthesis and the per-ADR ratification table.
