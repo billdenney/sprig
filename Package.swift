@@ -106,11 +106,13 @@ let package = Package(
         tier2Targets.flatMap { name -> [Target] in
             // Per-target production deps for Tier-2 packages beyond the
             // default `PlatformKit`. AgentKit composes Tier-1 RepoState +
-            // GitCore + IPCSchema with Tier-2 WatcherKit to host the
-            // single-process agent loop (see `AgentKit/RepoAgent`).
+            // GitCore + IPCSchema with Tier-2 WatcherKit + TransportKit
+            // to host the single-process agent loop and bridge it to a
+            // Transport-backed sink (see `AgentKit/RepoAgent` +
+            // `AgentKit/TransportBadgeEventSink`).
             let extraDeps: [Target.Dependency] = switch name {
             case "AgentKit":
-                ["GitCore", "RepoState", "IPCSchema", "WatcherKit"]
+                ["GitCore", "RepoState", "IPCSchema", "WatcherKit", "TransportKit"]
             default:
                 []
             }
@@ -127,7 +129,7 @@ let package = Package(
                 // AgentKit's integration tests exercise the full pipeline
                 // against real git, so they need the Tier-1 packages used
                 // in the production deps plus their helpers.
-                ["GitCore", "RepoState", "IPCSchema", "WatcherKit"]
+                ["GitCore", "RepoState", "IPCSchema", "WatcherKit", "TransportKit"]
             default:
                 []
             }
