@@ -1,10 +1,10 @@
 # Agent host (`AgentKit.RepoAgent`)
 
-How a single Sprig process composes the watcher, refresher, broadcaster, and subscription registry into a long-lived host that drives badge updates for one repo. Slice A of the M2 agent track.
+How a single Sprig process composes the watcher, refresher, broadcaster, subscription registry, and IPC layer into a long-lived host that drives badge updates for one repo. Slices A → A4 of the M2 agent track.
 
 ADR cross-references: 0021 (perf budget), 0024 (fsmonitor source of truth, outgoing), 0048 (cross-platform IPC tier discipline), 0056 (external-git-agent awareness, incoming), 0057 (commands panel default — `RunnerLog` is what feeds it), 0066 (stale `index.lock` recovery — `RepoRefreshDriver.firstDeferralAt` is the observable for the eventual one-click clear).
 
-## Pipeline
+## Outbound pipeline (badge changes flow agent → client)
 
 ```
 FileWatcher (PlatformKit protocol; FSEventsWatcher on macOS,
@@ -44,11 +44,33 @@ BadgeEventSink (protocol, RepoState)
        ├──► InMemoryBadgeEventSink (AgentKit) — AsyncStream for the
        │                                       CLI / tests
        │
-       └──► (planned) TransportBadgeEventSink — encode envelope + send
-                                                via TransportKit.Transport
+       └──► TransportBadgeEventSink (AgentKit) — encode envelope + send
+                                                 via TransportKit.Transport
 ```
 
-The shaded arrow at the bottom is the slice A2 follow-up: a sink that wraps `EnvelopeCodec` + `Transport` so a real client process can subscribe over XPC / named pipe / etc. Slice A delivers the in-process pipeline; the transport-backed sink is one focused PR after.
+## Inbound pipeline (client requests flow client → agent)
+
+```
+TransportKit.Transport.messages() — AsyncStream<Data>
+       │
+       ▼
+ClientRequestDispatcher (AgentKit actor) — drains the stream,
+       │                                    decodes Envelope<ClientRequest>,
+       │                                    dispatches by kind
+       │
+       ├──► subscribe → SubscriptionRegistry.subscribe(roots:)
+       │              → Envelope<AgentResponse>.subscribeAck
+       │
+       ├──► badgeQuery → BadgeResolver closure (host-supplied)
+       │              → Envelope<AgentResponse>.badgeReply
+       │
+       └──► (parse error / unknown kind)
+                       → Envelope<AgentResponse>.error
+                         (wire-stable code: unknown_message_kind,
+                          unsupported_schema_version, parse_error)
+```
+
+Both pipelines share one `Transport` and one `SubscriptionRegistry`, so a `subscribe` request from the client immediately enrols the new id in the registry the broadcaster reads from on the next refresh tick.
 
 ## `AgentKit.RepoAgent`
 
@@ -80,10 +102,50 @@ public actor RepoAgent {
 
 Platform-specific lifecycle (macOS LaunchAgent registration via `SMAppService`, Linux systemd user unit, Windows Service host) lands in `Sources/Mac/AgentKitMac.swift`, `Sources/Linux/AgentKitLinux.swift`, `Sources/Windows/AgentKitWindows.swift` as separate concerns; those files own the "how is this process kept alive across reboots?" question. The agent itself is just the long-lived business logic those hosts run.
 
+## Composing the full host (single client)
+
+For a single-client host like `sprigctl agent` over an in-process transport, or the M2-Mac LaunchAgent over XPC, the wiring is three components sharing one `Transport` and one `SubscriptionRegistry`:
+
+```swift
+let pair = InProcessTransportPair.connected()  // or: XPC transport pair
+let registry = SubscriptionRegistry()
+
+// Outbound side: agent → client.
+let sink = TransportBadgeEventSink(transport: pair.agentEnd)
+let agent = RepoAgent(
+    repoRoot: repoRoot,
+    gitDir: gitDir,
+    runner: runner,
+    watcher: watcher,
+    registry: registry,
+    sink: sink
+)
+
+// Inbound side: client → agent.
+let dispatcher = ClientRequestDispatcher(
+    transport: pair.agentEnd,
+    registry: registry,
+    badgeResolver: { url in
+        // Host decides which RepoStateStore answers each path.
+        // Single-repo hosts can hand a closure that consults the
+        // one store; multi-repo hosts route by path-prefix.
+        nil
+    }
+)
+
+try await agent.start()
+await dispatcher.start()
+```
+
+Both `agent` and `dispatcher` share `pair.agentEnd`. Concurrent `transport.send(_:)` calls are safe per the `Transport` protocol's `Sendable` requirement. The client side reads `pair.clientEnd.messages()` and peeks each envelope's `kind` before deciding "this is a reply, correlate by id" vs. "this is an event, route to the subscription handler" — `IPCSchema.EnvelopePeek` provides the cheap pre-decode.
+
+Multi-client hosts need additional plumbing not yet built: per-subscription routing in the sink so events for subscriptions held by client A don't get sent to client B's transport. See `EndToEndAgentLoopTests` for the single-client proof-of-life and the limits-of-the-current-design discussion.
+
 ## What `RepoAgent` does NOT do (deliberate)
 
-- **IPC dispatch.** Decoding inbound `ClientRequest` envelopes from a `Transport` and routing `subscribe` / `unsubscribe` / `queryBadge` to the registry is out of scope for slice A. Slice A subscribes the agent's own root at start (via `sprigctl agent`) and never reads from a transport. The dispatch loop lands when the transport-backed sink does (slice A2).
-- **Multi-repo orchestration.** One `RepoAgent` watches one repo. The CLI's `sprigctl agent` accepts a single `--repo`; multi-repo agents (the macOS LaunchAgent host, the Windows Service host) construct one `RepoAgent` per watched repo and let them share a `Runner` + `SubscriptionRegistry` if useful.
+- **IPC dispatch.** `RepoAgent` writes events outbound but doesn't read inbound. Use `ClientRequestDispatcher` for the inbound side; the two compose via a shared `SubscriptionRegistry`. The "Composing the full host" section above shows the pattern.
+- **Multi-repo orchestration.** One `RepoAgent` watches one repo. The CLI's `sprigctl agent` accepts a single `--repo`; multi-repo agents (the macOS LaunchAgent host, the Windows Service host) construct one `RepoAgent` per watched repo and let them share a `Runner` + `SubscriptionRegistry`.
+- **Multi-client fan-out.** The current `TransportBadgeEventSink` writes every event to its single configured transport. Multi-client hosts will need a router-shaped sink that, given a `BadgeChangedPayload.subscriptionId`, picks the right per-client transport. Out of scope for slices A → A4.
 - **`core.fsmonitor` outgoing direction (ADR 0024).** That's a separate path served by `WatcherKit` directly; `RepoAgent` is the *incoming* direction (Sprig reacts to filesystem and external-git changes; the fsmonitor hook hands changes back *to* the user's git process).
 
 ## Diagnostics worth knowing
@@ -104,7 +166,7 @@ For M2-Mac, the LaunchAgent host (`Sources/Mac/AgentKitMac.swift`) will:
 
 1. Register the agent process via `SMAppService.daemon`.
 2. On startup, discover repos (via `RepoState.RepoDiscovery`) and spin up one `RepoAgent` per discovered repo.
-3. Set up a Transport-backed sink so the FinderSync extension's IPC client can subscribe and receive `Envelope<AgentEvent>` envelopes.
-4. Wire in a `ClientRequest` dispatcher that decodes inbound IPC, calls `registry.subscribe(...)` / `unsubscribe(...)`, and returns `AgentResponse` envelopes.
+3. Set up an XPC `Transport` adapter (replaces `InProcessTransport` in the composition pattern above).
+4. For each connecting FinderSync client, construct a `TransportBadgeEventSink` and `ClientRequestDispatcher` pair against that client's transport. (Multi-client routing of events still needs work — see "What RepoAgent does NOT do" above.)
 
-Slice A delivers steps 0 (the `RepoAgent` core); steps 1–4 are M2-Mac scope.
+Slices A → A4 deliver step 0 (`RepoAgent` core, transport sink, request dispatcher, single-client integration). Steps 1–4 are M2-Mac scope.
