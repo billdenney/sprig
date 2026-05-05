@@ -18,7 +18,7 @@ struct RepoRefreshDriverDeferralTimeTests {
     /// canned outcome (overridable per-test). Same shape as the
     /// recorder used in `RepoRefreshDriverTests`.
     private actor Recorder {
-        private(set) var nextOutcome: RefreshOutcome = .applied(entryCount: 0)
+        private(set) var nextOutcome: RefreshOutcome = .applied(entryCount: 0, changes: [])
 
         func setNext(_ outcome: RefreshOutcome) {
             nextOutcome = outcome
@@ -94,7 +94,7 @@ struct RepoRefreshDriverDeferralTimeTests {
         _ = await driver.processEvents([event(path: "/x")])
         #expect(await driver.firstDeferralAt != nil)
 
-        await rec.setNext(.applied(entryCount: 0))
+        await rec.setNext(.applied(entryCount: 0, changes: []))
         _ = await driver.processEvents([])
         #expect(await driver.firstDeferralAt == nil)
     }
@@ -124,7 +124,7 @@ struct RepoRefreshDriverDeferralTimeTests {
         let firstStreakStamp = await driver.firstDeferralAt
 
         // End streak with a success.
-        await rec.setNext(.applied(entryCount: 0))
+        await rec.setNext(.applied(entryCount: 0, changes: []))
         _ = await driver.processEvents([])
         #expect(await driver.firstDeferralAt == nil)
 

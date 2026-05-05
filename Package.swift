@@ -104,6 +104,16 @@ let package = Package(
 
         +
         tier2Targets.flatMap { name -> [Target] in
+            // Per-target production deps for Tier-2 packages beyond the
+            // default `PlatformKit`. AgentKit composes Tier-1 RepoState +
+            // GitCore + IPCSchema with Tier-2 WatcherKit to host the
+            // single-process agent loop (see `AgentKit/RepoAgent`).
+            let extraDeps: [Target.Dependency] = switch name {
+            case "AgentKit":
+                ["GitCore", "RepoState", "IPCSchema", "WatcherKit"]
+            default:
+                []
+            }
             // Per-target test-only deps for Tier-2 packages. Test targets
             // can pull in additional Tier-1 packages without those becoming
             // production deps of the adapter.
@@ -113,13 +123,18 @@ let package = Package(
                 // composition end-to-end (encode envelope → send → receive
                 // → decode envelope → respond).
                 ["IPCSchema"]
+            case "AgentKit":
+                // AgentKit's integration tests exercise the full pipeline
+                // against real git, so they need the Tier-1 packages used
+                // in the production deps plus their helpers.
+                ["GitCore", "RepoState", "IPCSchema", "WatcherKit"]
             default:
                 []
             }
             return [
                 .target(
                     name: name,
-                    dependencies: ["PlatformKit"],
+                    dependencies: ["PlatformKit"] + extraDeps,
                     path: "packages/\(name)/Sources",
                     sources: [name, "Mac", "Linux", "Windows"]
                 ),
@@ -138,6 +153,9 @@ let package = Package(
                     "GitCore",
                     "WatcherKit",
                     "PlatformKit",
+                    "RepoState",
+                    "IPCSchema",
+                    "AgentKit",
                     .product(name: "ArgumentParser", package: "swift-argument-parser")
                 ],
                 path: "cli/sprigctl/Sources"
@@ -145,8 +163,15 @@ let package = Package(
             .testTarget(
                 name: "sprigctlTests",
                 // GitCore for ProcessTerminationGate (race-safe replacement
-                // for Process.waitUntilExit) used by SprigctlSupport.
-                dependencies: ["sprigctl", "GitCore"],
+                // for Process.waitUntilExit) used by SprigctlSupport;
+                // RepoState + IPCSchema + AgentKit for AgentCommand tests.
+                dependencies: [
+                    "sprigctl",
+                    "GitCore",
+                    "RepoState",
+                    "IPCSchema",
+                    "AgentKit"
+                ],
                 path: "cli/sprigctl/Tests"
             )
         ]
