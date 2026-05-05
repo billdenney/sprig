@@ -327,8 +327,7 @@ struct SprigctlAgentTests {
             if (obj["kind"] as? String) == "badgeChanged",
                let payload = obj["payload"] as? [String: Any],
                (payload["path"] as? String)?.contains("a.txt") == true,
-               (payload["badge"] as? String) == "modified"
-            {
+               (payload["badge"] as? String) == "modified" {
                 sawMatch = true
                 break
             }
