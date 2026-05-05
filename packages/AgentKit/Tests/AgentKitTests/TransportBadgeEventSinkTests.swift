@@ -11,12 +11,12 @@
 // Per CLAUDE.md, the integration spawns real git into a temp dir;
 // only the watcher is mocked.
 
+@testable import AgentKit
 import Foundation
 import GitCore
 import IPCSchema
 import PlatformKit
 import RepoState
-@testable import AgentKit
 import Testing
 import TransportKit
 import WatcherKit
@@ -101,17 +101,19 @@ struct TransportBadgeEventSinkTests {
         try write("v2\n", to: file)
         await watcher.emit(WatchEvent(path: file, kind: .modified))
 
-        let envelope = await awaitEnvelope(on: pair.clientEnd)
-        try #require(envelope != nil, "expected an envelope on the client end of the transport")
-        if case let .badgeChanged(payload) = envelope!.message {
+        let envelope = try #require(
+            await awaitEnvelope(on: pair.clientEnd),
+            "expected an envelope on the client end of the transport"
+        )
+        if case let .badgeChanged(payload) = envelope.message {
             #expect(payload.path == file.path)
             #expect(payload.badge == BadgeIdentifier.modified.rawValue)
         } else {
-            Issue.record("expected .badgeChanged, got \(envelope!.message)")
+            Issue.record("expected .badgeChanged, got \(envelope.message)")
         }
         // The schemaVersion must match what the codec writes; mismatch
         // would break wire compatibility silently.
-        #expect(envelope!.schemaVersion == IPCSchema.currentSchemaVersion)
+        #expect(envelope.schemaVersion == IPCSchema.currentSchemaVersion)
     }
 
     @Test("emit on a closed transport rethrows TransportError without crashing the agent")
