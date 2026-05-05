@@ -14,12 +14,12 @@
 // - Lifecycle: `start()` is idempotent; `stop()` shuts down the watcher
 //   loop without orphaning the sink stream.
 
+@testable import AgentKit
 import Foundation
 import GitCore
 import IPCSchema
 import PlatformKit
 import RepoState
-@testable import AgentKit
 import Testing
 import WatcherKit
 
@@ -100,13 +100,15 @@ struct RepoAgentTests {
         try write("v2\n", to: file)
         await watcher.emit(WatchEvent(path: file, kind: .modified))
 
-        let envelope = await awaitEnvelope(from: sink)
-        try #require(envelope != nil, "expected at least one badgeChanged envelope")
-        if case let .badgeChanged(payload) = envelope!.message {
+        let envelope = try #require(
+            await awaitEnvelope(from: sink),
+            "expected at least one badgeChanged envelope"
+        )
+        if case let .badgeChanged(payload) = envelope.message {
             #expect(payload.path == file.path)
             #expect(payload.badge == BadgeIdentifier.modified.rawValue)
         } else {
-            Issue.record("expected .badgeChanged, got \(envelope!.message)")
+            Issue.record("expected .badgeChanged, got \(envelope.message)")
         }
     }
 
@@ -139,12 +141,14 @@ struct RepoAgentTests {
 
         // No watcher events injected — we're testing the forced initial
         // refresh that `start()` performs.
-        let envelope = await awaitEnvelope(from: sink)
-        try #require(envelope != nil, "the start-up refresh should fan out the existing modified file")
-        if case let .badgeChanged(payload) = envelope!.message {
+        let envelope = try #require(
+            await awaitEnvelope(from: sink),
+            "the start-up refresh should fan out the existing modified file"
+        )
+        if case let .badgeChanged(payload) = envelope.message {
             #expect(payload.path == file.path)
         } else {
-            Issue.record("expected .badgeChanged, got \(envelope!.message)")
+            Issue.record("expected .badgeChanged, got \(envelope.message)")
         }
     }
 

@@ -319,18 +319,22 @@ struct SprigctlAgentTests {
         // `Codable` flattens the message's `kind` + `payload` into the
         // envelope's top-level keys (alongside `id`, `schemaVersion`),
         // so we assert at the top level — not under a `message` key.
+        // Uses a guard chain rather than a multi-clause `if`: the latter
+        // form trips both SwiftLint's `opening_brace` (wants `{` on the
+        // same line) and SwiftFormat's `wrapMultilineStatementBraces`
+        // (wants `{` on its own line). The guard chain sidesteps that.
         var sawMatch = false
         for line in out.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let data = String(line).data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { continue }
-            if (obj["kind"] as? String) == "badgeChanged",
-               let payload = obj["payload"] as? [String: Any],
-               (payload["path"] as? String)?.contains("a.txt") == true,
-               (payload["badge"] as? String) == "modified" {
-                sawMatch = true
-                break
-            }
+            guard (obj["kind"] as? String) == "badgeChanged",
+                  let payload = obj["payload"] as? [String: Any],
+                  (payload["path"] as? String)?.contains("a.txt") == true,
+                  (payload["badge"] as? String) == "modified"
+            else { continue }
+            sawMatch = true
+            break
         }
         #expect(sawMatch, "expected at least one badgeChanged envelope on stdout, got:\n\(out.stdout)")
     }
