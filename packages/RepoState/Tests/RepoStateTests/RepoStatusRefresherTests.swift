@@ -41,8 +41,9 @@ struct RepoStatusRefresherTests {
         let outcome = await refresher.refresh()
 
         switch outcome {
-        case let .applied(entryCount):
+        case let .applied(entryCount, changes):
             #expect(entryCount == 0, "tracked-clean files don't appear in porcelain output")
+            #expect(changes.isEmpty, "first apply against an empty store has no diff")
         default:
             Issue.record("expected .applied, got \(outcome)")
         }
@@ -63,11 +64,12 @@ struct RepoStatusRefresherTests {
         let refresher = RepoStatusRefresher(store: store)
         let outcome = await refresher.refresh()
 
-        guard case let .applied(entryCount) = outcome else {
+        guard case let .applied(entryCount, changes) = outcome else {
             Issue.record("expected .applied, got \(outcome)")
             return
         }
         #expect(entryCount == 2, "one modified, one untracked")
+        #expect(changes.count == 2, "diff against an empty prior reports both new badges")
         #expect(await store.badge(for: root.appendingPathComponent("a.txt")) == .modified)
         #expect(await store.badge(for: root.appendingPathComponent("b.txt")) == .untracked)
     }
@@ -151,8 +153,9 @@ struct RepoStatusRefresherTests {
         // Lock clears; next refresh applies.
         try FileManager.default.removeItem(at: indexLock)
         let secondOutcome = await refresher.refresh()
-        if case let .applied(entryCount) = secondOutcome {
+        if case let .applied(entryCount, changes) = secondOutcome {
             #expect(entryCount == 1)
+            #expect(changes.count == 1, "the modified file shows up as a single new badge")
             #expect(await store.badge(for: root.appendingPathComponent("a.txt")) == .modified)
         } else {
             Issue.record("expected second refresh to apply, got \(secondOutcome)")

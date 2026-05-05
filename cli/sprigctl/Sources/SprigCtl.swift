@@ -21,7 +21,8 @@ struct SprigCtl: AsyncParsableCommand {
             StatusCommand.self,
             WatchCommand.self,
             ReposCommand.self,
-            LogCommand.self
+            LogCommand.self,
+            AgentCommand.self
         ]
     )
 }

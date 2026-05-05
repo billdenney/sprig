@@ -1,9 +1,11 @@
 // RepoStatusRefresher.swift
 //
 // Tier 1 portable helper that bridges `GitCore.Runner` output into
-// `RepoStateStore.apply(_:)`. The "M2 agent main loop" minus the
-// IPC half: given a watcher event, the agent calls `refresh()` and
-// the store gets the latest porcelain-v2 snapshot.
+// `RepoStateStore.applyAndDiff(_:)`. The "M2 agent main loop" minus
+// the IPC half: given a watcher event, the agent calls `refresh()`
+// and the store gets the latest porcelain-v2 snapshot AND the diff
+// of badges that actually changed (so the agent can fan that diff
+// to subscribers without scanning every entry).
 //
 // Composes everything we've shipped so far:
 //
@@ -13,12 +15,13 @@
 // - `GitCore.GitMetadataPaths` — resolves the actual `.git` dir
 //   (handles submodule + linked-worktree pointer files) and detects
 //   "git op in flight" so we defer mid-mutation refreshes (ADR 0056)
-// - `RepoStateStore.apply(_:)` — whole-snapshot replace into the
-//   path-trie + branch info
+// - `RepoStateStore.applyAndDiff(_:)` — whole-snapshot replace into
+//   the path-trie + branch info AND a `[PathBadgeChange]` describing
+//   exactly what flipped between the prior and the new snapshot
 //
 // Stays Tier 1 — no platform APIs, no `WatcherKit` dep. The Tier-2
-// integration that wires this to a watcher's tick stream lands when
-// the M2 agent code is built.
+// integration that wires this to a watcher's tick stream lives in
+// `AgentKit.RepoAgent`.
 
 import Foundation
 import GitCore
@@ -27,8 +30,10 @@ import GitCore
 public enum RefreshOutcome: Sendable {
     /// Snapshot applied to the store. `entryCount` is the trie size
     /// after apply — useful for diagnostics ("did the badge set
-    /// shrink as expected?").
-    case applied(entryCount: Int)
+    /// shrink as expected?"). `changes` is the per-path diff between
+    /// the prior and new snapshot, ready to feed into
+    /// ``BadgeChangeBroadcaster/broadcast(_:)`` without rescanning.
+    case applied(entryCount: Int, changes: [PathBadgeChange])
 
     /// Refresh deferred because some git agent is mid-mutation.
     /// Caller should retry on the next tick. See
@@ -71,7 +76,8 @@ public struct RepoStatusRefresher: Sendable {
 
     /// - Parameters:
     ///   - store: the per-repo store to populate. The refresher
-    ///     calls only `repoRoot` (nonisolated) and `apply(_:)` on it.
+    ///     calls only `repoRoot` (nonisolated) and `applyAndDiff(_:)`
+    ///     on it.
     ///   - runner: optional explicit `Runner`. When nil, the
     ///     refresher constructs one with `defaultWorkingDirectory`
     ///     set to the store's `repoRoot`.
@@ -102,8 +108,8 @@ public struct RepoStatusRefresher: Sendable {
                 "--untracked-files=all"
             ])
             let status = try PorcelainV2Parser.parse(output.stdout)
-            await store.apply(status)
-            return await .applied(entryCount: store.entryCount())
+            let changes = await store.applyAndDiff(status)
+            return await .applied(entryCount: store.entryCount(), changes: changes)
         } catch {
             return .failed(error)
         }

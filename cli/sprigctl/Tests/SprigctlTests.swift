@@ -19,6 +19,7 @@ struct SprigctlGeneralTests {
         #expect(out.stdout.contains("watch"))
         #expect(out.stdout.contains("repos"))
         #expect(out.stdout.contains("log"))
+        #expect(out.stdout.contains("agent"))
     }
 
     @Test("sprigctl version prints sprigctl + git versions")
@@ -276,5 +277,87 @@ struct SprigctlLogTests {
             try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         )
         #expect(arr.count == 1)
+    }
+}
+
+// MARK: - Agent
+
+@Suite("sprigctl agent")
+struct SprigctlAgentTests {
+    @Test("agent --help shows usage")
+    func help() async throws {
+        let out = try await Sprigctl.run(["agent", "--help"])
+        #expect(out.exitCode == 0)
+        #expect(out.stdout.lowercased().contains("agent"))
+        #expect(out.stdout.contains("--duration"))
+        #expect(out.stdout.contains("--polling"))
+        #expect(out.stdout.contains("--polling-interval"))
+    }
+
+    @Test("agent on a dirty repo with --duration emits at least one badgeChanged envelope on stdout")
+    func emitsBadgeChangedOnStartup() async throws {
+        let repo = try Sprigctl.mkRepo("agent-startup")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await Sprigctl.initRepo(at: repo)
+        try Sprigctl.write("v1\n", to: repo.appendingPathComponent("a.txt"))
+        try await Sprigctl.spawnGit(["add", "a.txt"], cwd: repo)
+        try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
+        // Mark the file dirty BEFORE spawning the agent so the forced
+        // initial refresh (in `RepoAgent.start()`) produces a non-empty
+        // diff that the broadcaster fans out as one envelope.
+        try Sprigctl.write("v2\n", to: repo.appendingPathComponent("a.txt"))
+
+        let out = try await Sprigctl.run([
+            "agent",
+            "--duration", "1.0",
+            "--polling-interval", "0.1",
+            repo.path
+        ])
+        #expect(out.exitCode == 0)
+
+        // stdout is JSON envelopes, one per line. The envelope's
+        // `Codable` flattens the message's `kind` + `payload` into the
+        // envelope's top-level keys (alongside `id`, `schemaVersion`),
+        // so we assert at the top level — not under a `message` key.
+        var sawMatch = false
+        for line in out.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let data = String(line).data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            if (obj["kind"] as? String) == "badgeChanged",
+               let payload = obj["payload"] as? [String: Any],
+               (payload["path"] as? String)?.contains("a.txt") == true,
+               (payload["badge"] as? String) == "modified"
+            {
+                sawMatch = true
+                break
+            }
+        }
+        #expect(sawMatch, "expected at least one badgeChanged envelope on stdout, got:\n\(out.stdout)")
+    }
+
+    @Test("agent on a clean repo with --duration exits 0 with no envelopes")
+    func noEnvelopesOnCleanRepo() async throws {
+        let repo = try Sprigctl.mkRepo("agent-clean")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await Sprigctl.initRepo(at: repo)
+        try Sprigctl.write("seed\n", to: repo.appendingPathComponent("a.txt"))
+        try await Sprigctl.spawnGit(["add", "a.txt"], cwd: repo)
+        try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
+
+        let out = try await Sprigctl.run([
+            "agent",
+            "--duration", "0.5",
+            "--polling-interval", "0.1",
+            repo.path
+        ])
+        #expect(out.exitCode == 0)
+        // Clean repo → empty diff on initial refresh → no envelopes.
+        // stderr may contain the "# agent: watching ..." status line; the
+        // assertion is on stdout only.
+        let nonEmptyStdoutLines = out.stdout
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .count
+        #expect(nonEmptyStdoutLines == 0, "expected no envelopes on stdout, got:\n\(out.stdout)")
     }
 }

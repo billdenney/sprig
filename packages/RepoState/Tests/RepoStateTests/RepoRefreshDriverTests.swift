@@ -18,7 +18,7 @@ struct RepoRefreshDriverTests {
     /// canned outcome (overridable per-test).
     private actor Recorder {
         private(set) var calls: Int = 0
-        private(set) var nextOutcome: RefreshOutcome = .applied(entryCount: 0)
+        private(set) var nextOutcome: RefreshOutcome = .applied(entryCount: 0, changes: [])
 
         func setNext(_ outcome: RefreshOutcome) {
             nextOutcome = outcome
@@ -166,7 +166,7 @@ struct RepoRefreshDriverTests {
         #expect(await rec.calls == 1)
 
         // The lock has cleared by tick 2; reset the recorder's outcome.
-        await rec.setNext(.applied(entryCount: 0))
+        await rec.setNext(.applied(entryCount: 0, changes: []))
 
         // Tick 2: empty batch — but we should retry because the prior
         // attempt was deferred.
@@ -184,7 +184,7 @@ struct RepoRefreshDriverTests {
         let driver = RepoRefreshDriver(gitDir: nil, refresh: refresh)
 
         _ = await driver.processEvents([event(path: "/x")])
-        await rec.setNext(.applied(entryCount: 0))
+        await rec.setNext(.applied(entryCount: 0, changes: []))
         _ = await driver.processEvents([])
         #expect(await rec.calls == 2)
 
@@ -226,14 +226,14 @@ struct RepoRefreshDriverTests {
     @Test("refreshAttempts and lastOutcome track invocations across ticks")
     func diagnosticsTrackInvocations() async {
         let (rec, refresh) = makeRecorder()
-        await rec.setNext(.applied(entryCount: 5))
+        await rec.setNext(.applied(entryCount: 5, changes: []))
         let driver = RepoRefreshDriver(gitDir: nil, refresh: refresh)
         #expect(await driver.refreshAttempts == 0)
         #expect(await driver.lastOutcome == nil)
 
         _ = await driver.processEvents([event(path: "/x")])
         #expect(await driver.refreshAttempts == 1)
-        if case let .applied(count) = await driver.lastOutcome {
+        if case let .applied(count, _) = await driver.lastOutcome {
             #expect(count == 5)
         } else {
             Issue.record("expected applied outcome")
