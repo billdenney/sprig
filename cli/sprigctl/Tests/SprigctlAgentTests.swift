@@ -1,4 +1,5 @@
 import Foundation
+import IPCSchema
 import Testing
 
 // `sprigctl agent` end-to-end CLI tests. Lives in its own file (split
@@ -40,40 +41,42 @@ struct SprigctlAgentTests {
         ])
         #expect(out.exitCode == 0)
 
-        // stdout is JSON envelopes, one per line. We assert via raw
-        // substring matches against `out.stdout` rather than splitting
-        // and JSON-parsing each line — splitting + parsing is flaky on
-        // Windows CI in ways we couldn't reproduce on Linux/macOS,
-        // probably some interaction between Windows CRLF, pipe
-        // buffering, and `JSONSerialization`'s tolerance.
+        // stdout is one `Envelope<AgentEvent>` JSON per line. Decode
+        // via the canonical `IPCSchema.EnvelopeCodec.decode` (uses
+        // `JSONDecoder` under the hood) rather than reaching for
+        // `JSONSerialization.jsonObject(...) as? [String: Any]`. The
+        // typed-decode path goes through a different Foundation entry
+        // point that's been more reliable on Windows CI; using the
+        // production codec here also means tests exercise the same
+        // wire-format contract a real client would.
         //
-        // Substring matching is reliable here because the wire format
-        // pins key order: `EnvelopeCodec` writes with
-        // `JSONEncoder.outputFormatting = [.sortedKeys]`, so
-        // `"kind":"badgeChanged"` and `"badge":"modified"` always
-        // appear as literal substrings (no reorder, no whitespace
-        // surprises). The `subscriptionEnded` envelope on shutdown has
-        // a different `kind` value so it doesn't collide with the
-        // `badgeChanged` substring.
+        // Each line is whitespace-trimmed before decode because Windows
+        // CRLF leaves "\r" on every substring after splitting on "\n",
+        // and we don't want that "\r" to confuse the decoder's
+        // single-document boundary detection.
+        let envelopes = decodeAgentEventEnvelopes(in: out.stdout)
+        let sawMatch = envelopes.contains { envelope in
+            guard case let .badgeChanged(payload) = envelope.message else { return false }
+            return payload.path.contains("a.txt") && payload.badge == "modified"
+        }
         #expect(
-            stdoutContainsBadgeChangedFor(filename: "a.txt", badge: "modified", in: out.stdout),
+            sawMatch,
             "expected at least one badgeChanged envelope on stdout, got:\n\(out.stdout)"
         )
     }
 
-    /// Returns true when `stdout` contains a `badgeChanged` envelope
-    /// whose `path` includes `filename` and whose `badge` matches.
-    /// Uses substring matching against the wire-stable JSON form
-    /// (sorted keys per `EnvelopeCodec`), avoiding the JSON-parse +
-    /// line-iteration path that flakes on Windows CI.
-    private func stdoutContainsBadgeChangedFor(
-        filename: String,
-        badge: String,
-        in stdout: String
-    ) -> Bool {
-        stdout.contains("\"kind\":\"badgeChanged\"")
-            && stdout.contains("\"badge\":\"\(badge)\"")
-            && stdout.contains(filename)
+    /// Walks `stdout` line-by-line and returns each
+    /// `Envelope<AgentEvent>` that decodes cleanly via
+    /// ``IPCSchema/EnvelopeCodec/decode(_:from:)``. Lines that don't
+    /// decode are skipped silently — the agent's stdout sometimes
+    /// includes diagnostic or comment lines (`# agent: …`) the codec
+    /// rightly rejects.
+    private func decodeAgentEventEnvelopes(in stdout: String) -> [Envelope<AgentEvent>] {
+        stdout.split(separator: "\n", omittingEmptySubsequences: true).compactMap { raw in
+            let line = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, let data = line.data(using: .utf8) else { return nil }
+            return try? EnvelopeCodec.decode(AgentEvent.self, from: data)
+        }
     }
 
     @Test("agent on a clean repo with --duration exits 0 with no envelopes")
@@ -94,12 +97,16 @@ struct SprigctlAgentTests {
         #expect(out.exitCode == 0)
         // Clean repo → empty diff on initial refresh → no `badgeChanged`
         // envelopes. The agent does emit one `subscriptionEnded` envelope
-        // on shutdown (per slice A9, reason `agent_shutdown`); we filter
-        // it out via substring match. Same Windows-CRLF / JSON-parse
-        // flake reasoning as `emitsBadgeChangedOnStartup` — substring
-        // works because the wire format has sorted keys.
+        // on shutdown (per slice A9, reason `agent_shutdown`); decode
+        // every envelope and assert no `.badgeChanged` case appears.
+        // See `emitsBadgeChangedOnStartup` for the rationale on using
+        // `EnvelopeCodec.decode` rather than `JSONSerialization`.
+        let envelopes = decodeAgentEventEnvelopes(in: out.stdout)
+        let badgeChangedCount = envelopes.reduce(into: 0) { count, envelope in
+            if case .badgeChanged = envelope.message { count += 1 }
+        }
         #expect(
-            !out.stdout.contains("\"kind\":\"badgeChanged\""),
+            badgeChangedCount == 0,
             "expected no badgeChanged envelopes, got stdout:\n\(out.stdout)"
         )
     }
