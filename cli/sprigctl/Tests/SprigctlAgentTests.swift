@@ -80,13 +80,21 @@ struct SprigctlAgentTests {
             repo.path
         ])
         #expect(out.exitCode == 0)
-        // Clean repo → empty diff on initial refresh → no envelopes.
-        // stderr may contain the "# agent: watching ..." status line; the
-        // assertion is on stdout only.
-        let nonEmptyStdoutLines = out.stdout
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .count
-        #expect(nonEmptyStdoutLines == 0, "expected no envelopes on stdout, got:\n\(out.stdout)")
+        // Clean repo → empty diff on initial refresh → no `badgeChanged`
+        // envelopes. The agent does emit one `subscriptionEnded` envelope
+        // on shutdown (per slice A9, reason `agent_shutdown`); we filter
+        // it out here since the assertion is about badge changes, not
+        // shutdown lifecycle.
+        var badgeChangedLines = 0
+        for line in out.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let data = String(line).data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            if (obj["kind"] as? String) == "badgeChanged" {
+                badgeChangedLines += 1
+            }
+        }
+        #expect(badgeChangedLines == 0, "expected no badgeChanged envelopes, got stdout:\n\(out.stdout)")
     }
 
     @Test("agent --stats-interval prints periodic '# stats: …' lines on stderr")

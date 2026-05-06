@@ -74,6 +74,7 @@ public actor RepoAgent {
 
     private var coalescer: EventCoalescer
     private var driver: RepoRefreshDriver?
+    private var broadcaster: BadgeChangeBroadcaster?
     private var loop: Task<Void, Never>?
     private var running: Bool = false
 
@@ -133,7 +134,8 @@ public actor RepoAgent {
 
         let store = RepoStateStore(repoRoot: repoRoot)
         let refresher = RepoStatusRefresher(store: store, runner: runner)
-        let broadcaster = BadgeChangeBroadcaster(registry: registry, sink: sink)
+        let newBroadcaster = BadgeChangeBroadcaster(registry: registry, sink: sink)
+        broadcaster = newBroadcaster
 
         // The driver's refresh closure does the canonical 3-step:
         // refresh → broadcast the diff → return the outcome to the
@@ -142,7 +144,7 @@ public actor RepoAgent {
         // here — per-subscriber failures are isolated by the
         // broadcaster and the agent has no recovery action available
         // beyond what the broadcaster's logging already provides.
-        let closureBroadcaster = broadcaster
+        let closureBroadcaster = newBroadcaster
         let refreshClosure: @Sendable () async -> RefreshOutcome = {
             let outcome = await refresher.refresh()
             if case let .applied(_, changes) = outcome, !changes.isEmpty {
@@ -195,9 +197,19 @@ public actor RepoAgent {
         }
     }
 
-    /// Stop the watcher loop and the underlying watcher. Safe to call
-    /// multiple times. After stop returns, the sink's stream may still
-    /// have buffered events — drain it (or call `finish()` on an
+    /// Stop the watcher loop and the underlying watcher. Before
+    /// returning, fans an
+    /// ``IPCSchema/AgentEvent/subscriptionEnded`` envelope (reason
+    /// `"agent_shutdown"`) out to every still-active subscription in
+    /// the registry, so connected clients learn their subscriptions
+    /// are gone without waiting for the transport itself to disconnect.
+    ///
+    /// Safe to call multiple times. The shutdown broadcast only
+    /// happens on the first call (gated on `running`); subsequent
+    /// calls return immediately.
+    ///
+    /// After stop returns, the sink's stream may still have buffered
+    /// events — drain it (or call `finish()` on an
     /// `InMemoryBadgeEventSink`) if the consumer needs to terminate.
     ///
     /// Diagnostic accessors below remain readable after `stop()` —
@@ -206,6 +218,16 @@ public actor RepoAgent {
     public func stop() async {
         guard running else { return }
         running = false
+
+        // Tell every active subscriber their subscription is gone.
+        // Done before cancelling the watcher loop / stopping the watcher
+        // so the sink and registry are still in a workable state.
+        // `agent_shutdown` is the wire-stable reason from
+        // `IPCSchema.SubscriptionEndedPayload`'s documented value list.
+        if let broadcaster {
+            _ = await broadcaster.broadcastSubscriptionEnded(reason: "agent_shutdown")
+        }
+
         loop?.cancel()
         loop = nil
         await watcher.stop()

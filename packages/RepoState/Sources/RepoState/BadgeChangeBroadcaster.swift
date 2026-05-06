@@ -120,4 +120,41 @@ public struct BadgeChangeBroadcaster: Sendable {
         }
         return result
     }
+
+    /// Fan an
+    /// ``IPCSchema/AgentEvent/subscriptionEnded`` envelope out to
+    /// every active subscription in the registry. The agent calls
+    /// this from its shutdown path so connected clients learn their
+    /// subscriptions are no longer live and can clear their badge
+    /// caches without waiting for a transport-level disconnect.
+    ///
+    /// `reason` is wire-stable; the canonical values per
+    /// ``IPCSchema/SubscriptionEndedPayload`` are `"agent_shutdown"`,
+    /// `"repo_removed"`, `"volume_unmounted"`, `"unauthorized"`,
+    /// `"internal"`. Clients pattern-match on the string; renaming
+    /// breaks compatibility.
+    ///
+    /// Per-subscriber failure isolation matches ``broadcast(_:)``: a
+    /// sink that throws for one envelope is counted in
+    /// ``BroadcastResult/failed`` and the broadcaster continues.
+    @discardableResult
+    public func broadcastSubscriptionEnded(reason: String) async -> BroadcastResult {
+        var result = BroadcastResult(emitted: 0, failed: 0)
+        let subscriptions = await registry.allSubscriptions()
+        for subscriptionId in subscriptions {
+            let envelope = Envelope(
+                message: AgentEvent.subscriptionEnded(SubscriptionEndedPayload(
+                    subscriptionId: subscriptionId,
+                    reason: reason
+                ))
+            )
+            do {
+                try await sink.emit(envelope)
+                result.emitted += 1
+            } catch {
+                result.failed += 1
+            }
+        }
+        return result
+    }
 }
