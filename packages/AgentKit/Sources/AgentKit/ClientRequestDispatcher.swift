@@ -50,6 +50,7 @@ public actor ClientRequestDispatcher {
 
     private let transport: any Transport
     private let registry: SubscriptionRegistry
+    private let routes: SubscriptionTransportRoutes?
     private let badgeResolver: BadgeResolver
 
     private var task: Task<Void, Never>?
@@ -59,15 +60,24 @@ public actor ClientRequestDispatcher {
     ///   - transport: the duplex byte channel to read from / write to.
     ///   - registry: shared with the host's broadcaster path. Subscribes
     ///     mutate this; the broadcaster reads it on each fan-out.
+    ///   - routes: optional — the host's
+    ///     ``SubscriptionTransportRoutes`` actor. When provided, every
+    ///     successful `subscribe` ack also registers the assigned id →
+    ///     this dispatcher's `transport` so a ``RoutedBadgeEventSink``
+    ///     can later route events to the right client. Pass nil for
+    ///     single-client hosts (the default), where every event goes
+    ///     to the same transport via ``TransportBadgeEventSink``.
     ///   - badgeResolver: resolves a path → wire-stable badge string
     ///     for the synchronous `badgeQuery` path. Default returns nil.
     public init(
         transport: any Transport,
         registry: SubscriptionRegistry,
+        routes: SubscriptionTransportRoutes? = nil,
         badgeResolver: @escaping BadgeResolver = { _ in nil }
     ) {
         self.transport = transport
         self.registry = registry
+        self.routes = routes
         self.badgeResolver = badgeResolver
     }
 
@@ -78,6 +88,7 @@ public actor ClientRequestDispatcher {
         running = true
         let transport = self.transport
         let registry = self.registry
+        let routes = self.routes
         let resolver = self.badgeResolver
         task = Task {
             for await data in transport.messages() {
@@ -86,6 +97,7 @@ public actor ClientRequestDispatcher {
                     data,
                     transport: transport,
                     registry: registry,
+                    routes: routes,
                     resolver: resolver
                 )
             }
@@ -108,6 +120,7 @@ public actor ClientRequestDispatcher {
         _ data: Data,
         transport: any Transport,
         registry: SubscriptionRegistry,
+        routes: SubscriptionTransportRoutes?,
         resolver: BadgeResolver
     ) async {
         let envelope: Envelope<ClientRequest>
@@ -134,6 +147,11 @@ public actor ClientRequestDispatcher {
         case let .subscribe(payload):
             let urls = payload.roots.map(URL.init(fileURLWithPath:))
             let id = await registry.subscribe(roots: urls)
+            // Multi-client routing: associate the freshly-minted id
+            // with this dispatcher's transport so a
+            // `RoutedBadgeEventSink` knows where to send events.
+            // Single-client hosts pass `routes: nil` and skip this.
+            await routes?.register(id, transport: transport)
             response = Envelope(
                 id: envelope.id,
                 message: .subscribeAck(SubscribeAckPayload(subscriptionId: id))
