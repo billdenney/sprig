@@ -1,6 +1,6 @@
 # Agent host (`AgentKit.RepoAgent`)
 
-How a single Sprig process composes the watcher, refresher, broadcaster, subscription registry, and IPC layer into a long-lived host that drives badge updates for one repo. Slices A → A4 of the M2 agent track.
+How a single Sprig process composes the watcher, refresher, broadcaster, subscription registry, and IPC layer into a long-lived host that drives badge updates for one or more repos and serves one or more connected clients. Slices A → A5 of the M2 agent track.
 
 ADR cross-references: 0021 (perf budget), 0024 (fsmonitor source of truth, outgoing), 0048 (cross-platform IPC tier discipline), 0056 (external-git-agent awareness, incoming), 0057 (commands panel default — `RunnerLog` is what feeds it), 0066 (stale `index.lock` recovery — `RepoRefreshDriver.firstDeferralAt` is the observable for the eventual one-click clear).
 
@@ -139,13 +139,55 @@ await dispatcher.start()
 
 Both `agent` and `dispatcher` share `pair.agentEnd`. Concurrent `transport.send(_:)` calls are safe per the `Transport` protocol's `Sendable` requirement. The client side reads `pair.clientEnd.messages()` and peeks each envelope's `kind` before deciding "this is a reply, correlate by id" vs. "this is an event, route to the subscription handler" — `IPCSchema.EnvelopePeek` provides the cheap pre-decode.
 
-Multi-client hosts need additional plumbing not yet built: per-subscription routing in the sink so events for subscriptions held by client A don't get sent to client B's transport. See `EndToEndAgentLoopTests` for the single-client proof-of-life and the limits-of-the-current-design discussion.
+## Composing the full host (multi-client)
+
+For hosts serving more than one connected client — the M2-Mac LaunchAgent serving multiple FinderSync extension instances, a sprigctl-agent serving a CLI subscriber alongside a task-window app — the single-client wiring leaks events across clients (`TransportBadgeEventSink` writes every emit to its one configured transport). The multi-client wiring swaps that one piece for a router:
+
+```swift
+let registry = SubscriptionRegistry()
+let routes = SubscriptionTransportRoutes()  // shared across all clients
+
+// Outbound side: one RepoAgent per watched repo, all using a sink
+// that routes by subscription id rather than to a single transport.
+let sink = RoutedBadgeEventSink(routes: routes)
+let agent = RepoAgent(
+    repoRoot: repoRoot,
+    gitDir: gitDir,
+    runner: runner,
+    watcher: watcher,
+    registry: registry,
+    sink: sink
+)
+
+// Inbound side: one ClientRequestDispatcher per connected client.
+// `routes` is passed in so each successful `subscribe` ack also
+// associates the assigned id with this client's transport.
+func wireClient(transport: any Transport) async -> ClientRequestDispatcher {
+    let dispatcher = ClientRequestDispatcher(
+        transport: transport,
+        registry: registry,
+        routes: routes  // ← the only addition vs single-client
+    )
+    await dispatcher.start()
+    return dispatcher
+}
+
+try await agent.start()
+let dispatcherA = await wireClient(transport: pairA.agentEnd)
+let dispatcherB = await wireClient(transport: pairB.agentEnd)
+```
+
+When the broadcaster fans out a `[PathBadgeChange]` to N matching subscriptions, `RoutedBadgeEventSink.emit(_:)` consults `routes.transport(for: subscriptionId)` per envelope. Subscriptions owned by client A produce envelopes that reach client A's transport; B's stay on B's. Subscriptions whose owners disconnected (no mapping in `routes`) are silently dropped.
+
+**Connection cleanup.** When a client disconnects, the host should call `routes.unregisterAll(transport: theirTransport)` to drop every mapping pointing at that transport — otherwise dead-transport sends accumulate and `RoutedBadgeEventSink` keeps trying to write to a closed connection. The dispatcher's `messages()` loop ending is the natural trigger; whatever owns the connection lifecycle (the M2-Mac XPC listener, sprigctl's connection handler) calls `unregisterAll(transport:)` from its disconnect path.
+
+**Single-client hosts** can keep using `TransportBadgeEventSink` and pass `routes: nil` to `ClientRequestDispatcher` — the multi-client types are additive, not replacements.
 
 ## What `RepoAgent` does NOT do (deliberate)
 
-- **IPC dispatch.** `RepoAgent` writes events outbound but doesn't read inbound. Use `ClientRequestDispatcher` for the inbound side; the two compose via a shared `SubscriptionRegistry`. The "Composing the full host" section above shows the pattern.
-- **Multi-repo orchestration.** One `RepoAgent` watches one repo. The CLI's `sprigctl agent` accepts a single `--repo`; multi-repo agents (the macOS LaunchAgent host, the Windows Service host) construct one `RepoAgent` per watched repo and let them share a `Runner` + `SubscriptionRegistry`.
-- **Multi-client fan-out.** The current `TransportBadgeEventSink` writes every event to its single configured transport. Multi-client hosts will need a router-shaped sink that, given a `BadgeChangedPayload.subscriptionId`, picks the right per-client transport. Out of scope for slices A → A4.
+- **IPC dispatch.** `RepoAgent` writes events outbound but doesn't read inbound. Use `ClientRequestDispatcher` for the inbound side; the two compose via a shared `SubscriptionRegistry`. The "Composing the full host" sections above show the pattern in single- and multi-client form.
+- **Multi-repo orchestration.** One `RepoAgent` watches one repo. The CLI's `sprigctl agent` accepts a single `--repo`; multi-repo agents (the macOS LaunchAgent host, the Windows Service host) construct one `RepoAgent` per watched repo and let them share a `Runner` + `SubscriptionRegistry` + `SubscriptionTransportRoutes`.
+- **Auto-cleanup on transport drop.** `SubscriptionTransportRoutes.unregisterAll(transport:)` is the primitive; wiring it to a transport-closed signal is the host's call. `Transport` currently surfaces `peerClosed` only on send failure — a dedicated closed-callback can land if multiple hosts grow the same wiring.
 - **`core.fsmonitor` outgoing direction (ADR 0024).** That's a separate path served by `WatcherKit` directly; `RepoAgent` is the *incoming* direction (Sprig reacts to filesystem and external-git changes; the fsmonitor hook hands changes back *to* the user's git process).
 
 ## Diagnostics worth knowing
@@ -165,8 +207,9 @@ M1's exit-criterion list (see `docs/planning/milestones.md`) covered the buildin
 For M2-Mac, the LaunchAgent host (`Sources/Mac/AgentKitMac.swift`) will:
 
 1. Register the agent process via `SMAppService.daemon`.
-2. On startup, discover repos (via `RepoState.RepoDiscovery`) and spin up one `RepoAgent` per discovered repo.
+2. On startup, discover repos (via `RepoState.RepoDiscovery`) and spin up one `RepoAgent` per discovered repo, all sharing one `SubscriptionRegistry` and one `SubscriptionTransportRoutes`.
 3. Set up an XPC `Transport` adapter (replaces `InProcessTransport` in the composition pattern above).
-4. For each connecting FinderSync client, construct a `TransportBadgeEventSink` and `ClientRequestDispatcher` pair against that client's transport. (Multi-client routing of events still needs work — see "What RepoAgent does NOT do" above.)
+4. For each connecting FinderSync client, construct a `ClientRequestDispatcher` against that client's transport with the shared `routes`. The agents' shared `RoutedBadgeEventSink` then delivers events for that client's subscriptions to that client's transport.
+5. On disconnect, call `routes.unregisterAll(transport:)` to drop every mapping for the gone client.
 
-Slices A → A4 deliver step 0 (`RepoAgent` core, transport sink, request dispatcher, single-client integration). Steps 1–4 are M2-Mac scope.
+Slices A → A5 deliver step 0 (`RepoAgent` core, transport sink, request dispatcher, single-client integration test, multi-client routing). Steps 1–5 are M2-Mac scope.
