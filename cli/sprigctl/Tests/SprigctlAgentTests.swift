@@ -33,9 +33,17 @@ struct SprigctlAgentTests {
         // diff that the broadcaster fans out as one envelope.
         try Sprigctl.write("v2\n", to: repo.appendingPathComponent("a.txt"))
 
+        // `--duration 2.5` rather than something tighter so this test
+        // is robust to Windows's ~2 s filesystem-propagation latency.
+        // On Windows, the `v2\n` write above may not be visible to the
+        // `git status` subprocess that `RepoAgent` spawns until ~2 s
+        // after the write returns; the agent must keep running long
+        // enough for the polling watcher to observe the change after
+        // it propagates. macOS/Linux see the change instantly so the
+        // 2.5 s budget is just slack on those platforms.
         let out = try await Sprigctl.run([
             "agent",
-            "--duration", "1.0",
+            "--duration", "2.5",
             "--polling-interval", "0.1",
             repo.path
         ])
