@@ -26,7 +26,13 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // `refs/sprig/snapshots/...` entries from `git for-each-ref`. All
     // five are portable Tier-1 packages, so these dependencies are
     // in-tier and add no platform coupling.
-    "RepoState": ["GitCore", "IPCSchema", "PlatformKit", "SafetyKit"]
+    "RepoState": ["GitCore", "IPCSchema", "PlatformKit", "SafetyKit"],
+    // SafetyKit's `SnapshotWriter` invokes `git update-ref` to create
+    // the ADR 0033 snapshot refs that make destructive operations
+    // reversible. That's the only dependency it has on GitCore today;
+    // the format type (`SnapshotRefName`) is pure-Foundation and
+    // doesn't need it.
+    "SafetyKit": ["GitCore"]
 ]
 
 let tier2Targets: [String] = [
