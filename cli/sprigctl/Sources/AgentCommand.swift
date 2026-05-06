@@ -116,13 +116,20 @@ struct AgentCommand: AsyncParsableCommand {
         try await agent.start()
 
         // Drain the sink's stream; one JSON envelope per line.
+        // Writes go through `StdoutStream` rather than the default
+        // `print()` path so the line terminator is LF on every
+        // platform — Swift's default stdout writer applies text-mode
+        // FILE * translation on Windows, turning "\n" into "\r\n",
+        // which is unconventional for streaming-JSON tooling and
+        // surprises downstream consumers that split on "\n".
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
+        var out = StdoutStream()
         for await envelope in sink.events {
             let data = try encoder.encode(envelope)
             if let line = String(data: data, encoding: .utf8) {
-                print(line)
+                print(line, to: &out)
             }
         }
     }
