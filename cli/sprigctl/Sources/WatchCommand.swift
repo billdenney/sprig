@@ -89,8 +89,9 @@ struct WatchCommand: AsyncParsableCommand {
     // MARK: rendering
 
     private func emitHuman(_ event: WatchEvent) {
+        var out = StdoutStream()
         let kind = humanKind(event.kind)
-        print("\(kind)  \(event.path.path)")
+        print("\(kind)  \(event.path.path)", to: &out)
     }
 
     private func humanKind(_ kind: WatchEventKind) -> String {
@@ -111,7 +112,8 @@ struct WatchCommand: AsyncParsableCommand {
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(wire)
         if let line = String(data: data, encoding: .utf8) {
-            print(line)
+            var out = StdoutStream()
+            print(line, to: &out)
         }
     }
 }

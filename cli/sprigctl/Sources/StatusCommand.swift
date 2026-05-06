@@ -38,37 +38,38 @@ struct StatusCommand: AsyncParsableCommand {
     // MARK: human format
 
     private func emitHuman(_ status: PorcelainV2Status, repoURL: URL) {
-        print("# repo: \(repoURL.path)")
+        var out = StdoutStream()
+        print("# repo: \(repoURL.path)", to: &out)
         if let branch = status.branch {
             if let head = branch.head {
-                print("# branch: \(head)")
+                print("# branch: \(head)", to: &out)
             } else {
-                print("# branch: (detached)")
+                print("# branch: (detached)", to: &out)
             }
             if let oid = branch.oid {
-                print("# oid: \(oid)")
+                print("# oid: \(oid)", to: &out)
             } else {
-                print("# oid: (initial)")
+                print("# oid: (initial)", to: &out)
             }
             if let upstream = branch.upstream {
                 let ab = (branch.ahead, branch.behind)
                 switch ab {
                 case let (.some(a), .some(b)):
-                    print("# upstream: \(upstream) (+\(a) -\(b))")
+                    print("# upstream: \(upstream) (+\(a) -\(b))", to: &out)
                 default:
-                    print("# upstream: \(upstream)")
+                    print("# upstream: \(upstream)", to: &out)
                 }
             }
         }
         if let stashCount = status.stashCount, stashCount > 0 {
-            print("# stashes: \(stashCount)")
+            print("# stashes: \(stashCount)", to: &out)
         }
         if status.entries.isEmpty {
-            print("# (clean)")
+            print("# (clean)", to: &out)
             return
         }
         for entry in status.entries {
-            print(formatEntry(entry))
+            print(formatEntry(entry), to: &out)
         }
     }
 
@@ -99,7 +100,8 @@ struct StatusCommand: AsyncParsableCommand {
         let wire = StatusWire(status)
         let data = try encoder.encode(wire)
         if let string = String(data: data, encoding: .utf8) {
-            print(string)
+            var out = StdoutStream()
+            print(string, to: &out)
         }
     }
 }

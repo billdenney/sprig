@@ -53,16 +53,17 @@ struct ReposCommand: AsyncParsableCommand {
 
         let repos = RepoDiscovery.scan(root: root, options: options)
 
+        var out = StdoutStream()
         if json {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(repos.map(\.path))
             if let text = String(data: data, encoding: .utf8) {
-                print(text)
+                print(text, to: &out)
             }
         } else {
             for repo in repos {
-                print(repo.path)
+                print(repo.path, to: &out)
             }
         }
     }

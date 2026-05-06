@@ -44,13 +44,14 @@ struct LogCommand: AsyncParsableCommand {
     // MARK: - rendering
 
     private func emitHuman(_ commits: [Commit]) {
+        var out = StdoutStream()
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withInternetDateTime]
         for commit in commits {
             let mergeMarker = commit.isMerge ? " [merge]" : ""
             let date = dateFormatter.string(from: commit.committerDate)
-            print("\(commit.shortSHA)  \(commit.subject)\(mergeMarker)")
-            print("           \(commit.author.name) <\(commit.author.email)>  \(date)")
+            print("\(commit.shortSHA)  \(commit.subject)\(mergeMarker)", to: &out)
+            print("           \(commit.author.name) <\(commit.author.email)>  \(date)", to: &out)
         }
     }
 
@@ -61,7 +62,8 @@ struct LogCommand: AsyncParsableCommand {
         let wire = commits.map(CommitWire.init)
         let data = try encoder.encode(wire)
         if let text = String(data: data, encoding: .utf8) {
-            print(text)
+            var out = StdoutStream()
+            print(text, to: &out)
         }
     }
 }
