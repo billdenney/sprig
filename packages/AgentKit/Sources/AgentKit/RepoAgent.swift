@@ -199,12 +199,47 @@ public actor RepoAgent {
     /// multiple times. After stop returns, the sink's stream may still
     /// have buffered events — drain it (or call `finish()` on an
     /// `InMemoryBadgeEventSink`) if the consumer needs to terminate.
+    ///
+    /// Diagnostic accessors below remain readable after `stop()` —
+    /// they reflect the state of the last refresh that ran. Useful for
+    /// "agent stopped, what did it manage to do?" inspection.
     public func stop() async {
         guard running else { return }
         running = false
         loop?.cancel()
         loop = nil
         await watcher.stop()
+    }
+
+    // MARK: diagnostics
+
+    /// Total refresh-closure invocations the underlying
+    /// ``RepoRefreshDriver`` has made since this agent started. Zero
+    /// before ``start()`` and immediately after — the initial forced
+    /// refresh in `start()` increments to 1.
+    ///
+    /// Surface for `sprigctl status`-style introspection and the
+    /// future M2-Mac UI's "agent activity" panel.
+    public func refreshAttempts() async -> Int {
+        await driver?.refreshAttempts ?? 0
+    }
+
+    /// Most recent ``RefreshOutcome`` from the driver, or nil if the
+    /// driver hasn't run yet (i.e. before ``start()`` and immediately
+    /// after, before the forced initial refresh completes).
+    public func lastOutcome() async -> RefreshOutcome? {
+        await driver?.lastOutcome
+    }
+
+    /// Forward-compat enabler for ADR 0066 (stale `index.lock`
+    /// recovery). When non-nil, the wall-clock timestamp of the first
+    /// `.deferred` outcome in the current consecutive deferral streak.
+    /// Cleared on success or failure. Hosts can compute "how long has
+    /// this repo been stuck mid-mutation?" via
+    /// `Date().timeIntervalSince(...)` and surface a notification when
+    /// elapsed > 60 s, offering one-click clear of the stale lock.
+    public func firstDeferralAt() async -> Date? {
+        await driver?.firstDeferralAt
     }
 
     // MARK: actor-internal helpers
