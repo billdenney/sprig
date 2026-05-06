@@ -37,7 +37,7 @@ CI required-green per platform: macOS (`ci-macos`), Linux `packages/` (`ci-linux
 
 ## Cross-platform IO conventions
 
-Two footguns surfaced during the M2 agent track that every CLI/test author should know:
+Three footguns surfaced during the M2 agent track that every CLI/test author should know:
 
 ### Stdout/stderr line endings
 
@@ -76,6 +76,18 @@ input.enumerateLines { line, _ in lines.append(line) }
 Use `enumerateLines` for any byte stream that might originate from a different platform — subprocess output, network reads, files written elsewhere. The CLI now uses `StdoutStream` so its own output is LF, but tests should still iterate with `enumerateLines` as defense-in-depth (the convention may change; tests outliving the convention shouldn't break).
 
 This isn't a Foundation bug — Swift's grapheme-cluster `String` semantics are correct per Unicode spec. It's a portability footgun that the project leans against by convention.
+
+### Windows filesystem propagation latency
+
+**Filesystem changes on Windows can take up to 2 seconds to be visible** to readers — including subprocesses like `git`. A `Data.write(to: file)` followed immediately by spawning `git status` may see the pre-write state on Windows even though Linux/macOS see the post-write state instantly.
+
+This shapes test design:
+
+- Tests that write a file and expect a subprocess (`git`, `sprigctl`) to *observe* the change need a ≥2 s window. `--duration 0.5` is too tight on Windows; `--duration 2.5` or higher leaves margin.
+- Polling watcher tests already account for this — see PR #27 (`fix(WatcherKit): bump PollingFileWatcher test pre-write delays for Windows`).
+- Tests that don't depend on a *new* write reaching disk are fine at shorter timeouts. Spinning up `RepoAgent` against a repo whose state was committed earlier in setup is OK because the commit's index update has already propagated by the time the agent runs.
+
+When a Windows test goes flaky with timing-related assertions — empty `git status` outputs after a recent file write, `RepoAgent` initial refresh reporting no entries when one was just written — the answer is almost always "increase the timeout / duration to ≥ 2 s," not adjust parser/decoder logic. The grapheme-cluster trap above is the *other* common Windows-specific flake; rule out the timing one first since it's the more common cause.
 
 ## Adapter seams
 
