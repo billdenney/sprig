@@ -48,20 +48,42 @@ struct SprigctlAgentTests {
         // form trips both SwiftLint's `opening_brace` (wants `{` on the
         // same line) and SwiftFormat's `wrapMultilineStatementBraces`
         // (wants `{` on its own line). The guard chain sidesteps that.
-        var sawMatch = false
-        for line in out.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let data = String(line).data(using: .utf8),
+        //
+        // Each split line is trimmed before parsing because Windows
+        // delivers stdout with CRLF — splitting on "\n" leaves "\r" on
+        // every line, and Swift's `JSONSerialization` on Windows isn't
+        // reliably tolerant of it. Trim at the boundary, parse clean.
+        #expect(
+            stdoutContainsBadgeChangedFor(filename: "a.txt", badge: "modified", in: out.stdout),
+            "expected at least one badgeChanged envelope on stdout, got:\n\(out.stdout)"
+        )
+    }
+
+    /// Walks the lines of `stdout`, parses each as JSON (after a
+    /// whitespace trim — see Windows-CRLF note in callers), and
+    /// returns true on the first envelope that:
+    /// - has `kind == "badgeChanged"`,
+    /// - whose payload's `path` contains `filename`,
+    /// - whose payload's `badge` equals `badge`.
+    private func stdoutContainsBadgeChangedFor(
+        filename: String,
+        badge: String,
+        in stdout: String
+    ) -> Bool {
+        for raw in stdout.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty,
+                  let data = line.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { continue }
             guard (obj["kind"] as? String) == "badgeChanged",
                   let payload = obj["payload"] as? [String: Any],
-                  (payload["path"] as? String)?.contains("a.txt") == true,
-                  (payload["badge"] as? String) == "modified"
+                  (payload["path"] as? String)?.contains(filename) == true,
+                  (payload["badge"] as? String) == badge
             else { continue }
-            sawMatch = true
-            break
+            return true
         }
-        #expect(sawMatch, "expected at least one badgeChanged envelope on stdout, got:\n\(out.stdout)")
+        return false
     }
 
     @Test("agent on a clean repo with --duration exits 0 with no envelopes")
@@ -84,10 +106,14 @@ struct SprigctlAgentTests {
         // envelopes. The agent does emit one `subscriptionEnded` envelope
         // on shutdown (per slice A9, reason `agent_shutdown`); we filter
         // it out here since the assertion is about badge changes, not
-        // shutdown lifecycle.
+        // shutdown lifecycle. Lines are trimmed before parsing because
+        // Windows delivers stdout with CRLF and JSONSerialization on
+        // Windows isn't reliably tolerant of trailing `\r`.
         var badgeChangedLines = 0
-        for line in out.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let data = String(line).data(using: .utf8),
+        for raw in out.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty,
+                  let data = line.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { continue }
             if (obj["kind"] as? String) == "badgeChanged" {
@@ -116,8 +142,12 @@ struct SprigctlAgentTests {
         ])
         #expect(out.exitCode == 0)
 
+        // Trim each split line — Windows CRLF leaves "\r" at the end of
+        // every substring after splitting on "\n", and we don't want
+        // that "\r" leaking into the JSON-body slice below.
         let statsLines = out.stderr
             .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.hasPrefix("# stats: ") }
         #expect(statsLines.count >= 2, "expected at least 2 stats lines, got stderr:\n\(out.stderr)")
 
