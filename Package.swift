@@ -21,9 +21,12 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // (in `BadgeChangeBroadcaster`) using `IPCSchema`'s wire types,
     // and consumes `WatchEvent` (from PlatformKit) inside
     // `RepoRefreshDriver` to decide when filesystem activity warrants
-    // a `git status` refresh. All four are portable Tier-1 packages,
-    // so these dependencies are in-tier and add no platform coupling.
-    "RepoState": ["GitCore", "IPCSchema", "PlatformKit"]
+    // a `git status` refresh. `SnapshotIndex` (per ADR 0033's amendment)
+    // re-uses SafetyKit's `SnapshotRefName` format type when listing
+    // `refs/sprig/snapshots/...` entries from `git for-each-ref`. All
+    // five are portable Tier-1 packages, so these dependencies are
+    // in-tier and add no platform coupling.
+    "RepoState": ["GitCore", "IPCSchema", "PlatformKit", "SafetyKit"]
 ]
 
 let tier2Targets: [String] = [
