@@ -35,6 +35,48 @@ CI required-green per platform: macOS (`ci-macos`), Linux `packages/` (`ci-linux
 5. Every `PlatformKit` protocol has Mac/Linux/Windows source files from day 1 (non-target platforms may be `fatalError` stubs).
 6. CI runs the full test suite on macOS, Linux, and Windows. Red builds block merge on all three.
 
+## Cross-platform IO conventions
+
+Two footguns surfaced during the M2 agent track that every CLI/test author should know:
+
+### Stdout/stderr line endings
+
+Swift's default `print(...)` writes to stdout through a C-runtime `FILE *` with text-mode semantics on Windows, which translates `"\n"` → `"\r\n"` at the byte level. Linux and macOS pipes are byte-for-byte LF-only. CRLF on stdout is unconventional for streaming-JSON tooling (`jq -c` and similar consumers expect LF) and was the underlying cause of slice A9's Windows CI failure.
+
+Convention: **every CLI command writes to stdout via `StdoutStream`** (see `cli/sprigctl/Sources/StdoutStream.swift`), which calls `FileHandle.standardOutput.write(Data(...).utf8)` directly — no text-mode translation, LF on every platform. Same shape as the existing `StderrStream`.
+
+```swift
+var out = StdoutStream()
+print("hello", to: &out)              // LF on every platform
+print("don't do this")                // CRLF on Windows; only safe for one-off scripts
+```
+
+`StderrStream` is unchanged — `FileHandle.standardError.write(Data(...).utf8)` was already byte-for-byte. Use either depending on whether the output is data (stdout) or diagnostic text (stderr).
+
+### Splitting strings on newlines
+
+Swift's `String` is a collection of *grapheme clusters*. Per Unicode TR#14, a CRLF pair (`"\r\n"`) is **one** cluster, not two. So `someString.split(separator: "\n", ...)` against a CRLF-terminated string returns a single element containing every line concatenated — the separator `"\n"` (one cluster) never matches any cluster in the input.
+
+```swift
+"a\r\nb\r\nc".split(separator: "\n", omittingEmptySubsequences: true)
+// → ["a\r\nb\r\nc"]   (one element, NOT three)
+
+"a\nb\nc".split(separator: "\n", omittingEmptySubsequences: true)
+// → ["a", "b", "c"]   (works only for LF-only input)
+```
+
+The right primitive: **`String.enumerateLines(invoking:)`** — Foundation's canonical line iterator that handles LF, CRLF, CR-alone, and NEL uniformly.
+
+```swift
+var lines: [String] = []
+input.enumerateLines { line, _ in lines.append(line) }
+// Works for "a\nb\nc", "a\r\nb\r\nc", and mixed.
+```
+
+Use `enumerateLines` for any byte stream that might originate from a different platform — subprocess output, network reads, files written elsewhere. The CLI now uses `StdoutStream` so its own output is LF, but tests should still iterate with `enumerateLines` as defense-in-depth (the convention may change; tests outliving the convention shouldn't break).
+
+This isn't a Foundation bug — Swift's grapheme-cluster `String` semantics are correct per Unicode spec. It's a portability footgun that the project leans against by convention.
+
 ## Adapter seams
 
 See `packages/PlatformKit/` for the authoritative protocol list: `FileWatcher`, `CredentialStore`, `NotificationPresenter`, `UpdateChannel`, `Transport`, `ServiceLauncher`, `PathResolver`, `GitLocator`.
