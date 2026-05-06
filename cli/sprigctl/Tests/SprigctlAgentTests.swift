@@ -1,4 +1,5 @@
 import Foundation
+import IPCSchema
 import Testing
 
 // `sprigctl agent` end-to-end CLI tests. Lives in its own file (split
@@ -40,28 +41,66 @@ struct SprigctlAgentTests {
         ])
         #expect(out.exitCode == 0)
 
-        // stdout is JSON envelopes, one per line. The envelope's
-        // `Codable` flattens the message's `kind` + `payload` into the
-        // envelope's top-level keys (alongside `id`, `schemaVersion`),
-        // so we assert at the top level — not under a `message` key.
-        // Uses a guard chain rather than a multi-clause `if`: the latter
-        // form trips both SwiftLint's `opening_brace` (wants `{` on the
-        // same line) and SwiftFormat's `wrapMultilineStatementBraces`
-        // (wants `{` on its own line). The guard chain sidesteps that.
-        var sawMatch = false
-        for line in out.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let data = String(line).data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { continue }
-            guard (obj["kind"] as? String) == "badgeChanged",
-                  let payload = obj["payload"] as? [String: Any],
-                  (payload["path"] as? String)?.contains("a.txt") == true,
-                  (payload["badge"] as? String) == "modified"
-            else { continue }
-            sawMatch = true
-            break
+        // stdout is one `Envelope<AgentEvent>` JSON per line. Decode
+        // via the canonical `IPCSchema.EnvelopeCodec.decode` (uses
+        // `JSONDecoder` under the hood) rather than reaching for
+        // `JSONSerialization.jsonObject(...) as? [String: Any]`. The
+        // typed-decode path goes through a different Foundation entry
+        // point that's been more reliable on Windows CI; using the
+        // production codec here also means tests exercise the same
+        // wire-format contract a real client would.
+        //
+        // Each line is whitespace-trimmed before decode because Windows
+        // CRLF leaves "\r" on every substring after splitting on "\n",
+        // and we don't want that "\r" to confuse the decoder's
+        // single-document boundary detection.
+        let envelopes = decodeAgentEventEnvelopes(in: out.stdout)
+        let sawMatch = envelopes.contains { envelope in
+            guard case let .badgeChanged(payload) = envelope.message else { return false }
+            return payload.path.contains("a.txt") && payload.badge == "modified"
         }
-        #expect(sawMatch, "expected at least one badgeChanged envelope on stdout, got:\n\(out.stdout)")
+        #expect(
+            sawMatch,
+            "expected at least one badgeChanged envelope on stdout, got:\n\(out.stdout)"
+        )
+    }
+
+    /// Walks `stdout` line-by-line and returns each
+    /// `Envelope<AgentEvent>` that decodes cleanly via
+    /// ``IPCSchema/EnvelopeCodec/decode(_:from:)``. Lines that don't
+    /// decode are skipped silently — the agent's stdout sometimes
+    /// includes diagnostic or comment lines (`# agent: …`) the codec
+    /// rightly rejects.
+    ///
+    /// **Why `enumerateLines(invoking:)` rather than
+    /// `split(separator: "\n", ...)`.** Swift's `String` is a
+    /// collection of *grapheme clusters*; per Unicode TR#14 a CRLF
+    /// pair (`\r\n`) is **one** cluster, not two. So `split(separator:
+    /// "\n", ...)` against a CRLF-terminated string returns a single
+    /// element containing every line concatenated — the separator
+    /// `"\n"` (one cluster) never matches any cluster in the input
+    /// (every newline cluster there is `"\r\n"`).
+    ///
+    /// This bites on Windows specifically: Swift's `print()` writes
+    /// to stdout through a runtime that translates `"\n"` to `"\r\n"`
+    /// at the C-runtime layer (text-mode FILE * semantics), so the
+    /// captured pipe bytes carry CRLF. Linux and macOS pipes are
+    /// byte-for-byte and stay LF-only.
+    ///
+    /// `String.enumerateLines(invoking:)` is the Foundation-canonical
+    /// line iterator that handles LF, CRLF, CR-alone, and NEL
+    /// uniformly. Use it for any byte stream that might originate
+    /// from a different platform.
+    private func decodeAgentEventEnvelopes(in stdout: String) -> [Envelope<AgentEvent>] {
+        var envelopes: [Envelope<AgentEvent>] = []
+        stdout.enumerateLines { line, _ in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return }
+            if let envelope = try? EnvelopeCodec.decode(AgentEvent.self, from: data) {
+                envelopes.append(envelope)
+            }
+        }
+        return envelopes
     }
 
     @Test("agent on a clean repo with --duration exits 0 with no envelopes")
@@ -80,13 +119,20 @@ struct SprigctlAgentTests {
             repo.path
         ])
         #expect(out.exitCode == 0)
-        // Clean repo → empty diff on initial refresh → no envelopes.
-        // stderr may contain the "# agent: watching ..." status line; the
-        // assertion is on stdout only.
-        let nonEmptyStdoutLines = out.stdout
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .count
-        #expect(nonEmptyStdoutLines == 0, "expected no envelopes on stdout, got:\n\(out.stdout)")
+        // Clean repo → empty diff on initial refresh → no `badgeChanged`
+        // envelopes. The agent does emit one `subscriptionEnded` envelope
+        // on shutdown (per slice A9, reason `agent_shutdown`); decode
+        // every envelope and assert no `.badgeChanged` case appears.
+        // See `emitsBadgeChangedOnStartup` for the rationale on using
+        // `EnvelopeCodec.decode` rather than `JSONSerialization`.
+        let envelopes = decodeAgentEventEnvelopes(in: out.stdout)
+        let badgeChangedCount = envelopes.reduce(into: 0) { count, envelope in
+            if case .badgeChanged = envelope.message { count += 1 }
+        }
+        #expect(
+            badgeChangedCount == 0,
+            "expected no badgeChanged envelopes, got stdout:\n\(out.stdout)"
+        )
     }
 
     @Test("agent --stats-interval prints periodic '# stats: …' lines on stderr")
@@ -108,8 +154,12 @@ struct SprigctlAgentTests {
         ])
         #expect(out.exitCode == 0)
 
+        // Trim each split line — Windows CRLF leaves "\r" at the end of
+        // every substring after splitting on "\n", and we don't want
+        // that "\r" leaking into the JSON-body slice below.
         let statsLines = out.stderr
             .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.hasPrefix("# stats: ") }
         #expect(statsLines.count >= 2, "expected at least 2 stats lines, got stderr:\n\(out.stderr)")
 

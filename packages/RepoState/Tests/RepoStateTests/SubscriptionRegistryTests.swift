@@ -225,4 +225,44 @@ struct SubscriptionRegistryTests {
         let id = await registry.subscribe(roots: [url("/repo/./dir")])
         #expect(await registry.matchingSubscriptions(for: url("/repo/dir/file")) == [id])
     }
+
+    // MARK: allSubscriptions
+
+    @Test("allSubscriptions on an empty registry returns an empty array")
+    func allSubscriptionsEmpty() async {
+        let registry = SubscriptionRegistry()
+        #expect(await registry.allSubscriptions().isEmpty)
+    }
+
+    @Test("allSubscriptions returns every active id across multiple subscribers")
+    func allSubscriptionsEnumeratesAll() async {
+        let registry = SubscriptionRegistry()
+        let id1 = await registry.subscribe(roots: [url("/a")])
+        let id2 = await registry.subscribe(roots: [url("/b")])
+        let id3 = await registry.subscribe(roots: [url("/c")])
+        let all = await registry.allSubscriptions()
+        #expect(Set(all) == Set([id1, id2, id3]))
+        #expect(all.count == 3)
+    }
+
+    @Test("allSubscriptions returns ids in stable (uuidString-sorted) order")
+    func allSubscriptionsIsSorted() async {
+        let registry = SubscriptionRegistry()
+        let id1 = await registry.subscribe(roots: [url("/a")])
+        let id2 = await registry.subscribe(roots: [url("/b")])
+        let id3 = await registry.subscribe(roots: [url("/c")])
+        let all = await registry.allSubscriptions()
+        let expected = [id1, id2, id3].sorted(by: { $0.uuidString < $1.uuidString })
+        #expect(all == expected)
+    }
+
+    @Test("allSubscriptions reflects unsubscribes")
+    func allSubscriptionsReflectsUnsubscribe() async {
+        let registry = SubscriptionRegistry()
+        let id1 = await registry.subscribe(roots: [url("/a")])
+        let id2 = await registry.subscribe(roots: [url("/b")])
+        _ = await registry.unsubscribe(id1)
+        let all = await registry.allSubscriptions()
+        #expect(all == [id2])
+    }
 }

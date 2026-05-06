@@ -132,6 +132,15 @@ public actor SubscriptionRegistry {
         rootsByID.count
     }
 
+    /// Every active subscription id, in stable (uuidString-sorted)
+    /// order. Used by the agent to fan
+    /// ``IPCSchema/AgentEvent/subscriptionEnded`` envelopes out to all
+    /// active subscribers on shutdown — tests and per-tick diagnostics
+    /// can also consume this without needing a separate enumeration.
+    public func allSubscriptions() -> [UUID] {
+        rootsByID.keys.sorted(by: { $0.uuidString < $1.uuidString })
+    }
+
     /// Roots registered for `id`, or nil if no subscription has that
     /// id. Returns roots in the order the caller supplied them
     /// (post-deduplication). Useful for diagnostics and for the
