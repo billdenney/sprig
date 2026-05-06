@@ -21,9 +21,12 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // (in `BadgeChangeBroadcaster`) using `IPCSchema`'s wire types,
     // and consumes `WatchEvent` (from PlatformKit) inside
     // `RepoRefreshDriver` to decide when filesystem activity warrants
-    // a `git status` refresh. All four are portable Tier-1 packages,
-    // so these dependencies are in-tier and add no platform coupling.
-    "RepoState": ["GitCore", "IPCSchema", "PlatformKit"],
+    // a `git status` refresh. `SnapshotIndex` (per ADR 0033's amendment)
+    // re-uses SafetyKit's `SnapshotRefName` format type when listing
+    // `refs/sprig/snapshots/...` entries from `git for-each-ref`. All
+    // five are portable Tier-1 packages, so these dependencies are
+    // in-tier and add no platform coupling.
+    "RepoState": ["GitCore", "IPCSchema", "PlatformKit", "SafetyKit"],
     // SafetyKit's `SnapshotWriter` invokes `git update-ref` to create
     // the ADR 0033 snapshot refs that make destructive operations
     // reversible. That's the only dependency it has on GitCore today;
@@ -164,6 +167,7 @@ let package = Package(
                     "RepoState",
                     "IPCSchema",
                     "AgentKit",
+                    "SafetyKit",
                     .product(name: "ArgumentParser", package: "swift-argument-parser")
                 ],
                 path: "cli/sprigctl/Sources"
@@ -172,13 +176,15 @@ let package = Package(
                 name: "sprigctlTests",
                 // GitCore for ProcessTerminationGate (race-safe replacement
                 // for Process.waitUntilExit) used by SprigctlSupport;
-                // RepoState + IPCSchema + AgentKit for AgentCommand tests.
+                // RepoState + IPCSchema + AgentKit for AgentCommand tests;
+                // SafetyKit for RecoverCommand tests (snapshot ref names).
                 dependencies: [
                     "sprigctl",
                     "GitCore",
                     "RepoState",
                     "IPCSchema",
-                    "AgentKit"
+                    "AgentKit",
+                    "SafetyKit"
                 ],
                 path: "cli/sprigctl/Tests"
             )
