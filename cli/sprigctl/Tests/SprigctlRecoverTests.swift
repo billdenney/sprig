@@ -64,6 +64,145 @@ struct SprigctlRecoverTests {
         #expect(out.stdout.contains("2026-05-06"))
     }
 
+    @Test("recover --list and --restore are mutually exclusive")
+    func mutuallyExclusiveFlags() async throws {
+        let repo = try Sprigctl.mkRepo("recover-mutex")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await Sprigctl.initRepo(at: repo)
+
+        let out = try await Sprigctl.run([
+            "recover",
+            "--list",
+            "--restore", "refs/sprig/snapshots/20260506T031234Z/merge",
+            repo.path
+        ])
+        #expect(out.exitCode != 0)
+        #expect(out.stderr.contains("mutually exclusive"))
+    }
+
+    // MARK: - --restore
+
+    @Test("restore rejects refs that don't parse as snapshot refs")
+    func restoreRejectsBadFormat() async throws {
+        let repo = try Sprigctl.mkRepo("recover-bad-format")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await seed(repo: repo)
+
+        // A perfectly valid git ref, but not a snapshot ref.
+        let out = try await Sprigctl.run([
+            "recover",
+            "--restore", "refs/heads/main",
+            repo.path
+        ])
+        #expect(out.exitCode != 0)
+        #expect(out.stderr.contains("snapshot format"))
+    }
+
+    @Test("restore errors when the snapshot ref doesn't exist")
+    func restoreRejectsNonexistentRef() async throws {
+        let repo = try Sprigctl.mkRepo("recover-nonexistent")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await seed(repo: repo)
+
+        let phantom = "refs/sprig/snapshots/20260506T031234Z/merge"
+        let out = try await Sprigctl.run([
+            "recover",
+            "--restore", phantom,
+            repo.path
+        ])
+        #expect(out.exitCode != 0)
+        #expect(out.stderr.contains("does not exist"))
+    }
+
+    @Test("restore moves HEAD to the snapshot's commit and creates a before-snapshot")
+    func restoreResetsHEAD() async throws {
+        let repo = try Sprigctl.mkRepo("recover-restore")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await seed(repo: repo)
+
+        // Snapshot the seed commit, then make a second commit so HEAD
+        // diverges from the snapshot.
+        let timestamp = utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34)
+        try await writeSnapshot(at: timestamp, op: SnapshotRefName.opMerge, in: repo)
+        let snapshotRef = "refs/sprig/snapshots/20260506T031234Z/merge"
+
+        try Sprigctl.write("v2\n", to: repo.appendingPathComponent("a.txt"))
+        try await Sprigctl.spawnGit(["commit", "-am", "second"], cwd: repo)
+
+        let beforeRestoreHEAD = try await readHEAD(in: repo)
+        let snapshotSHA = try await readRefSHA(snapshotRef, in: repo)
+        #expect(beforeRestoreHEAD != snapshotSHA, "HEAD should differ from the snapshot before restore")
+
+        let out = try await Sprigctl.run([
+            "recover",
+            "--restore", snapshotRef,
+            repo.path
+        ])
+        #expect(out.exitCode == 0)
+        #expect(out.stdout.contains("Restored worktree to \(snapshotRef)"))
+        #expect(out.stdout.contains("Before-restore snapshot:"))
+
+        // HEAD now matches the snapshot.
+        let afterRestoreHEAD = try await readHEAD(in: repo)
+        #expect(afterRestoreHEAD == snapshotSHA)
+
+        // A new "restore" snapshot exists that captures the
+        // pre-restore HEAD; we don't know its exact name (timestamp
+        // is `Date()`), but `for-each-ref` should find one.
+        let listOut = try await Sprigctl.run(["recover", "--list", "--json", repo.path])
+        let trimmed = listOut.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let data = try #require(trimmed.data(using: .utf8))
+        let parsed = try JSONSerialization.jsonObject(with: data, options: [])
+        let array = try #require(parsed as? [[String: Any]])
+        let beforeSnap = array.first { $0["op"] as? String == "restore" }
+        let beforeSnapDict = try #require(beforeSnap)
+        #expect(beforeSnapDict["sha"] as? String == beforeRestoreHEAD)
+    }
+
+    @Test("restore is reversible — restoring the before-snapshot brings HEAD back")
+    func restoreIsReversible() async throws {
+        let repo = try Sprigctl.mkRepo("recover-reversible")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await seed(repo: repo)
+
+        let firstSeedHEAD = try await readHEAD(in: repo)
+
+        // Snapshot the seed, then add a second commit.
+        let timestamp = utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34)
+        try await writeSnapshot(at: timestamp, op: SnapshotRefName.opMerge, in: repo)
+        let snapshotRef = "refs/sprig/snapshots/20260506T031234Z/merge"
+
+        try Sprigctl.write("v2\n", to: repo.appendingPathComponent("a.txt"))
+        try await Sprigctl.spawnGit(["commit", "-am", "second"], cwd: repo)
+        let preRestoreHEAD = try await readHEAD(in: repo)
+
+        // First restore: HEAD → first commit.
+        _ = try await Sprigctl.run(["recover", "--restore", snapshotRef, repo.path])
+        #expect(try await readHEAD(in: repo) == firstSeedHEAD)
+
+        // Find the before-restore snapshot.
+        let listOut = try await Sprigctl.run(["recover", "--list", "--json", repo.path])
+        let trimmed = listOut.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let data = try #require(trimmed.data(using: .utf8))
+        let parsed = try JSONSerialization.jsonObject(with: data, options: [])
+        let array = try #require(parsed as? [[String: Any]])
+        let beforeSnap = try #require(array.first { $0["op"] as? String == "restore" })
+        let beforeSnapRef = try #require(beforeSnap["refName"] as? String)
+
+        // Sleep > 1 s so the second restore's own before-snapshot has
+        // a distinct timestamp and doesn't overwrite the first one's
+        // before-snapshot (`SnapshotWriter`'s same-second-same-op
+        // collision behavior, documented in PR #60). Without this
+        // delay, `git update-ref refs/.../restore` would move
+        // `beforeSnapRef` to the new HEAD before the `git reset
+        // --hard` reads it, and we'd end up back where we started.
+        try await Task.sleep(for: .seconds(1.2))
+
+        // Second restore: HEAD back to second commit via the before-snapshot.
+        _ = try await Sprigctl.run(["recover", "--restore", beforeSnapRef, repo.path])
+        #expect(try await readHEAD(in: repo) == preRestoreHEAD)
+    }
+
     @Test("recover --list --json emits a sorted-keys JSON array")
     func jsonList() async throws {
         let repo = try Sprigctl.mkRepo("recover-json")
@@ -132,6 +271,28 @@ struct SprigctlRecoverTests {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
         return calendar.date(from: components) ?? .distantPast
+    }
+
+    /// Read HEAD's commit SHA via `git rev-parse HEAD`. Returns the
+    /// full hex SHA, trimmed of whitespace.
+    private func readHEAD(in repo: URL) async throws -> String {
+        try await readRefSHA("HEAD", in: repo)
+    }
+
+    /// Read the commit SHA a ref points at via `git rev-parse <ref>`.
+    private func readRefSHA(_ ref: String, in repo: URL) async throws -> String {
+        let process = Process()
+        process.executableURL = try URL(fileURLWithPath: Sprigctl.gitBinaryPath())
+        process.arguments = ["rev-parse", ref]
+        process.currentDirectoryURL = repo
+        let outPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = try outPipe.fileHandleForReading.readToEnd() ?? Data()
+        process.waitUntilExit()
+        return (String(data: data, encoding: .utf8) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

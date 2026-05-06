@@ -1,15 +1,14 @@
 // RecoverCommand.swift
 //
-// `sprigctl recover` — list (and eventually restore) ADR 0033 snapshot
-// refs created by destructive operations. Per the ADR amendment, this
-// is the headless equivalent of the macOS / Windows "Recover…" task
-// window: anyone with a git checkout can see the safety net Sprig has
-// laid down.
+// `sprigctl recover` — list or restore ADR 0033 snapshot refs created
+// by destructive operations. Per the ADR amendment, this is the
+// headless equivalent of the macOS / Windows "Recover…" task window:
+// anyone with a git checkout can see the safety net Sprig has laid
+// down — and roll back to one with a single command.
 //
-// This slice ships `--list` only. `--restore <ref>` is a follow-up
-// slice — restoration creates a new snapshot of HEAD before checking
-// out the older one (so the restore is itself reversible), which
-// touches more of the destructive-op machinery.
+// `--restore` does `git reset --hard <snapshot-ref>` after creating a
+// new before-restore snapshot of HEAD, so the restore is itself
+// reversible (re-restore the before-snapshot to undo).
 
 import ArgumentParser
 import Foundation
@@ -17,42 +16,60 @@ import GitCore
 import RepoState
 import SafetyKit
 
-/// `sprigctl recover --list [<repo>] [--json]`
-/// — list every `refs/sprig/snapshots/...` ref in the repo.
+/// `sprigctl recover --list [<repo>] [--json]` or
+/// `sprigctl recover --restore <snapshot-ref> [<repo>]`.
 ///
-/// Default output is human-readable: one line per snapshot, sorted
-/// newest first. `--json` emits a sorted-keys JSON array suitable for
-/// piping into `jq` or other tooling.
+/// `--list` and `--restore` are mutually exclusive; exactly one must
+/// be supplied. List output is human-readable by default; `--json`
+/// emits a sorted-keys JSON array suitable for piping into `jq` or
+/// other tooling.
 struct RecoverCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "recover",
-        abstract: "List ADR 0033 snapshot refs in a repo (--restore is a future slice)."
+        abstract: "List or restore ADR 0033 snapshot refs in a repo."
     )
 
     @Argument(help: "Repository worktree root (defaults to the current directory).")
     var path: String?
 
-    @Flag(name: .long, help: "List snapshot refs (currently the only supported mode).")
+    @Flag(name: .long, help: "List snapshot refs in the repo. Mutually exclusive with --restore.")
     var list: Bool = false
 
-    @Flag(name: .long, help: "Emit JSON instead of a human-readable summary.")
+    @Option(
+        name: .long,
+        help: ArgumentHelp(
+            "Restore the worktree to the named snapshot ref. Mutually exclusive with --list.",
+            valueName: "snapshot-ref"
+        )
+    )
+    var restore: String?
+
+    @Flag(name: .long, help: "Emit JSON instead of a human-readable summary (only with --list).")
     var json: Bool = false
 
     func run() async throws {
-        guard list else {
-            // Without --list there's nothing this subcommand does yet.
-            // Surfacing this as a validation error rather than a default
-            // behavior because adding `--restore` later should require an
-            // explicit mode flag too — silently defaulting to list would
-            // hide a footgun once both modes exist.
+        // Exactly-one-of validation: --list and --restore are mutually
+        // exclusive, and at least one must be supplied. ArgumentParser
+        // doesn't have a built-in "exactly one of these flags" so we
+        // do it ourselves.
+        switch (list, restore) {
+        case (false, nil):
             throw ValidationError(
-                "specify --list to enumerate snapshot refs (--restore is not yet implemented)"
+                "specify either --list (enumerate snapshots) or --restore <snapshot-ref>"
             )
+        case (true, .some):
+            throw ValidationError("--list and --restore are mutually exclusive")
+        case (true, nil):
+            try await runList()
+        case let (false, .some(snapshotRef)):
+            try await runRestore(ref: snapshotRef)
         }
+    }
 
-        let repoURL = URL(fileURLWithPath: path ?? FileManager.default.currentDirectoryPath)
-            .standardized
-        let runner = Runner(defaultWorkingDirectory: repoURL)
+    // MARK: - --list
+
+    private func runList() async throws {
+        let runner = makeRunner()
         let index = SnapshotIndex(runner: runner)
         try await index.refresh()
         let snapshots = await index.list()
@@ -62,6 +79,12 @@ struct RecoverCommand: AsyncParsableCommand {
         } else {
             emitHuman(snapshots)
         }
+    }
+
+    private func makeRunner() -> Runner {
+        let repoURL = URL(fileURLWithPath: path ?? FileManager.default.currentDirectoryPath)
+            .standardized
+        return Runner(defaultWorkingDirectory: repoURL)
     }
 
     private func emitHuman(_ snapshots: [Snapshot]) {
@@ -93,6 +116,57 @@ struct RecoverCommand: AsyncParsableCommand {
             var out = StdoutStream()
             print(text, to: &out)
         }
+    }
+
+    // MARK: - --restore
+
+    /// Op tag used for the before-restore snapshot. Distinguishes
+    /// "I restored the repo at this time" from the destructive-op
+    /// snapshots (`merge`, `rebase`, `reset-hard`, …) that the user
+    /// might be restoring to. Lowercase ASCII per
+    /// ``SafetyKit/SnapshotRefName/isValidOp(_:)``.
+    static let beforeRestoreOp = "restore"
+
+    private func runRestore(ref: String) async throws {
+        // Reject anything that doesn't parse as a snapshot ref before
+        // we touch git. This keeps `--restore <some-other-branch>`
+        // from accidentally rewinding HEAD via the recover tool;
+        // arbitrary refs need `git reset --hard`, not Sprig.
+        guard SnapshotRefName.parse(ref) != nil else {
+            throw ValidationError(
+                "ref does not match the snapshot format \(SnapshotRefName.prefix)<ts>/<op>: \(ref)"
+            )
+        }
+
+        let runner = makeRunner()
+
+        // Verify the ref actually exists in the repo. `rev-parse
+        // --verify --quiet` exits non-zero if the ref is missing.
+        let revParse = try await runner.run(
+            ["rev-parse", "--verify", "--quiet", ref],
+            throwOnNonZero: false
+        )
+        guard revParse.exitCode == 0 else {
+            throw ValidationError("snapshot ref does not exist in this repo: \(ref)")
+        }
+
+        // Take a snapshot of the current HEAD so the restore is
+        // itself reversible — re-running `recover --restore` against
+        // this new ref returns to pre-restore state. Per ADR 0033's
+        // amendment.
+        let writer = SnapshotWriter(runner: runner)
+        let beforeSnapshot = try await writer.createSnapshot(op: RecoverCommand.beforeRestoreOp)
+
+        // Now reset the worktree to the snapshot. `git reset --hard`
+        // moves HEAD, index, and worktree to the target ref's commit
+        // — destructive of *uncommitted* changes (committed state is
+        // captured in `beforeSnapshot`).
+        _ = try await runner.run(["reset", "--hard", ref])
+
+        var out = StdoutStream()
+        print("Restored worktree to \(ref)", to: &out)
+        print("Before-restore snapshot: \(beforeSnapshot.refName)", to: &out)
+        print("Run `sprigctl recover --restore \(beforeSnapshot.refName)` to undo.", to: &out)
     }
 }
 
