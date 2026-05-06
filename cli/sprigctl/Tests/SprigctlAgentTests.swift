@@ -154,13 +154,20 @@ struct SprigctlAgentTests {
         ])
         #expect(out.exitCode == 0)
 
-        // Trim each split line — Windows CRLF leaves "\r" at the end of
-        // every substring after splitting on "\n", and we don't want
-        // that "\r" leaking into the JSON-body slice below.
-        let statsLines = out.stderr
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { $0.hasPrefix("# stats: ") }
+        // Use `enumerateLines(invoking:)` rather than
+        // `split(separator: "\n", ...)`. Stderr is currently written
+        // via `FileHandle.standardError.write(Data(...).utf8)` (no
+        // text-mode translation, LF on every platform), so split would
+        // work today — but the canonical iterator tolerates CRLF if
+        // anyone ever changes the stderr write path. Same reasoning as
+        // `decodeAgentEventEnvelopes(in:)` above; defense-in-depth.
+        var statsLines: [String] = []
+        out.stderr.enumerateLines { line, _ in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("# stats: ") {
+                statsLines.append(trimmed)
+            }
+        }
         #expect(statsLines.count >= 2, "expected at least 2 stats lines, got stderr:\n\(out.stderr)")
 
         // Each stats line's payload is JSON. Sample-decode the first
