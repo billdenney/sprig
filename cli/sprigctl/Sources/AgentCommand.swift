@@ -99,21 +99,25 @@ struct AgentCommand: AsyncParsableCommand {
         }
         defer { stopTask?.cancel() }
 
-        // Optional periodic stats printer. Reads diagnostics from the
-        // agent (passthroughs to `RepoRefreshDriver`) and writes one
-        // JSON line per tick to stderr. Cancelled by `defer` when the
-        // command exits — doesn't need its own coordination with the
-        // sink shutdown.
+        var err = StderrStream()
+        print("# agent: watching \(rootURL.path)", to: &err)
+
+        try await agent.start()
+
+        // Optional periodic stats printer. Spawned AFTER `start()`
+        // returns so the first tick's `await agent.lastOutcome()` has
+        // a concrete value: `start()` runs the forced initial refresh
+        // synchronously, so by the time the stats task wakes after
+        // its first sleep there's always at least one outcome to
+        // report. If we spawned earlier (or before `start()`) the
+        // first stats line could fire while `start()` is still
+        // running on a slow runner — Windows CI hit this — and emit
+        // `outcome: null` because no refresh had completed yet.
         let statsTask: Task<Void, Never>? = makeStatsTask(
             interval: statsInterval,
             agent: agent
         )
         defer { statsTask?.cancel() }
-
-        var err = StderrStream()
-        print("# agent: watching \(rootURL.path)", to: &err)
-
-        try await agent.start()
 
         // Drain the sink's stream; one JSON envelope per line.
         // Writes go through `StdoutStream` rather than the default

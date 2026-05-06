@@ -12,11 +12,12 @@ struct VersionCommand: AsyncParsableCommand {
     static let toolVersion = "0.1.0"
 
     func run() async throws {
-        print("sprigctl \(Self.toolVersion)")
+        var out = StdoutStream()
+        print("sprigctl \(Self.toolVersion)", to: &out)
         let runner = Runner()
         do {
             let gitVersion = try await runner.version()
-            print("git \(gitVersion)")
+            print("git \(gitVersion)", to: &out)
             if !gitVersion.meetsMinimum {
                 var err = StderrStream()
                 print(
@@ -25,7 +26,7 @@ struct VersionCommand: AsyncParsableCommand {
                 )
             }
         } catch let error as GitError {
-            print("git unavailable (\(error.description))")
+            print("git unavailable (\(error.description))", to: &out)
         }
     }
 }
