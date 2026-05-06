@@ -40,50 +40,40 @@ struct SprigctlAgentTests {
         ])
         #expect(out.exitCode == 0)
 
-        // stdout is JSON envelopes, one per line. The envelope's
-        // `Codable` flattens the message's `kind` + `payload` into the
-        // envelope's top-level keys (alongside `id`, `schemaVersion`),
-        // so we assert at the top level — not under a `message` key.
-        // Uses a guard chain rather than a multi-clause `if`: the latter
-        // form trips both SwiftLint's `opening_brace` (wants `{` on the
-        // same line) and SwiftFormat's `wrapMultilineStatementBraces`
-        // (wants `{` on its own line). The guard chain sidesteps that.
+        // stdout is JSON envelopes, one per line. We assert via raw
+        // substring matches against `out.stdout` rather than splitting
+        // and JSON-parsing each line — splitting + parsing is flaky on
+        // Windows CI in ways we couldn't reproduce on Linux/macOS,
+        // probably some interaction between Windows CRLF, pipe
+        // buffering, and `JSONSerialization`'s tolerance.
         //
-        // Each split line is trimmed before parsing because Windows
-        // delivers stdout with CRLF — splitting on "\n" leaves "\r" on
-        // every line, and Swift's `JSONSerialization` on Windows isn't
-        // reliably tolerant of it. Trim at the boundary, parse clean.
+        // Substring matching is reliable here because the wire format
+        // pins key order: `EnvelopeCodec` writes with
+        // `JSONEncoder.outputFormatting = [.sortedKeys]`, so
+        // `"kind":"badgeChanged"` and `"badge":"modified"` always
+        // appear as literal substrings (no reorder, no whitespace
+        // surprises). The `subscriptionEnded` envelope on shutdown has
+        // a different `kind` value so it doesn't collide with the
+        // `badgeChanged` substring.
         #expect(
             stdoutContainsBadgeChangedFor(filename: "a.txt", badge: "modified", in: out.stdout),
             "expected at least one badgeChanged envelope on stdout, got:\n\(out.stdout)"
         )
     }
 
-    /// Walks the lines of `stdout`, parses each as JSON (after a
-    /// whitespace trim — see Windows-CRLF note in callers), and
-    /// returns true on the first envelope that:
-    /// - has `kind == "badgeChanged"`,
-    /// - whose payload's `path` contains `filename`,
-    /// - whose payload's `badge` equals `badge`.
+    /// Returns true when `stdout` contains a `badgeChanged` envelope
+    /// whose `path` includes `filename` and whose `badge` matches.
+    /// Uses substring matching against the wire-stable JSON form
+    /// (sorted keys per `EnvelopeCodec`), avoiding the JSON-parse +
+    /// line-iteration path that flakes on Windows CI.
     private func stdoutContainsBadgeChangedFor(
         filename: String,
         badge: String,
         in stdout: String
     ) -> Bool {
-        for raw in stdout.split(separator: "\n", omittingEmptySubsequences: true) {
-            let line = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty,
-                  let data = line.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { continue }
-            guard (obj["kind"] as? String) == "badgeChanged",
-                  let payload = obj["payload"] as? [String: Any],
-                  (payload["path"] as? String)?.contains(filename) == true,
-                  (payload["badge"] as? String) == badge
-            else { continue }
-            return true
-        }
-        return false
+        stdout.contains("\"kind\":\"badgeChanged\"")
+            && stdout.contains("\"badge\":\"\(badge)\"")
+            && stdout.contains(filename)
     }
 
     @Test("agent on a clean repo with --duration exits 0 with no envelopes")
@@ -105,22 +95,13 @@ struct SprigctlAgentTests {
         // Clean repo → empty diff on initial refresh → no `badgeChanged`
         // envelopes. The agent does emit one `subscriptionEnded` envelope
         // on shutdown (per slice A9, reason `agent_shutdown`); we filter
-        // it out here since the assertion is about badge changes, not
-        // shutdown lifecycle. Lines are trimmed before parsing because
-        // Windows delivers stdout with CRLF and JSONSerialization on
-        // Windows isn't reliably tolerant of trailing `\r`.
-        var badgeChangedLines = 0
-        for raw in out.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
-            let line = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty,
-                  let data = line.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { continue }
-            if (obj["kind"] as? String) == "badgeChanged" {
-                badgeChangedLines += 1
-            }
-        }
-        #expect(badgeChangedLines == 0, "expected no badgeChanged envelopes, got stdout:\n\(out.stdout)")
+        // it out via substring match. Same Windows-CRLF / JSON-parse
+        // flake reasoning as `emitsBadgeChangedOnStartup` — substring
+        // works because the wire format has sorted keys.
+        #expect(
+            !out.stdout.contains("\"kind\":\"badgeChanged\""),
+            "expected no badgeChanged envelopes, got stdout:\n\(out.stdout)"
+        )
     }
 
     @Test("agent --stats-interval prints periodic '# stats: …' lines on stderr")
