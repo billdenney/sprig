@@ -7,6 +7,10 @@
 // stacked but not-yet-merged branch). Once both slices land, a future
 // PR can rewrite the helpers to go through `SnapshotWriter` for tighter
 // coupling to the production write path.
+//
+// Helpers live in `SnapshotIndexTestSupport.swift`; pruning tests live
+// in `SnapshotIndexPruneTests.swift` — split out so the test structs
+// in either file stay under SwiftLint's `type_body_length` cap.
 
 import Foundation
 import GitCore
@@ -16,63 +20,15 @@ import Testing
 
 @Suite("SnapshotIndex — integration against real git")
 struct SnapshotIndexTests {
-    private func mkRepo(_ tag: String) async throws -> (URL, Runner) {
-        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("sprig-snapshot-index-\(tag)-\(UUID().uuidString)")
-            .standardized
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        let runner = Runner(defaultWorkingDirectory: tmp)
-        _ = try await runner.run(["init", "-b", "main"])
-        _ = try await runner.run(["config", "user.email", "test@sprig.app"])
-        _ = try await runner.run(["config", "user.name", "Sprig Test"])
-        _ = try await runner.run(["config", "commit.gpgsign", "false"])
-        return (tmp, runner)
-    }
-
-    private func seedCommit(at repo: URL, runner: Runner) async throws {
-        try Data("seed\n".utf8).write(to: repo.appendingPathComponent("a.txt"))
-        _ = try await runner.run(["add", "a.txt"])
-        _ = try await runner.run(["commit", "-m", "seed"])
-    }
-
-    /// Write a snapshot ref via `git update-ref` directly. Mirrors what
-    /// `SafetyKit.SnapshotWriter` will do when its slice merges; using
-    /// the raw form here keeps S3's branch independent of S2's.
-    @discardableResult
-    private func writeSnapshot(
-        at timestamp: Date,
-        op: String,
-        runner: Runner,
-        target: String = "HEAD"
-    ) async throws -> SnapshotRefName {
-        guard let name = SnapshotRefName(timestamp: timestamp, op: op) else {
-            throw SnapshotIndexTestError.invalidRefName(timestamp: timestamp, op: op)
-        }
-        _ = try await runner.run(["update-ref", name.refName, target])
-        return name
-    }
-
-    private static func utcDate(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0, second: Int = 0) -> Date {
-        var components = DateComponents()
-        components.year = year
-        components.month = month
-        components.day = day
-        components.hour = hour
-        components.minute = minute
-        components.second = second
-        components.timeZone = TimeZone(identifier: "UTC")
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
-        return calendar.date(from: components) ?? .distantPast
-    }
+    private typealias Support = SnapshotIndexTestSupport
 
     // MARK: - Lifecycle
 
     @Test("a fresh index has no snapshots until refreshed")
     func freshIndexIsEmpty() async throws {
-        let (repo, runner) = try await mkRepo("fresh")
+        let (repo, runner) = try await Support.mkRepo("fresh")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await seedCommit(at: repo, runner: runner)
+        try await Support.seedCommit(at: repo, runner: runner)
 
         let index = SnapshotIndex(runner: runner)
         let initial = await index.list()
@@ -85,9 +41,9 @@ struct SnapshotIndexTests {
 
     @Test("refresh on a repo with no snapshots yields an empty list")
     func refreshOnEmptyRepoIsEmpty() async throws {
-        let (repo, runner) = try await mkRepo("empty")
+        let (repo, runner) = try await Support.mkRepo("empty")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await seedCommit(at: repo, runner: runner)
+        try await Support.seedCommit(at: repo, runner: runner)
 
         let index = SnapshotIndex(runner: runner)
         try await index.refresh()
@@ -97,16 +53,16 @@ struct SnapshotIndexTests {
         #expect(lastRefresh != nil, "lastRefresh should be set after refresh, even on empty repo")
     }
 
-    // MARK: - Reads against snapshots written by SnapshotWriter
+    // MARK: - Reads against snapshots written by raw update-ref
 
     @Test("refresh picks up a snapshot written via update-ref")
     func refreshSeesOneSnapshot() async throws {
-        let (repo, runner) = try await mkRepo("one")
+        let (repo, runner) = try await Support.mkRepo("one")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await seedCommit(at: repo, runner: runner)
+        try await Support.seedCommit(at: repo, runner: runner)
 
-        let timestamp = Self.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34)
-        let written = try await writeSnapshot(at: timestamp, op: SnapshotRefName.opMerge, runner: runner)
+        let timestamp = Support.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34)
+        let written = try await Support.writeSnapshot(at: timestamp, op: SnapshotRefName.opMerge, runner: runner)
 
         let index = SnapshotIndex(runner: runner)
         try await index.refresh()
@@ -120,15 +76,15 @@ struct SnapshotIndexTests {
 
     @Test("refresh returns snapshots newest-first")
     func newestFirstOrdering() async throws {
-        let (repo, runner) = try await mkRepo("order")
+        let (repo, runner) = try await Support.mkRepo("order")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await seedCommit(at: repo, runner: runner)
+        try await Support.seedCommit(at: repo, runner: runner)
 
-        let earlier = Self.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34)
-        let later = Self.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 35)
+        let earlier = Support.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34)
+        let later = Support.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 35)
 
-        let earlierSnap = try await writeSnapshot(at: earlier, op: SnapshotRefName.opMerge, runner: runner)
-        let laterSnap = try await writeSnapshot(at: later, op: SnapshotRefName.opRebase, runner: runner)
+        let earlierSnap = try await Support.writeSnapshot(at: earlier, op: SnapshotRefName.opMerge, runner: runner)
+        let laterSnap = try await Support.writeSnapshot(at: later, op: SnapshotRefName.opRebase, runner: runner)
 
         let index = SnapshotIndex(runner: runner)
         try await index.refresh()
@@ -140,21 +96,21 @@ struct SnapshotIndexTests {
 
     @Test("snapshots(olderThan:) returns only entries strictly older than cutoff")
     func olderThanFilter() async throws {
-        let (repo, runner) = try await mkRepo("older-than")
+        let (repo, runner) = try await Support.mkRepo("older-than")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await seedCommit(at: repo, runner: runner)
+        try await Support.seedCommit(at: repo, runner: runner)
 
-        let early = Self.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 0, second: 0)
-        let middle = Self.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 0, second: 30)
-        let late = Self.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 1, second: 0)
+        let early = Support.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 0, second: 0)
+        let middle = Support.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 0, second: 30)
+        let late = Support.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 1, second: 0)
 
         for date in [early, middle, late] {
-            try await writeSnapshot(at: date, op: SnapshotRefName.opMerge, runner: runner)
+            try await Support.writeSnapshot(at: date, op: SnapshotRefName.opMerge, runner: runner)
         }
 
         let index = SnapshotIndex(runner: runner)
         try await index.refresh()
-        let cutoff = Self.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 0, second: 45)
+        let cutoff = Support.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 0, second: 45)
         let older = await index.snapshots(olderThan: cutoff)
         // `early` and `middle` are < cutoff; `late` is > cutoff.
         #expect(older.count == 2)
@@ -165,16 +121,16 @@ struct SnapshotIndexTests {
 
     @Test("count tracks the cached list size")
     func countMatchesListSize() async throws {
-        let (repo, runner) = try await mkRepo("count")
+        let (repo, runner) = try await Support.mkRepo("count")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await seedCommit(at: repo, runner: runner)
+        try await Support.seedCommit(at: repo, runner: runner)
 
         let index = SnapshotIndex(runner: runner)
         try await index.refresh()
         #expect(await index.count == 0)
 
-        try await writeSnapshot(
-            at: Self.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34),
+        try await Support.writeSnapshot(
+            at: Support.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34),
             op: SnapshotRefName.opMerge,
             runner: runner
         )
@@ -186,9 +142,9 @@ struct SnapshotIndexTests {
 
     @Test("non-snapshot refs sharing the prefix are silently skipped")
     func skipsNonSnapshotRefs() async throws {
-        let (repo, runner) = try await mkRepo("manual")
+        let (repo, runner) = try await Support.mkRepo("manual")
         defer { try? FileManager.default.removeItem(at: repo) }
-        try await seedCommit(at: repo, runner: runner)
+        try await Support.seedCommit(at: repo, runner: runner)
 
         // Manually create a ref under refs/sprig/snapshots/ that
         // doesn't match SnapshotRefName's shape (no `<ts>/<op>`
@@ -196,8 +152,8 @@ struct SnapshotIndexTests {
         _ = try await runner.run(["update-ref", "refs/sprig/snapshots/manual-broken", "HEAD"])
 
         // And one well-formed snapshot for contrast.
-        let valid = try await writeSnapshot(
-            at: Self.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34),
+        let valid = try await Support.writeSnapshot(
+            at: Support.utcDate(year: 2026, month: 5, day: 6, hour: 3, minute: 12, second: 34),
             op: SnapshotRefName.opMerge,
             runner: runner
         )
@@ -244,8 +200,4 @@ struct SnapshotIndexTests {
         #expect(parsed.count == 1)
         #expect(parsed[0].name.op == SnapshotRefName.opMerge)
     }
-}
-
-private enum SnapshotIndexTestError: Error {
-    case invalidRefName(timestamp: Date, op: String)
 }
