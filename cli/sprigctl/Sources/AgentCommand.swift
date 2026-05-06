@@ -50,6 +50,12 @@ struct AgentCommand: AsyncParsableCommand {
     )
     var duration: Double?
 
+    @Option(
+        name: .long,
+        help: "Print one `# stats: {…}` JSON line on stderr every SECONDS. 0 (default) disables."
+    )
+    var statsInterval: Double = 0
+
     func run() async throws {
         let rootURL = URL(fileURLWithPath: path ?? FileManager.default.currentDirectoryPath)
             .standardized
@@ -93,6 +99,17 @@ struct AgentCommand: AsyncParsableCommand {
         }
         defer { stopTask?.cancel() }
 
+        // Optional periodic stats printer. Reads diagnostics from the
+        // agent (passthroughs to `RepoRefreshDriver`) and writes one
+        // JSON line per tick to stderr. Cancelled by `defer` when the
+        // command exits — doesn't need its own coordination with the
+        // sink shutdown.
+        let statsTask: Task<Void, Never>? = makeStatsTask(
+            interval: statsInterval,
+            agent: agent
+        )
+        defer { statsTask?.cancel() }
+
         var err = StderrStream()
         print("# agent: watching \(rootURL.path)", to: &err)
 
@@ -110,6 +127,47 @@ struct AgentCommand: AsyncParsableCommand {
         }
     }
 
+    /// Spawn a periodic stats printer if `interval > 0`. Returns nil
+    /// when stats are disabled, so the caller can `task?.cancel()` in
+    /// the defer without checking.
+    private func makeStatsTask(
+        interval: Double,
+        agent: RepoAgent
+    ) -> Task<Void, Never>? {
+        guard interval > 0 else { return nil }
+        let nanos = UInt64(interval * 1_000_000_000)
+        return Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: nanos)
+                if Task.isCancelled { break }
+                let line = await Self.formatStats(for: agent)
+                var err = StderrStream()
+                print("# stats: \(line)", to: &err)
+            }
+        }
+    }
+
+    /// Render the agent's current diagnostics as a single-line JSON
+    /// blob suitable for "# stats: …" stderr emission.
+    private static func formatStats(for agent: RepoAgent) async -> String {
+        let attempts = await agent.refreshAttempts()
+        let outcome = await agent.lastOutcome()
+        let firstDeferral = await agent.firstDeferralAt()
+        let wire = StatsWire(
+            refreshes: attempts,
+            outcome: StatsWire.kind(of: outcome),
+            entryCount: StatsWire.entryCount(of: outcome),
+            firstDeferralAt: firstDeferral
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(wire),
+              let line = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return line
+    }
+
     private func makeWatcher() -> any FileWatcher {
         #if os(macOS)
             if polling {
@@ -123,5 +181,39 @@ struct AgentCommand: AsyncParsableCommand {
             // honor `--polling-interval` for tuning.
             return PollingFileWatcher(pollInterval: pollingInterval)
         #endif
+    }
+}
+
+// MARK: - Stats wire format
+
+/// One stats line's payload. Wire shape:
+/// ```
+/// # stats: {"entryCount":N,"firstDeferralAt":null,"outcome":"applied","refreshes":N}
+/// ```
+/// Sorted keys + ISO-8601 dates so log greps stay deterministic.
+private struct StatsWire: Encodable {
+    var refreshes: Int
+    /// `"applied"`, `"deferred"`, `"failed"`, or `null` before any
+    /// refresh has run. Wire-stable strings; clients pattern-match.
+    var outcome: String?
+    /// Trie-size from the most recent `.applied` outcome. Nil unless
+    /// `outcome == "applied"` — `null` for "no refresh yet" /
+    /// "deferred" / "failed".
+    var entryCount: Int?
+    /// First deferral timestamp; nil when no deferral is pending.
+    var firstDeferralAt: Date?
+
+    static func kind(of outcome: RefreshOutcome?) -> String? {
+        guard let outcome else { return nil }
+        return switch outcome {
+        case .applied: "applied"
+        case .deferred: "deferred"
+        case .failed: "failed"
+        }
+    }
+
+    static func entryCount(of outcome: RefreshOutcome?) -> Int? {
+        guard case let .applied(entryCount, _) = outcome else { return nil }
+        return entryCount
     }
 }
