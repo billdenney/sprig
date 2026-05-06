@@ -23,7 +23,13 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // `RepoRefreshDriver` to decide when filesystem activity warrants
     // a `git status` refresh. All four are portable Tier-1 packages,
     // so these dependencies are in-tier and add no platform coupling.
-    "RepoState": ["GitCore", "IPCSchema", "PlatformKit"]
+    "RepoState": ["GitCore", "IPCSchema", "PlatformKit"],
+    // SafetyKit's `SnapshotWriter` invokes `git update-ref` to create
+    // the ADR 0033 snapshot refs that make destructive operations
+    // reversible. That's the only dependency it has on GitCore today;
+    // the format type (`SnapshotRefName`) is pure-Foundation and
+    // doesn't need it.
+    "SafetyKit": ["GitCore"]
 ]
 
 let tier2Targets: [String] = [
