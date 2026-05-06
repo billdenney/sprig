@@ -71,12 +71,36 @@ struct SprigctlAgentTests {
     /// decode are skipped silently — the agent's stdout sometimes
     /// includes diagnostic or comment lines (`# agent: …`) the codec
     /// rightly rejects.
+    ///
+    /// **Why `enumerateLines(invoking:)` rather than
+    /// `split(separator: "\n", ...)`.** Swift's `String` is a
+    /// collection of *grapheme clusters*; per Unicode TR#14 a CRLF
+    /// pair (`\r\n`) is **one** cluster, not two. So `split(separator:
+    /// "\n", ...)` against a CRLF-terminated string returns a single
+    /// element containing every line concatenated — the separator
+    /// `"\n"` (one cluster) never matches any cluster in the input
+    /// (every newline cluster there is `"\r\n"`).
+    ///
+    /// This bites on Windows specifically: Swift's `print()` writes
+    /// to stdout through a runtime that translates `"\n"` to `"\r\n"`
+    /// at the C-runtime layer (text-mode FILE * semantics), so the
+    /// captured pipe bytes carry CRLF. Linux and macOS pipes are
+    /// byte-for-byte and stay LF-only.
+    ///
+    /// `String.enumerateLines(invoking:)` is the Foundation-canonical
+    /// line iterator that handles LF, CRLF, CR-alone, and NEL
+    /// uniformly. Use it for any byte stream that might originate
+    /// from a different platform.
     private func decodeAgentEventEnvelopes(in stdout: String) -> [Envelope<AgentEvent>] {
-        stdout.split(separator: "\n", omittingEmptySubsequences: true).compactMap { raw in
-            let line = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty, let data = line.data(using: .utf8) else { return nil }
-            return try? EnvelopeCodec.decode(AgentEvent.self, from: data)
+        var envelopes: [Envelope<AgentEvent>] = []
+        stdout.enumerateLines { line, _ in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return }
+            if let envelope = try? EnvelopeCodec.decode(AgentEvent.self, from: data) {
+                envelopes.append(envelope)
+            }
         }
+        return envelopes
     }
 
     @Test("agent on a clean repo with --duration exits 0 with no envelopes")
