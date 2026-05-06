@@ -134,6 +134,21 @@ struct PollingFileWatcherRealFSTests {
     /// race; it adds ~1.5 s to total suite time, which is fine.
     private static let preWriteDelayNs: UInt64 = 500_000_000
 
+    /// Maximum wait for the polling watcher to surface an expected
+    /// event. The `collect` helper exits as soon as the `until:`
+    /// predicate matches, so on macOS / Linux this caps near zero
+    /// because events arrive in <100 ms; the budget is for Windows.
+    ///
+    /// Windows filesystem updates can take up to ~2 s to propagate to
+    /// readers (the polling watcher's `readdir` snapshot included),
+    /// so the worst-case wait is `preWriteDelayNs (500 ms) + ~2 s
+    /// propagation + one poll interval (50 ms) ≈ 2.55 s`. The previous
+    /// 3.0 s budget left only ~450 ms of margin, which a busy Windows
+    /// runner would occasionally lose to. 5.0 s leaves comfortable
+    /// headroom without affecting macOS / Linux runtimes (the
+    /// `until:`-based `collect` returns the moment the event lands).
+    private static let eventTimeoutSec: Double = 5.0
+
     @Test("creating a file produces a .created event")
     func createDetected() async throws {
         let root = try makeTempDir("create")
@@ -151,7 +166,7 @@ struct PollingFileWatcherRealFSTests {
         let events = await collect(
             from: stream,
             until: { evs in evs.contains(where: { $0.kind == .created }) },
-            timeout: 3.0
+            timeout: Self.eventTimeoutSec
         )
         await watcher.stop()
         #expect(events.contains(where: { $0.kind == .created && $0.path.lastPathComponent == "hello.txt" }))
@@ -175,7 +190,7 @@ struct PollingFileWatcherRealFSTests {
         let events = await collect(
             from: stream,
             until: { evs in evs.contains(where: { $0.kind == .modified }) },
-            timeout: 3.0
+            timeout: Self.eventTimeoutSec
         )
         await watcher.stop()
         #expect(events.contains(where: { $0.kind == .modified && $0.path.lastPathComponent == "a.txt" }))
@@ -199,7 +214,7 @@ struct PollingFileWatcherRealFSTests {
         let events = await collect(
             from: stream,
             until: { evs in evs.contains(where: { $0.kind == .removed }) },
-            timeout: 3.0
+            timeout: Self.eventTimeoutSec
         )
         await watcher.stop()
         #expect(events.contains(where: { $0.kind == .removed && $0.path.lastPathComponent == "doomed.txt" }))
