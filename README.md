@@ -4,7 +4,7 @@ A shell-integrated Git client modelled on TortoiseGit — overlay badges and rig
 
 The **engine and `sprigctl` CLI are first-class on macOS, Linux, and Windows** today; every PR runs the full test suite on all three. The **GUI shell ships first on macOS** (Finder integration, `apps/macos/`); a Windows GUI shell (Explorer integration via `apps/windows/`) is a planned 1.0 deliverable. Linux GUI integration (Nautilus / Dolphin / etc.) is post-1.0.
 
-> **Status:** pre-MVP scaffolding. Not yet usable as a GUI app. `sprigctl` is functional on all three platforms (status, watch, repos subcommands today; log lands soon).
+> **Status:** pre-MVP scaffolding. Not yet usable as a GUI app. `sprigctl` is functional on all three platforms today — `version`, `status`, `watch`, `repos`, `log`, `agent` (long-running watcher → refresh → broadcast loop), `recover` (ADR 0033 snapshot list / restore), and `conflicts` (list / show / auto-resolve trivially-equivalent regions). Windows users can already script-drive Sprig against real repos via `sprigctl`; the Windows GUI shell follows the macOS shell as a 1.0 deliverable.
 
 ## Why Sprig?
 
@@ -37,7 +37,7 @@ The **engine and `sprigctl` CLI are first-class on macOS, Linux, and Windows** t
 - macOS 14 Sonoma or newer (macOS 15 Sequoia recommended).
 - Xcode 16 or newer with Command Line Tools installed.
 
-The Windows GUI shell (`apps/windows/`) is in the design phase; once it lands the prerequisites will include the Windows 10 SDK and a swift-cross-ui-compatible toolchain.
+The Windows GUI shell (`apps/windows/`) is in the design phase (M2-Win onwards — Explorer shell extension via COM, Windows Service host of `SprigAgent`, MSIX installer); see [`docs/research/windows-shell-apis.md`](docs/research/windows-shell-apis.md) for the implementation reference. Once it lands, the prerequisites add the Windows 10 SDK and a swift-cross-ui-compatible toolchain. **In the meantime, `sprigctl` runs natively on Windows and is the way to test Sprig's engine on real Windows repos.**
 
 ### Build and run
 

@@ -2,7 +2,8 @@
     import Foundation
 
     // Windows stub — part of the day-1 cross-platform scaffolding (ADR 0053).
-    // Real implementation lands when a Windows port is prioritized post-1.0.
+    // Real implementation lands as part of M2-Win (Windows GUI shell;
+    // 1.0 deliverable per ADR 0054).
 
     enum LauncherKitWindowsImpl {
         static let platform = "Windows"

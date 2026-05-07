@@ -60,7 +60,7 @@ Exit criteria:
 
 Exit criteria:
 
-- [ ] `docs/research/windows-shell-apis.md` substantively expanded (currently a v0 sketch — by M2-Win exit it's the canonical implementation reference).
+- [ ] `docs/research/windows-shell-apis.md` is the canonical implementation reference for M2-Win (cross-link from the SprigExplorer source files when written).
 - [ ] Windows Service host of `SprigAgent` installable via MSIX (per-user, no admin elevation).
 - [ ] `IPCSchema` named-pipe transport in `TransportKit/Windows` shipped, peer-SID validation working.
 - [ ] `SprigExplorer.dll` C++/COM extension implementing 5 `IShellIconOverlayIdentifier` classes + `IContextMenu` (legacy) + `IExplorerCommand` (Windows 11 streamlined).
