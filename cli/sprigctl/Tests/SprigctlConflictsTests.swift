@@ -30,6 +30,26 @@ struct SprigctlConflictsTests {
         #expect(out.stderr.contains("mutually exclusive"))
     }
 
+    @Test("conflicts --auto-resolve and --show are mutually exclusive")
+    func autoResolveAndShowExclusive() async throws {
+        let out = try await Sprigctl.run(["conflicts", "--auto-resolve", "--show", "/tmp/foo"])
+        #expect(out.exitCode != 0)
+        #expect(out.stderr.contains("mutually exclusive"))
+    }
+
+    @Test("--whitespace without --auto-resolve is rejected")
+    func whitespaceRequiresAutoResolve() async throws {
+        let dir = try Sprigctl.mkRepo("conflicts-whitespace-bad")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Sprigctl.write("clean\n", to: dir.appendingPathComponent("a.txt"))
+
+        let out = try await Sprigctl.run([
+            "conflicts", "--show", "--whitespace", dir.appendingPathComponent("a.txt").path
+        ])
+        #expect(out.exitCode != 0)
+        #expect(out.stderr.contains("--whitespace") || out.stderr.contains("--auto-resolve"))
+    }
+
     // MARK: - --list
 
     @Test("conflicts --list on a clean repo prints nothing on stdout")
