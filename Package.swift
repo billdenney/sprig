@@ -137,8 +137,11 @@ let package = Package(
             case "AgentKit":
                 // AgentKit's integration tests exercise the full pipeline
                 // against real git, so they need the Tier-1 packages used
-                // in the production deps plus their helpers.
-                ["GitCore", "RepoState", "IPCSchema", "WatcherKit", "TransportKit"]
+                // in the production deps plus their helpers. SafetyKit is
+                // a test-only addition for `RepoAgent`'s snapshot-prune
+                // tests, which write `refs/sprig/snapshots/...` refs via
+                // `SnapshotRefName` to set up fixtures.
+                ["GitCore", "RepoState", "IPCSchema", "WatcherKit", "TransportKit", "SafetyKit"]
             default:
                 []
             }
