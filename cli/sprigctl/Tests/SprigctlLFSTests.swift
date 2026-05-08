@@ -34,9 +34,43 @@ struct SprigctlLFSTests {
 
         let out = try await Sprigctl.run(["lfs", "--status", repo.path])
         #expect(out.exitCode == 0)
+        // "no LFS rules in .gitattributes" is the only assertion that
+        // doesn't depend on the runner host's git config — we wrote
+        // no .gitattributes so the local repo has zero LFS rules.
+        // We can't assert on the configured / ready fields here
+        // because hosted CI runners (macOS, Windows) ship with
+        // git-lfs installed and `git lfs install --system` already
+        // run, which sets `filter.lfs.*` system-wide and propagates
+        // to this fresh repo. The dedicated unconfigured assertion
+        // lives in `statusReportsUnconfiguredAfterLocalUnset` —
+        // that test sets a local-level filter that overrides any
+        // inherited config, making the assertion environment-
+        // independent.
+        #expect(out.stdout.contains("no LFS rules in .gitattributes"))
+        // Fields are always present in the output regardless of value.
+        #expect(out.stdout.contains("configured:"))
+        #expect(out.stdout.contains("ready:"))
+    }
+
+    @Test("lfs --status reports configured == no when local filter is whitespace-only")
+    func statusReportsUnconfiguredAfterLocalUnset() async throws {
+        let repo = try Sprigctl.mkRepo("lfs-status-local-empty")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await Sprigctl.initRepo(at: repo)
+        // Local-level filter.lfs.clean set to whitespace-only
+        // overrides any global / system level inherited config
+        // (local has highest precedence). Our probe trims and
+        // rejects empty values — so this assertion is environment-
+        // independent: it works even on hosted CI runners where
+        // `git lfs install --system` was run by the package manager.
+        try await Sprigctl.spawnGit(
+            ["config", "--local", "filter.lfs.clean", "   "],
+            cwd: repo
+        )
+        let out = try await Sprigctl.run(["lfs", "--status", repo.path])
+        #expect(out.exitCode == 0)
         #expect(out.stdout.contains("configured: no"))
         #expect(out.stdout.contains("ready:      no"))
-        #expect(out.stdout.contains("no LFS rules in .gitattributes"))
     }
 
     @Test("lfs --status surfaces .gitattributes LFS rules")

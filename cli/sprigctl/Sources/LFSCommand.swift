@@ -41,7 +41,18 @@ struct LFSCommand: AsyncParsableCommand {
             .standardized
         let runner = Runner(defaultWorkingDirectory: repoURL)
 
-        let install = await LFSInstall.probe(runner: runner)
+        // `LFSInstall.probe` distinguishes "git-lfs not installed"
+        // (returned as fields on the status struct — fine, that's
+        // what we report) from "git itself isn't usable" (thrown as
+        // `LFSProbeError.gitNotAvailable`). Re-throw the latter as
+        // a CLI-level validation error so the user sees a usable
+        // diagnostic instead of a Swift backtrace.
+        let install: LFSInstallStatus
+        do {
+            install = try await LFSInstall.probe(runner: runner)
+        } catch let error as LFSProbeError {
+            throw ValidationError(String(describing: error))
+        }
         let rules = readLFSRules(repoURL: repoURL)
 
         if json {
