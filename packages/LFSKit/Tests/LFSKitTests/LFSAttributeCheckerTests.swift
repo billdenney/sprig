@@ -5,13 +5,28 @@ import Testing
 
 @Suite("LFSAttributeChecker — git check-attr wrapper")
 struct LFSAttributeCheckerTests {
+    /// Build a NUL-separated byte stream from `tokens`. Replaces the
+    /// `Array("foo".utf8) + [0] + Array("bar".utf8) + ...` pattern
+    /// that hits "the compiler is unable to type-check this
+    /// expression in reasonable time" on macOS Swift (the `[0]`
+    /// literal's `[Int]` vs `[UInt8]` ambiguity multiplied across
+    /// many `+` operands turns inference into exponential work).
+    /// Linux Swift had more headroom and the chains compiled fine
+    /// there; the macOS-14 / -15 jobs on PR #76 surfaced the gap.
+    private func nulSeparated(_ tokens: [String]) -> Data {
+        var data = Data()
+        for token in tokens {
+            data.append(contentsOf: token.utf8)
+            data.append(0)
+        }
+        return data
+    }
+
     // MARK: - Pure parser
 
     @Test("parse handles a single record")
     func parseSingle() {
-        // <path>\0filter\0lfs\0
-        let bytes: [UInt8] = Array("a.psd".utf8) + [0] + Array("filter".utf8) + [0] + Array("lfs".utf8) + [0]
-        let parsed = LFSAttributeChecker.parse(Data(bytes))
+        let parsed = LFSAttributeChecker.parse(nulSeparated(["a.psd", "filter", "lfs"]))
         #expect(parsed.count == 1)
         #expect(parsed[0].path == "a.psd")
         #expect(parsed[0].filter == "lfs")
@@ -20,17 +35,11 @@ struct LFSAttributeCheckerTests {
 
     @Test("parse handles multiple records")
     func parseMultiple() {
-        let parts = [
+        let parsed = LFSAttributeChecker.parse(nulSeparated([
             "a.psd", "filter", "lfs",
             "b.txt", "filter", "unspecified",
             "c.bin", "filter", "lfs"
-        ]
-        var bytes: [UInt8] = []
-        for part in parts {
-            bytes.append(contentsOf: part.utf8)
-            bytes.append(0)
-        }
-        let parsed = LFSAttributeChecker.parse(Data(bytes))
+        ]))
         #expect(parsed.count == 3)
         #expect(parsed[0].isLFS)
         #expect(!parsed[1].isLFS)
@@ -40,10 +49,11 @@ struct LFSAttributeCheckerTests {
 
     @Test("parse drops a trailing partial record")
     func parseTrailingPartial() {
-        // Full record + 2 tokens (incomplete second record)
-        let bytes: [UInt8] = Array("ok.psd".utf8) + [0] + Array("filter".utf8) + [0] + Array("lfs".utf8) + [0]
-            + Array("partial".utf8) + [0] + Array("filter".utf8) + [0]
-        let parsed = LFSAttributeChecker.parse(Data(bytes))
+        // Full record + 2 trailing tokens (incomplete second record).
+        let parsed = LFSAttributeChecker.parse(nulSeparated([
+            "ok.psd", "filter", "lfs",
+            "partial", "filter"
+        ]))
         #expect(parsed.count == 1)
         #expect(parsed[0].path == "ok.psd")
     }
@@ -51,9 +61,10 @@ struct LFSAttributeCheckerTests {
     @Test("parse skips records whose attribute name isn't 'filter'")
     func parseSkipsUnknownAttr() {
         // Pathological — git would never emit this, but be defensive.
-        let bytes: [UInt8] = Array("foo".utf8) + [0] + Array("merge".utf8) + [0] + Array("custom".utf8) + [0]
-            + Array("bar.psd".utf8) + [0] + Array("filter".utf8) + [0] + Array("lfs".utf8) + [0]
-        let parsed = LFSAttributeChecker.parse(Data(bytes))
+        let parsed = LFSAttributeChecker.parse(nulSeparated([
+            "foo", "merge", "custom",
+            "bar.psd", "filter", "lfs"
+        ]))
         #expect(parsed.count == 1)
         #expect(parsed[0].path == "bar.psd")
     }
@@ -66,8 +77,8 @@ struct LFSAttributeCheckerTests {
     @Test("encodeStdin produces NUL-separated UTF-8 bytes per path")
     func encodeStdinFormat() {
         let data = LFSAttributeChecker.encodeStdin(paths: ["a.psd", "images/b c.png"])
-        let expected: [UInt8] = Array("a.psd".utf8) + [0] + Array("images/b c.png".utf8) + [0]
-        #expect(Array(data) == expected)
+        let expected = nulSeparated(["a.psd", "images/b c.png"])
+        #expect(data == expected)
     }
 
     @Test("encodeStdin on empty paths produces empty data")
