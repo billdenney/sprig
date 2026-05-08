@@ -38,7 +38,13 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // covering the full glob/path-pattern semantics of
     // `.gitattributes`. Pure-Foundation pieces (the pointer-file
     // parser and the .gitattributes scanner) don't need GitCore.
-    "LFSKit": ["GitCore"]
+    "LFSKit": ["GitCore"],
+    // SubmoduleKit's `SubmoduleStatus` async wrapper invokes
+    // `git submodule status` through `GitCore.Runner`. The pure
+    // parser (`SubmoduleStatusParser`) and value type
+    // (`SubmoduleEntry`) don't need GitCore, but they live in the
+    // same Tier-1 module and the convenience of one dep covers both.
+    "SubmoduleKit": ["GitCore"]
 ]
 
 let tier2Targets: [String] = [
