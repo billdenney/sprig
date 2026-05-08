@@ -114,7 +114,7 @@ Implemented and CI-required-green on macOS / Linux / Windows:
 - `GitCore.PorcelainV2Parser` and `GitCore.LogParser`.
 - `PlatformKit.FileWatcher` protocol, `WatchEvent` model, `EventCoalescer`.
 - `WatcherKit.MockFileWatcher` (test fixture), `WatcherKit.PollingFileWatcher` (portable), `WatcherKit.FSEventsWatcher` (macOS).
-- `sprigctl` CLI with subcommands: `version`, `status`, `watch`, `repos`, `log`.
+- `sprigctl` CLI with subcommands: `version`, `status`, `watch`, `repos`, `log`, `agent` (long-running watcher → refresh → broadcast loop), `recover` (ADR 0033 snapshot list / restore), `conflicts` (ConflictKit list / show / auto-resolve). Builds and runs natively on macOS, Linux, and Windows; the Windows engine is testable end-to-end via this CLI before the GUI shell lands.
 - All Tier-2 protocol shells exist for `Credential / Notify / Update / Launcher / Transport / Agent`. Native impls are stubs (`fatalError("not implemented")`) until their owning milestone activates.
 
 Not yet started:

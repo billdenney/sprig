@@ -36,6 +36,38 @@ import PlatformKit
 import RepoState
 import WatcherKit
 
+/// Policy for ADR 0033 snapshot housekeeping. Per the ADR amendment,
+/// the agent runs a single TTL-based prune on startup so old
+/// `refs/sprig/snapshots/...` refs don't accumulate forever. Each
+/// agent host (macOS LaunchAgent, Windows Service, sprigctl) picks a
+/// policy at construction; the default mirrors the ADR's "30 days"
+/// recommendation.
+public struct SnapshotPolicy: Equatable, Hashable, Sendable {
+    /// Whether to run a TTL prune on `RepoAgent.start()`. Tests
+    /// commonly disable this to keep snapshots they wrote in setup
+    /// from disappearing under them; production hosts should leave
+    /// it at the default.
+    public var pruneOnStartup: Bool
+
+    /// Snapshots whose timestamp is older than `now - ttl` are
+    /// candidates for the startup prune.
+    public var ttl: TimeInterval
+
+    public init(pruneOnStartup: Bool, ttl: TimeInterval) {
+        self.pruneOnStartup = pruneOnStartup
+        self.ttl = ttl
+    }
+
+    /// 30 days, matching ADR 0033's recommendation.
+    public static let defaultTTL: TimeInterval = 30 * 86400
+
+    /// Default production policy: prune on startup, 30-day TTL.
+    public static let `default` = SnapshotPolicy(pruneOnStartup: true, ttl: defaultTTL)
+
+    /// Tests / repos where the caller manages snapshots manually.
+    public static let disabled = SnapshotPolicy(pruneOnStartup: false, ttl: defaultTTL)
+}
+
 /// Long-lived agent host for one repository. Owns the watcher loop,
 /// the refresh driver, and the broadcaster wiring; emits
 /// `Envelope<AgentEvent>` to its `BadgeEventSink` on every refresh
@@ -48,9 +80,11 @@ import WatcherKit
 /// these are not exposed because callers shouldn't be poking at
 /// internal pipeline stages mid-flight.
 ///
-/// **Lifecycle.** `start()` launches the watcher loop and forces an
-/// initial refresh so the store is populated. `stop()` cancels the
-/// loop and stops the watcher; safe to call multiple times.
+/// **Lifecycle.** `start()` launches the watcher loop, forces an
+/// initial refresh so the store is populated, and (per
+/// ``SnapshotPolicy``) runs a one-shot TTL prune of
+/// `refs/sprig/snapshots/...`. `stop()` cancels the loop and stops
+/// the watcher; safe to call multiple times.
 ///
 /// **Why an actor.** The watcher loop, the coalescer, and the driver
 /// state are all mutated from concurrent tasks (watcher producer task,
@@ -71,12 +105,15 @@ public actor RepoAgent {
     private let registry: SubscriptionRegistry
     private let sink: any BadgeEventSink
     private let tickInterval: Duration
+    private let snapshotPolicy: SnapshotPolicy
 
     private var coalescer: EventCoalescer
     private var driver: RepoRefreshDriver?
     private var broadcaster: BadgeChangeBroadcaster?
     private var loop: Task<Void, Never>?
     private var running: Bool = false
+    private var snapshotPruneCount: Int = 0
+    private var snapshotPruneAt: Date?
 
     /// - Parameters:
     ///   - repoRoot: absolute path to the worktree root.
@@ -102,6 +139,10 @@ public actor RepoAgent {
     ///     the FSEvents/inotify natural batching window — small enough
     ///     to feel instant, large enough to absorb editor "save many
     ///     events at once" bursts.
+    ///   - snapshotPolicy: ADR 0033 snapshot-housekeeping policy.
+    ///     Default prunes refs older than 30 days on startup; tests
+    ///     and repos where the caller manages snapshots manually
+    ///     should pass `.disabled`.
     public init(
         repoRoot: URL,
         gitDir: URL?,
@@ -110,7 +151,8 @@ public actor RepoAgent {
         watcher: any FileWatcher,
         registry: SubscriptionRegistry,
         sink: any BadgeEventSink,
-        tickInterval: Duration = .milliseconds(100)
+        tickInterval: Duration = .milliseconds(100),
+        snapshotPolicy: SnapshotPolicy = .default
     ) {
         self.repoRoot = repoRoot
         self.gitDir = gitDir
@@ -120,6 +162,7 @@ public actor RepoAgent {
         self.registry = registry
         self.sink = sink
         self.tickInterval = tickInterval
+        self.snapshotPolicy = snapshotPolicy
         coalescer = EventCoalescer()
     }
 
@@ -163,6 +206,17 @@ public actor RepoAgent {
         // Force an initial refresh so callers that subscribed before
         // start() see the current state, not a series of empty diffs.
         _ = await driver.forceRefresh()
+
+        // ADR 0033 startup prune. Best-effort — failures here don't
+        // block the agent from running. Order: AFTER the initial
+        // refresh (so callers that observe refreshAttempts == 1 see
+        // a stable post-refresh state) and BEFORE the watcher loop
+        // (so a one-shot startup task isn't racing the live update
+        // path). On a repo with no snapshots this is one
+        // `git for-each-ref` returning empty — tens of milliseconds.
+        if snapshotPolicy.pruneOnStartup {
+            await runStartupPrune()
+        }
 
         // Watch the worktree AND the resolved gitDir per ADR 0056.
         // Some callers may pass gitDir=nil (e.g. tests with a fake
@@ -264,7 +318,44 @@ public actor RepoAgent {
         await driver?.firstDeferralAt
     }
 
+    /// Number of `refs/sprig/snapshots/...` refs the startup prune
+    /// deleted. Zero before ``start()`` runs, after a `.disabled`
+    /// policy run, and after a prune failure (best-effort — see
+    /// `start()` notes).
+    public func lastSnapshotPruneCount() -> Int {
+        snapshotPruneCount
+    }
+
+    /// Wall-clock time of the last successful startup prune, or nil
+    /// before one has run (or if the prune failed).
+    public func lastSnapshotPruneAt() -> Date? {
+        snapshotPruneAt
+    }
+
     // MARK: actor-internal helpers
+
+    /// One-shot startup TTL prune of `refs/sprig/snapshots/...`. Errors
+    /// from `git for-each-ref` / `git update-ref --stdin` are
+    /// swallowed — pruning is housekeeping, not load-bearing for
+    /// badge correctness. Diagnostics (``lastSnapshotPruneCount()``,
+    /// ``lastSnapshotPruneAt()``) stay at their defaults on failure
+    /// so callers that want to monitor health can detect the absence
+    /// of a successful prune.
+    private func runStartupPrune() async {
+        let index = SnapshotIndex(runner: runner)
+        do {
+            try await index.refresh()
+            let cutoff = Date().addingTimeInterval(-snapshotPolicy.ttl)
+            let pruned = try await index.prune(olderThan: cutoff)
+            snapshotPruneCount = pruned.count
+            snapshotPruneAt = Date()
+        } catch {
+            // Best-effort — leave diagnostics at their defaults. A
+            // future slice can add structured error reporting via
+            // `RunnerLog` (ADR 0057) once the agent host has a
+            // logging surface.
+        }
+    }
 
     /// Ingest one watcher event into the coalescer. Called by the
     /// watcher-stream task; serialized through actor isolation.

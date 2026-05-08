@@ -13,10 +13,10 @@ This document mirrors §12 of the master plan (`/home/bill/.claude/plans/please-
 | `WatcherKit.MockFileWatcher` | ✅ | ✅ | ✅ | Pure-portable. |
 | `WatcherKit.PollingFileWatcher` | ✅ | ✅ | ✅ | Pure-portable; default on non-macOS, fallback on macOS via `--polling`. |
 | `WatcherKit.FSEventsWatcher` | ✅ | — | — | macOS-only kernel API; CoreServices FSEvents. |
-| `sprigctl` (version / status / watch) | ✅ | ✅ | ✅ | All three subcommands work on all three OSes. |
-| `apps/macos/SprigApp` (FinderSync, LaunchAgent, …) | ✅ | — | — | The macOS user-facing shell. Tier-3 platform shell (per §12). |
-| `apps/windows/SprigApp` (Explorer shell extension, …) | — | — | planned | Post-1.0; stub READMEs in `apps/windows/`. |
-| `apps/linux/SprigApp` (Nautilus extension, …) | — | — | planned | Post-1.0; stub READMEs in `apps/linux/`. |
+| `sprigctl` (version / status / watch / repos / log / agent / recover / conflicts) | ✅ | ✅ | ✅ | Every subcommand works on all three OSes. The Windows engine is testable today via the CLI; per-PR `ci-windows` runs the full suite. |
+| `apps/macos/SprigApp` (FinderSync, LaunchAgent, …) | ✅ | — | — | The macOS user-facing shell. Tier-3 platform shell. |
+| `apps/windows/SprigApp` (Explorer shell extension, Windows Service host, MSIX, …) | — | — | M2-Win+ | 1.0 deliverable per ADR 0054. Stub README in `apps/windows/` until M2-Win begins. |
+| `apps/linux/SprigApp` (Nautilus extension, …) | — | — | post-1.0 | Linux GUI shell explicitly out of 1.0 scope per ADR 0054 (Linux desktop is too fragmented to multiplex). |
 
 CI required-green per platform: macOS (`ci-macos`), Linux `packages/` (`ci-linux`), Windows full test suite (`ci-windows`).
 
