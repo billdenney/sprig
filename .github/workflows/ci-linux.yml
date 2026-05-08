@@ -27,7 +27,39 @@ jobs:
         # Mac-only adapter sources are excluded by #if os(macOS).
         run: swift build
       - name: Run tests (portable subset)
-        run: swift test
+        # One automatic retry on the test step because of the upstream
+        # SIGSEGV in `Foundation.findMaximumOpenFromProcSelfFD()` on
+        # Linux (over-reads dirent.d_name; tracked at
+        # swiftlang/swift-corelibs-foundation#5472, fix on a fork at
+        # billdenney/swift-corelibs-foundation:fix/process-d_name-buffer-overrun).
+        # The bug manifests as a process-wide crash during test
+        # execution any time `Foundation.Process.run()` happens to hit
+        # a near-page-boundary dirent — about 5 % of CI runs across
+        # this repo's test suite. The crash is environmental, not a
+        # regression in any specific test, so retrying once clears
+        # nearly all flakes without masking real failures (a real
+        # test bug fails both attempts deterministically).
+        #
+        # Drop this retry once a Swift toolchain release picks up
+        # PR #5472. The other CI legs (`ci-macos`, `ci-windows`)
+        # don't carry a retry — they don't hit this bug because
+        # `findMaximumOpenFromProcSelfFD()` is gated by
+        # `#if !canImport(Darwin) && !os(Windows)`.
+        run: |
+          set -e
+          attempt=1
+          max=2
+          while true; do
+            if swift test; then
+              exit 0
+            fi
+            if [ "$attempt" -ge "$max" ]; then
+              echo "::error::Linux test suite failed $max times — not the upstream Foundation flake."
+              exit 1
+            fi
+            echo "::warning::Linux test attempt $attempt failed; retrying once. Likely the upstream Foundation findMaximumOpenFromProcSelfFD() flake (swiftlang/swift-corelibs-foundation#5472)."
+            attempt=$((attempt + 1))
+          done
 
       - name: Smoke-build benchmarks
         # Just verify the benchmark target compiles. Full benchmark runs
