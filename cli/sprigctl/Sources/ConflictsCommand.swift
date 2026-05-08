@@ -1,11 +1,14 @@
 // ConflictsCommand.swift
 //
-// `sprigctl conflicts` — surface ConflictKit's parser to the CLI.
-// Two modes, mutually exclusive:
+// `sprigctl conflicts` — surface ConflictKit's parser + auto-resolver
+// to the CLI. Three modes, exactly one of which must be supplied:
 //
-//   --list [<repo>]    list unmerged paths in the repo, with the
-//                      number of conflict regions in each.
-//   --show <file>      show every conflict region in a single file.
+//   --list [<repo>]            list unmerged paths in the repo, with
+//                              the number of conflict regions each.
+//   --show <file>              show every conflict region in a file.
+//   --auto-resolve <file>      apply auto-resolution heuristics to the
+//                              file at <path> and write back; markers
+//                              remain on regions that don't resolve.
 //
 // Mirrors the flag-style mode-discrimination of `sprigctl recover`
 // (--list / --restore) so users have one mental model across the CLI.
@@ -18,36 +21,54 @@ import GitCore
 struct ConflictsCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "conflicts",
-        abstract: "List repo unmerged paths or show conflict regions in a file."
+        abstract: "List, inspect, or auto-resolve git conflict markers."
     )
 
-    @Argument(help: "Path: repo for --list (default cwd), or file for --show.")
+    @Argument(help: "Path: repo for --list (default cwd), or file for --show / --auto-resolve.")
     var path: String?
 
-    @Flag(name: .long, help: "List unmerged paths in the repo. Mutually exclusive with --show.")
+    @Flag(name: .long, help: "List unmerged paths in the repo.")
     var list: Bool = false
+
+    @Flag(name: .long, help: "Show conflict regions in the file at <path>.")
+    var show: Bool = false
+
+    @Flag(
+        name: .customLong("auto-resolve"),
+        help: "Apply auto-resolution to the file at <path> and write back."
+    )
+    var autoResolve: Bool = false
 
     @Flag(
         name: .long,
-        help: "Show conflict regions in the file at <path>. Mutually exclusive with --list."
+        help: "With --auto-resolve, also resolve whitespace-only differences (unsafe in Python/YAML)."
     )
-    var show: Bool = false
+    var whitespace: Bool = false
 
-    @Flag(name: .long, help: "Emit JSON instead of a human-readable summary.")
+    @Flag(name: .long, help: "Emit JSON instead of a human-readable summary (--list / --show only).")
     var json: Bool = false
 
     func run() async throws {
-        switch (list, show) {
-        case (false, false):
+        let activeCount = [list, show, autoResolve].filter(\.self).count
+        switch activeCount {
+        case 0:
             throw ValidationError(
-                "specify either --list (enumerate unmerged paths) or --show (inspect one file)"
+                "specify one of --list (enumerate unmerged paths), --show (inspect one file), " +
+                    "or --auto-resolve (resolve trivially-equivalent regions and write back)"
             )
-        case (true, true):
-            throw ValidationError("--list and --show are mutually exclusive")
-        case (true, false):
-            try await runList()
-        case (false, true):
-            try runShow()
+        case 1:
+            if !autoResolve, whitespace {
+                throw ValidationError("--whitespace is only meaningful with --auto-resolve")
+            }
+            if list {
+                try await runList()
+            } else if show {
+                try runShow()
+            } else {
+                try runAutoResolve()
+            }
+        default:
+            throw ValidationError("--list, --show, and --auto-resolve are mutually exclusive")
         }
     }
 
@@ -153,6 +174,67 @@ struct ConflictsCommand: AsyncParsableCommand {
                 print("    \(line)", to: &out)
             }
         }
+    }
+
+    // MARK: - --auto-resolve
+
+    private func runAutoResolve() throws {
+        guard let path else {
+            throw ValidationError("--auto-resolve requires a file path argument")
+        }
+        let fileURL = URL(fileURLWithPath: path).standardized
+        let data = try Data(contentsOf: fileURL)
+        guard let source = String(data: data, encoding: .utf8) else {
+            throw ValidationError("file is not valid UTF-8: \(fileURL.path)")
+        }
+
+        let file = ConflictedFile(source: source)
+        var err = StderrStream()
+        guard !file.isClean else {
+            print("# no conflict regions in \(fileURL.path)", to: &err)
+            return
+        }
+
+        var strategies: Set<AutoResolutionStrategy> = [.identical]
+        if whitespace {
+            strategies.insert(.whitespaceOnly)
+        }
+        let resolutions = file.autoResolutions(strategies: strategies)
+        let unresolvedCount = resolutions.filter(Self.isUnresolved).count
+        let resolvedCount = resolutions.count - unresolvedCount
+
+        guard resolvedCount > 0 else {
+            print("# no auto-resolvable regions in \(fileURL.path)", to: &err)
+            return
+        }
+
+        // Apply + write atomically (write-temp-then-rename via
+        // `Data.write(.atomic)` — survives a crash mid-write).
+        let resolved = try file.applying(resolutions)
+        try Data(resolved.utf8).write(to: fileURL, options: [.atomic])
+
+        var out = StdoutStream()
+        let total = file.regions.count
+        if unresolvedCount == 0 {
+            print(
+                "Resolved all \(total) region\(total == 1 ? "" : "s") in \(fileURL.path)",
+                to: &out
+            )
+        } else {
+            print(
+                "Resolved \(resolvedCount) of \(total) region\(total == 1 ? "" : "s") in \(fileURL.path); " +
+                    "\(unresolvedCount) still need manual resolution",
+                to: &out
+            )
+        }
+    }
+
+    /// Predicate matching `ConflictResolution.unresolved`. A free
+    /// helper so the call site reads as `filter(Self.isUnresolved)`
+    /// instead of inlining the case-pattern closure.
+    private static func isUnresolved(_ resolution: ConflictResolution) -> Bool {
+        if case .unresolved = resolution { return true }
+        return false
     }
 
     // MARK: - Shared JSON
