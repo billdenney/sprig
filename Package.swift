@@ -178,6 +178,7 @@ let package = Package(
                     "AgentKit",
                     "SafetyKit",
                     "ConflictKit",
+                    "LFSKit",
                     .product(name: "ArgumentParser", package: "swift-argument-parser")
                 ],
                 path: "cli/sprigctl/Sources"
@@ -188,7 +189,8 @@ let package = Package(
                 // for Process.waitUntilExit) used by SprigctlSupport;
                 // RepoState + IPCSchema + AgentKit for AgentCommand tests;
                 // SafetyKit for RecoverCommand tests (snapshot ref names);
-                // ConflictKit for ConflictsCommand tests.
+                // ConflictKit for ConflictsCommand tests;
+                // LFSKit for LFSCommand tests.
                 dependencies: [
                     "sprigctl",
                     "GitCore",
@@ -196,7 +198,8 @@ let package = Package(
                     "IPCSchema",
                     "AgentKit",
                     "SafetyKit",
-                    "ConflictKit"
+                    "ConflictKit",
+                    "LFSKit"
                 ],
                 path: "cli/sprigctl/Tests"
             )
