@@ -32,7 +32,13 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // reversible. That's the only dependency it has on GitCore today;
     // the format type (`SnapshotRefName`) is pure-Foundation and
     // doesn't need it.
-    "SafetyKit": ["GitCore"]
+    "SafetyKit": ["GitCore"],
+    // LFSKit's `LFSAttributeChecker` wraps `git check-attr filter` to
+    // get the authoritative answer for "is this path LFS-tracked?",
+    // covering the full glob/path-pattern semantics of
+    // `.gitattributes`. Pure-Foundation pieces (the pointer-file
+    // parser and the .gitattributes scanner) don't need GitCore.
+    "LFSKit": ["GitCore"]
 ]
 
 let tier2Targets: [String] = [
