@@ -194,8 +194,18 @@ struct SubmoduleStatusFetchTests {
         // Advance the submodule's checked-out HEAD by committing
         // inside `parent/sub/`. The super-repo's recorded pointer
         // doesn't change, so `git submodule status` reports `+`.
+        //
+        // `git submodule update --init` clones the helper into the
+        // submodule with a fresh `.git/config`, so user.email/name
+        // don't carry over from the helper's repo. Set them locally
+        // on the submodule's worktree before committing — Windows CI
+        // has no global git identity, so a missing local identity
+        // fails the commit there.
         let subWorktree = fixture.parent.appendingPathComponent("sub")
         let subRunner = Runner(defaultWorkingDirectory: subWorktree)
+        _ = try await subRunner.run(["config", "user.email", "sub@test"])
+        _ = try await subRunner.run(["config", "user.name", "sub"])
+        _ = try await subRunner.run(["config", "commit.gpgsign", "false"])
         try Data("update\n".utf8).write(to: subWorktree.appendingPathComponent("u.txt"))
         _ = try await subRunner.run(["add", "u.txt"])
         _ = try await subRunner.run(["commit", "-m", "u"])
