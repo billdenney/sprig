@@ -26,7 +26,8 @@ struct SprigCtl: AsyncParsableCommand {
             RecoverCommand.self,
             ConflictsCommand.self,
             LFSCommand.self,
-            SubmoduleCommand.self
+            SubmoduleCommand.self,
+            DiagnoseCommand.self
         ]
     )
 }
