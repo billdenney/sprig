@@ -140,14 +140,26 @@ struct PollingFileWatcherRealFSTests {
     /// because events arrive in <100 ms; the budget is for Windows.
     ///
     /// Windows filesystem updates can take up to ~2 s to propagate to
-    /// readers (the polling watcher's `readdir` snapshot included),
-    /// so the worst-case wait is `preWriteDelayNs (500 ms) + ~2 s
-    /// propagation + one poll interval (50 ms) ≈ 2.55 s`. The previous
-    /// 3.0 s budget left only ~450 ms of margin, which a busy Windows
-    /// runner would occasionally lose to. 5.0 s leaves comfortable
-    /// headroom without affecting macOS / Linux runtimes (the
-    /// `until:`-based `collect` returns the moment the event lands).
-    private static let eventTimeoutSec: Double = 5.0
+    /// readers (the polling watcher's `readdir` snapshot included)
+    /// — but that's a median, not a worst case. Hosted Windows
+    /// runners under load have been observed taking longer:
+    ///
+    /// - PR #22 / #23 baseline: 3.0 s (failed all three live-watcher
+    ///   tests on a slow runner; bumped to 5.0 s in commit `e911d0d`).
+    /// - PR #87 (Ollama provider, unrelated change): 5.0 s budget
+    ///   timed out on `createDetected` after >5 s of `readdir` not
+    ///   surfacing the new file. Bumped to 15.0 s here.
+    ///
+    /// 15 s is generous, but the cost is asymmetric: the `until:`-
+    /// based `collect` returns the moment the event lands, so happy
+    /// paths (every macOS/Linux run, most Windows runs) pay zero.
+    /// Only timeout-on-failure paths feel the longer ceiling — and
+    /// that's where we WANT the slack so a slow runner doesn't fail
+    /// the suite. Bump again if a future Windows runner exceeds
+    /// even this; investigating a more reactive Windows directory-
+    /// notification API (vs polling `readdir`) is the long-term
+    /// alternative if the bumps stop fitting.
+    private static let eventTimeoutSec: Double = 15.0
 
     @Test("creating a file produces a .created event")
     func createDetected() async throws {
