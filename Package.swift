@@ -44,7 +44,14 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // parser (`SubmoduleStatusParser`) and value type
     // (`SubmoduleEntry`) don't need GitCore, but they live in the
     // same Tier-1 module and the convenience of one dep covers both.
-    "SubmoduleKit": ["GitCore"]
+    "SubmoduleKit": ["GitCore"],
+    // DiagKit's `EnvironmentCollector` probes git via
+    // `GitCore.Runner` (`git --version` and `git lfs version`) so
+    // diagnostics envelopes carry the actually-resolved tool
+    // versions, not just whatever was on PATH at compile time. The
+    // value-type `EnvironmentReport` is pure-Foundation; the dep
+    // is needed by the collector.
+    "DiagKit": ["GitCore"]
 ]
 
 let tier2Targets: [String] = [
