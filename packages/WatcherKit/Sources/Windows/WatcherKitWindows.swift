@@ -141,7 +141,7 @@
             var wide = Array(pathString.utf16)
             wide.append(0) // null terminator
 
-            let handle = wide.withUnsafeBufferPointer { buf -> HANDLE? in
+            return wide.withUnsafeBufferPointer { buf -> HANDLE? in
                 let h = CreateFileW(
                     buf.baseAddress,
                     DWORD(FILE_LIST_DIRECTORY),
@@ -158,7 +158,6 @@
                 )
                 return h == INVALID_HANDLE_VALUE ? nil : h
             }
-            return handle
         }
 
         // MARK: - Watch loop
@@ -166,7 +165,7 @@
         /// Filter mask covering the same event categories
         /// `PollingFileWatcher` surfaces. Adjust if the
         /// ``FileWatcher`` protocol grows finer-grained kinds.
-        private static let notifyFilter: DWORD = DWORD(
+        private static let notifyFilter: DWORD = .init(
             FILE_NOTIFY_CHANGE_FILE_NAME
                 | FILE_NOTIFY_CHANGE_DIR_NAME
                 | FILE_NOTIFY_CHANGE_LAST_WRITE
@@ -277,8 +276,9 @@
                 let nameLengthBytes = Int(recordPtr.load(as: DWORD.self, fromByteOffset: 8))
                 let nameWordCount = nameLengthBytes / 2 // bytes -> UInt16 (WCHAR)
 
-                if nameWordCount > 0,
-                   offset + 12 + nameLengthBytes <= byteCount {
+                let hasParseableName = nameWordCount > 0
+                    && offset + 12 + nameLengthBytes <= byteCount
+                if hasParseableName {
                     let nameStart = recordPtr.advanced(by: 12)
                     var chars = [UInt16](repeating: 0, count: nameWordCount + 1)
                     chars.withUnsafeMutableBufferPointer { dst in
