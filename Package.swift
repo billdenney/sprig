@@ -185,6 +185,7 @@ let package = Package(
                     "SafetyKit",
                     "ConflictKit",
                     "LFSKit",
+                    "SubmoduleKit",
                     .product(name: "ArgumentParser", package: "swift-argument-parser")
                 ],
                 path: "cli/sprigctl/Sources"
@@ -196,7 +197,8 @@ let package = Package(
                 // RepoState + IPCSchema + AgentKit for AgentCommand tests;
                 // SafetyKit for RecoverCommand tests (snapshot ref names);
                 // ConflictKit for ConflictsCommand tests;
-                // LFSKit for LFSCommand tests.
+                // LFSKit for LFSCommand tests;
+                // SubmoduleKit for SubmoduleCommand tests.
                 dependencies: [
                     "sprigctl",
                     "GitCore",
@@ -205,7 +207,8 @@ let package = Package(
                     "AgentKit",
                     "SafetyKit",
                     "ConflictKit",
-                    "LFSKit"
+                    "LFSKit",
+                    "SubmoduleKit"
                 ],
                 path: "cli/sprigctl/Tests"
             )
