@@ -38,21 +38,24 @@ struct OllamaGenerateRequest: Encodable, Equatable {
     /// Optional generation parameters. Ollama nests these under
     /// `"options"` rather than as siblings. Nil omits the key
     /// entirely so Ollama uses its model-side defaults.
-    let options: Options?
+    let options: OllamaGenerateOptions?
+}
 
-    struct Options: Encodable, Equatable {
-        /// Sampling temperature. Maps from
-        /// ``AIRequest/temperature``.
-        let temperature: Double?
+/// Options block nested under `"options"` in Ollama's request
+/// JSON. Sibling-level (rather than nested under
+/// `OllamaGenerateRequest`) to satisfy SwiftLint's
+/// max-1-level-nesting rule.
+struct OllamaGenerateOptions: Encodable, Equatable {
+    /// Sampling temperature. Maps from ``AIRequest/temperature``.
+    let temperature: Double?
 
-        /// Maximum tokens to predict. Maps from
-        /// ``AIRequest/maxTokens``. Ollama's key is `num_predict`.
-        let numPredict: Int?
+    /// Maximum tokens to predict. Maps from
+    /// ``AIRequest/maxTokens``. Ollama's key is `num_predict`.
+    let numPredict: Int?
 
-        enum CodingKeys: String, CodingKey {
-            case temperature
-            case numPredict = "num_predict"
-        }
+    enum CodingKeys: String, CodingKey {
+        case temperature
+        case numPredict = "num_predict"
     }
 }
 
