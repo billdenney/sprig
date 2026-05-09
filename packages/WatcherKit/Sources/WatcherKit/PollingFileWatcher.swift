@@ -38,8 +38,9 @@ import PlatformKit
 /// `GitCore.GitMetadataPaths.resolveGitDir(forWorktree:)`) as a
 /// SEPARATE root in `paths`** — once explicitly added as a root, the
 /// walk descends into it normally. The same applies to every
-/// submodule's gitDir (via `submoduleWorktrees(at:)`) and every
-/// linked worktree's gitDir (via `linkedWorktrees(at:)`).
+/// submodule's worktree (via
+/// `SubmoduleKit.SubmoduleStatus.worktreeURLs(at:runner:recursive:)`)
+/// and every linked worktree's gitDir (via `linkedWorktrees(at:)`).
 public final class PollingFileWatcher: FileWatcher, @unchecked Sendable {
     /// Wall-clock time between rescans.
     public let pollInterval: TimeInterval

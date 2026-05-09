@@ -62,8 +62,7 @@ public enum SubmoduleStatus {
         // Strict UTF-8 decode. `String(bytes:encoding:)` returns nil
         // (rather than substituting U+FFFD) when bytes aren't valid
         // UTF-8, so a failure here surfaces malformed git output
-        // rather than silently dropping submodules. Matches the
-        // precedent in `GitMetadataPaths.submoduleWorktrees`.
+        // rather than silently dropping submodules.
         guard let stdoutText = String(bytes: output.stdout, encoding: .utf8) else {
             throw GitError.parseFailure(
                 context: "git submodule status emitted non-UTF-8 bytes",
@@ -71,5 +70,35 @@ public enum SubmoduleStatus {
             )
         }
         return try SubmoduleStatusParser.parse(stdoutText)
+    }
+
+    /// Convenience: list every submodule's worktree URL under
+    /// `worktree`. Equivalent to ``fetch(at:runner:recursive:source:)``
+    /// composed with `entries.map { worktree.appendingPathComponent($0.path).standardized }`.
+    ///
+    /// Defaults to `recursive: true` because the original use case —
+    /// a watcher enumerating every gitDir to subscribe to — wants
+    /// every level of nesting. Callers that need just the top-level
+    /// listing can pass `recursive: false` (or call ``fetch`` directly
+    /// and map themselves).
+    ///
+    /// State is intentionally elided here: a callsite that wanted
+    /// "watcher targets" doesn't care whether the submodule is
+    /// out-of-date, only that it exists at all. Callers who do care
+    /// about state should use ``fetch`` and inspect each entry.
+    public static func worktreeURLs(
+        at worktree: URL,
+        runner: Runner,
+        recursive: Bool = true
+    ) async throws -> [URL] {
+        let standardized = worktree.standardized
+        let entries = try await fetch(
+            at: standardized,
+            runner: runner,
+            recursive: recursive
+        )
+        return entries.map { entry in
+            standardized.appendingPathComponent(entry.path).standardized
+        }
     }
 }

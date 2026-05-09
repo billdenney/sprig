@@ -33,11 +33,11 @@
 // `gitVersion: GitVersion?` parameter on filter helpers is plumbed
 // for future divergent logic; today it's accepted-but-ignored.
 //
-// Submodule recursion (and nested submodules) is a deliberate
-// follow-up — `submoduleWorktrees(at:runner:)` will land in a sibling
-// PR. This PR's resolveGitDir already handles each individual
-// submodule's `.git` file, so the follow-up is purely "discover all
-// of them and call this for each."
+// Submodule enumeration lives in `SubmoduleKit.SubmoduleStatus` —
+// `worktreeURLs(at:runner:recursive:)` for the URL-only listing,
+// `fetch(at:runner:recursive:source:)` for the full typed model.
+// The agent calls into SubmoduleKit (Tier 1) directly; GitCore
+// itself doesn't need its own copy.
 
 import Foundation
 
@@ -272,68 +272,6 @@ public enum GitMetadataPaths {
         // Deterministic order so callers can rely on the result for
         // diff-style change detection between calls.
         return results.sorted { $0.path < $1.path }
-    }
-
-    /// Discover **submodules** (recursively, including nested) and
-    /// return each submodule's worktree URL.
-    ///
-    /// Implementation runs `git submodule status --recursive` inside
-    /// `worktreeURL`. The output line format (per `git-submodule(1)`)
-    /// is:
-    ///
-    ///   `<status-char> <sha-or-marker> <path> [<refname>]`
-    ///
-    /// where `<status-char>` is one of:
-    /// - ` ` — clean (matches super-repo's recorded SHA)
-    /// - `+` — different SHA than recorded ("out of date")
-    /// - `-` — not yet initialized
-    /// - `U` — merge conflict
-    ///
-    /// We return ALL submodule paths regardless of status — including
-    /// uninitialized ones — so the caller can render the appropriate
-    /// `submodule-init-needed` / `submodule-out-of-date` badges.
-    ///
-    /// `--recursive` flattens nested submodules into the same listing,
-    /// so this is a single git invocation regardless of nesting depth.
-    /// Each `path` is reported relative to `worktreeURL`; we resolve
-    /// to absolute URLs.
-    static func submoduleWorktrees(
-        at worktreeURL: URL,
-        runner: Runner? = nil
-    ) async throws -> [URL] {
-        let worktree = worktreeURL.standardized
-        let r = runner ?? Runner(defaultWorkingDirectory: worktree)
-        let output = try await r.run(
-            ["submodule", "status", "--recursive"],
-            cwd: worktree
-        )
-        // Path components in submodule status are UTF-8; bail loudly if
-        // git emits non-UTF-8 bytes (`String(bytes:encoding:)` returns
-        // nil rather than substituting U+FFFD). Surfaces malformed
-        // output rather than silently dropping submodules.
-        guard let stdoutText = String(bytes: output.stdout, encoding: .utf8) else {
-            throw GitError.parseFailure(
-                context: "submodule status --recursive emitted non-UTF-8 bytes",
-                rawSnippet: ""
-            )
-        }
-        var results: [URL] = []
-        for rawLine in stdoutText.split(whereSeparator: \.isNewline) {
-            // Tolerate empty lines (trailing newlines) gracefully.
-            guard !rawLine.isEmpty else { continue }
-            // First char is the status indicator; remaining is
-            // `<sha-or-marker> <path> [<refname>]`. We split on
-            // whitespace and pick index 1 as the path. The refname
-            // component (if present) is parenthesized and may itself
-            // contain spaces in pathological cases, but we don't need
-            // it here.
-            let body = rawLine.dropFirst()
-            let parts = body.split(separator: " ", omittingEmptySubsequences: true)
-            guard parts.count >= 2 else { continue }
-            let path = String(parts[1])
-            results.append(worktree.appendingPathComponent(path).standardized)
-        }
-        return results
     }
 }
 
