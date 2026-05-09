@@ -215,4 +215,48 @@ struct SubmoduleStatusFetchTests {
         #expect(entries.count == 1)
         #expect(entries.first?.state == .outOfDate)
     }
+
+    @Test("worktreeURLs returns empty for a repo with no submodules")
+    func worktreeURLsEmpty() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sprig-skit-wt-empty-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { cleanup(dir) }
+        let runner = Runner(defaultWorkingDirectory: dir)
+        try await initRepo(at: dir, identity: "x", runner: runner)
+        try Data("x\n".utf8).write(to: dir.appendingPathComponent("x.txt"))
+        _ = try await runner.run(["add", "x.txt"])
+        _ = try await runner.run(["commit", "-m", "x"])
+
+        let urls = try await SubmoduleStatus.worktreeURLs(at: dir, runner: runner)
+        #expect(urls.isEmpty)
+    }
+
+    @Test("worktreeURLs returns absolute URLs and recurses into nested submodules by default")
+    func worktreeURLsRecursesByDefault() async throws {
+        let fixture = try await mkParentWithSubmodule(nested: true)
+        defer { cleanup(fixture.parent, fixture.helper, fixture.nestedHelper) }
+        let runner = Runner(defaultWorkingDirectory: fixture.parent)
+
+        let urls = try await SubmoduleStatus.worktreeURLs(at: fixture.parent, runner: runner)
+        let sorted = urls.map(\.path).sorted()
+        #expect(sorted.count == 2)
+        #expect(sorted.contains(fixture.parent.appendingPathComponent("sub").standardized.path))
+        #expect(sorted.contains(fixture.parent.appendingPathComponent("sub/deeper").standardized.path))
+    }
+
+    @Test("worktreeURLs with recursive: false stays at the top level")
+    func worktreeURLsTopLevelOnly() async throws {
+        let fixture = try await mkParentWithSubmodule(nested: true)
+        defer { cleanup(fixture.parent, fixture.helper, fixture.nestedHelper) }
+        let runner = Runner(defaultWorkingDirectory: fixture.parent)
+
+        let urls = try await SubmoduleStatus.worktreeURLs(
+            at: fixture.parent,
+            runner: runner,
+            recursive: false
+        )
+        #expect(urls.count == 1)
+        #expect(urls.first == fixture.parent.appendingPathComponent("sub").standardized)
+    }
 }
