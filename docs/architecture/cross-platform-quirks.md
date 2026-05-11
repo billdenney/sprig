@@ -187,6 +187,20 @@ These are cases where the same Swift source code compiles on one platform's tool
 - **Where in the repo** — `packages/WatcherKit/Tests/WatcherKitTests/PollingFileWatcherTests.swift` (live-FS suite skipped on Windows per `disabled-tests.md`); `packages/WatcherKit/Sources/Windows/WatcherKitWindows.swift` (`ReadDirectoryChangesWatcher`, the reactive replacement).
 - **U:** Not a bug — `FindFirstFile`'s caching is documented Win32 behaviour. Documentation only.
 
+### E1a. Test fixture race against `ReadDirectoryChangesW` registration
+
+- **Symptom** — `ReadDirectoryChangesWatcher` test sees `events: []` for a file mutation fired shortly after `watcher.start(paths:)`. Symptom-identical to E1 but the underlying cause is different: the registration race, not the visibility lag.
+- **Root cause** — `start(paths:)` synchronously opens directory `HANDLE`s and spawns one detached `Task` per root. The Task body issues the first `ReadDirectoryChangesW`. There's a gap between `start` returning and the syscall actually entering, dominated by `Task.detached` scheduling. `ReadDirectoryChangesW` does NOT buffer events from before the call registers — anything that happens in that gap is silently dropped. On hosted Windows runners under load, the gap can exceed 500ms (see PR #89's CI runs 25689125187 + 25689738154 + previous-iteration history).
+- **Fix pattern** — `FileWatcher.awaitReady() async`. Each watcher impl that has an async registration step (currently only `ReadDirectoryChangesWatcher`) signals "ready" from inside its per-root Task's preamble, just before its first kernel call. Tests `await watcher.awaitReady()` between `start()` and firing the mutation. Watchers whose `start()` is synchronously-live (`FSEventsWatcher`, `MockFileWatcher`) inherit a default no-op extension method, so the API is uniform across impls without forcing trivial overrides.
+  ```swift
+  let stream = watcher.start(paths: [root])
+  await watcher.awaitReady()           // deterministic — replaces Task.sleep(N)
+  try Data("…").write(to: file)
+  ```
+  The remaining gap between "ready signal fires" and "syscall enters" is userspace-only and microsecond-scale; any test client firing a mutation immediately afterward has hundreds of µs of Foundation overhead before the write hits the kernel.
+- **Where in the repo** — `packages/PlatformKit/Sources/PlatformKit/FileWatcher.swift` (protocol + default impl); `packages/WatcherKit/Sources/Windows/WatcherKitWindows.swift` (override + `markRootReady()` callback); `packages/WatcherKit/Tests/WatcherKitTests/ReadDirectoryChangesWatcherTests.swift` (test usage).
+- **U:** Not a bug — `ReadDirectoryChangesW` semantics are documented. The pattern of "watcher exposes an explicit readiness signal for tests" would be worth pulling into a Swift-on-server file-watcher library if one ever forms.
+
 ### E2. macOS `Process.waitUntilExit()` deadlocks on fast-exiting children
 
 - **Symptom** — `Process.run(); process.waitUntilExit()` hangs indefinitely when the spawned child exits in < 50ms.

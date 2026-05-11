@@ -50,31 +50,17 @@
             }
         }
 
-        /// Delay between `start()` and the file mutation, so the
-        /// watcher's per-handle detached Task gets a chance to issue
-        /// its first `ReadDirectoryChangesW` call before the mutation
-        /// fires. ReadDirectoryChangesW does NOT buffer events that
-        /// happen before its first invocation on a handle — they're
-        /// silently lost — so the test fixtures must wait long enough
-        /// for the watcher to be live.
-        ///
-        /// 500ms (rather than the more obvious 50–100ms) because of
-        /// hosted-runner Task-scheduling latency:
-        ///
-        /// - PR #89's first Windows CI run (25689738154) failed
-        ///   `nestedFileDetected` with `events: []` at 100ms — the
-        ///   detached Task that wraps `runWatchLoop` hadn't been
-        ///   scheduled by the time the file write fired, so the
-        ///   first `ReadDirectoryChangesW` happened *after* the
-        ///   create event the kernel emitted.
-        /// - The polling watcher hit the symmetric problem in PR
-        ///   #22 / #23 and settled on 500ms there too.
-        ///
-        /// 500ms adds ~2.5s total to the suite (5 cases × ~500ms);
-        /// happy-path tests still complete in <1s wall-clock per
-        /// case because the predicate-driven collector exits on the
-        /// first matching event.
-        private static let preWriteDelayNs: UInt64 = 500_000_000
+        // No `preWriteDelayNs` anymore — see ``FileWatcher/awaitReady()``.
+        // Tests `await watcher.awaitReady()` between `start()` and
+        // firing the mutation, which signals deterministically when
+        // the kernel notification is registered. Earlier iterations
+        // of this suite used a time-based delay (100ms initially,
+        // bumped to 500ms after PR #89's CI flakes) and remained
+        // sensitive to hosted-runner Task-scheduling latency. The
+        // structural fix is in `ReadDirectoryChangesWatcher`:
+        // per-root Tasks call back into the watcher just before
+        // their first `ReadDirectoryChangesW`, and `awaitReady`
+        // resumes when every Task has done so.
 
         /// Reactive watcher — events arrive when the kernel emits
         /// them, not on a poll tick. The predicate-driven `collect`
@@ -105,11 +91,8 @@
 
             let watcher = ReadDirectoryChangesWatcher()
             let stream = watcher.start(paths: [root])
-
-            Task {
-                try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
-                try? Data("hi\n".utf8).write(to: root.appendingPathComponent("hello.txt"))
-            }
+            await watcher.awaitReady()
+            try Data("hi\n".utf8).write(to: root.appendingPathComponent("hello.txt"))
 
             let events = await collect(
                 from: stream,
@@ -131,11 +114,8 @@
 
             let watcher = ReadDirectoryChangesWatcher()
             let stream = watcher.start(paths: [root])
-
-            Task {
-                try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
-                try? Data("one\ntwo\n".utf8).write(to: file)
-            }
+            await watcher.awaitReady()
+            try Data("one\ntwo\n".utf8).write(to: file)
 
             // Predicate intentionally matches *any* event for
             // `a.txt`, not just `.modified`. Two Windows-specific
@@ -182,11 +162,8 @@
 
             let watcher = ReadDirectoryChangesWatcher()
             let stream = watcher.start(paths: [root])
-
-            Task {
-                try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
-                try? FileManager.default.removeItem(at: file)
-            }
+            await watcher.awaitReady()
+            try FileManager.default.removeItem(at: file)
 
             let events = await collect(
                 from: stream,
@@ -208,11 +185,8 @@
 
             let watcher = ReadDirectoryChangesWatcher()
             let stream = watcher.start(paths: [root])
-
-            Task {
-                try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
-                try? Data("nested\n".utf8).write(to: subdir.appendingPathComponent("deep.txt"))
-            }
+            await watcher.awaitReady()
+            try Data("nested\n".utf8).write(to: subdir.appendingPathComponent("deep.txt"))
 
             let events = await collect(
                 from: stream,
