@@ -50,12 +50,31 @@
             }
         }
 
-        /// Brief delay between `start()` and the file mutation. The
-        /// watcher's per-handle Task spawns synchronously inside
-        /// `start()`, but the `ReadDirectoryChangesW` call itself
-        /// runs on a dispatch thread that takes a few ms to issue
-        /// the first I/O. 100ms is comfortable.
-        private static let preWriteDelayNs: UInt64 = 100_000_000
+        /// Delay between `start()` and the file mutation, so the
+        /// watcher's per-handle detached Task gets a chance to issue
+        /// its first `ReadDirectoryChangesW` call before the mutation
+        /// fires. ReadDirectoryChangesW does NOT buffer events that
+        /// happen before its first invocation on a handle — they're
+        /// silently lost — so the test fixtures must wait long enough
+        /// for the watcher to be live.
+        ///
+        /// 500ms (rather than the more obvious 50–100ms) because of
+        /// hosted-runner Task-scheduling latency:
+        ///
+        /// - PR #89's first Windows CI run (25689738154) failed
+        ///   `nestedFileDetected` with `events: []` at 100ms — the
+        ///   detached Task that wraps `runWatchLoop` hadn't been
+        ///   scheduled by the time the file write fired, so the
+        ///   first `ReadDirectoryChangesW` happened *after* the
+        ///   create event the kernel emitted.
+        /// - The polling watcher hit the symmetric problem in PR
+        ///   #22 / #23 and settled on 500ms there too.
+        ///
+        /// 500ms adds ~2.5s total to the suite (5 cases × ~500ms);
+        /// happy-path tests still complete in <1s wall-clock per
+        /// case because the predicate-driven collector exits on the
+        /// first matching event.
+        private static let preWriteDelayNs: UInt64 = 500_000_000
 
         /// Reactive watcher — events arrive when the kernel emits
         /// them, not on a poll tick. The predicate-driven `collect`
