@@ -4,6 +4,8 @@ Sprig's macOS app is the user-facing 1.0 target, but the **engine is portable** 
 
 This document mirrors §12 of the master plan (`/home/bill/.claude/plans/please-switch-to-plan-glittery-corbato.md`).
 
+**Companion doc:** [`cross-platform-quirks.md`](cross-platform-quirks.md) catalogs the *operational* surprises we've hit during development — symptoms, root causes, fix patterns, and upstream-fix candidates. Add an entry there whenever a CI failure surfaces on one platform but not another.
+
 ## Platform support matrix
 
 | Surface | macOS | Linux | Windows | Notes |
