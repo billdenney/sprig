@@ -30,6 +30,39 @@ public protocol FileWatcher: Sendable {
     /// Stop the watcher. Idempotent. After this returns, the stream
     /// previously vended by ``start(paths:)`` will finish.
     func stop() async
+
+    /// Wait until the watcher is actually live — i.e., the kernel-
+    /// level subscription (FSEvents stream, inotify watch,
+    /// `ReadDirectoryChangesW` notification) is registered and any
+    /// filesystem change from this point forward will be reported.
+    ///
+    /// Most watchers' ``start(paths:)`` returns *before* the
+    /// underlying notification is fully registered — the
+    /// registration runs in a detached `Task` so `start` can be
+    /// synchronous. Production callers don't usually care: they let
+    /// the watcher run for the lifetime of a subscription and never
+    /// fire a change "immediately after" starting.
+    ///
+    /// Tests do fire changes immediately, and a time-based delay
+    /// (e.g. `Task.sleep(nanoseconds:)`) is inherently racy on
+    /// hosted runners under load. `awaitReady` removes the race:
+    /// once it returns, any subsequent file mutation will be
+    /// observed.
+    ///
+    /// Default implementation is a no-op for watchers whose
+    /// ``start(paths:)`` is synchronously live (`FSEventsWatcher`,
+    /// `MockFileWatcher`). Watchers with a detached-Task
+    /// registration step (`ReadDirectoryChangesWatcher`) override.
+    func awaitReady() async
+}
+
+public extension FileWatcher {
+    func awaitReady() async {
+        // Default: no async waiting needed. The watcher's
+        // ``start(paths:)`` either registered the subscription
+        // synchronously (FSEvents, Mock) or doesn't have an async
+        // registration step worth waiting on.
+    }
 }
 
 /// A single filesystem change observation.
