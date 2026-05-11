@@ -152,18 +152,34 @@ struct SprigctlAgentTests {
         try await Sprigctl.spawnGit(["add", "a.txt"], cwd: repo)
         try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
 
-        // `--duration 1.5` at `--stats-interval 0.2` budgets for ≥6
+        // `--duration 5.0` at `--stats-interval 0.2` budgets for ≥25
         // stats ticks on a fast runner; the assertion below requires
-        // only ≥2. Earlier value of 0.6 s left ~0.4 s for ticks after
-        // agent startup, which a slow Windows hosted runner could
-        // chew through and produce only one tick before the
-        // `--duration` cutoff fired (PR #70 hit this on Windows CI).
-        // 1.5 s is comfortable headroom; macOS / Linux runners exit
-        // at the `--duration` cutoff regardless, so the runtime cost
+        // only ≥2. Earlier values failed on Windows hosted runners:
+        //
+        // - PR #70: 0.6 → 1.5 s after a Windows CI flake left only
+        //   ~0.4 s for stats after agent startup.
+        // - PR #92 (CI run 25696584319): 1.5 s flaked again — the
+        //   Windows agent printed `# agent: watching <path>` but
+        //   zero stats lines in 1.5 s. Hosted-runner agent startup
+        //   (process spawn + Foundation init + git init + initial
+        //   refresh of a fresh repo) burned through the entire
+        //   window.
+        //
+        // 5.0 s is generous headroom. macOS / Linux runners exit at
+        // the `--duration` cutoff regardless, so the runtime cost
         // is uniform across platforms.
+        //
+        // Structural alternative (deferred): stream stderr in real
+        // time and exit as soon as we've seen ≥2 stats lines.
+        // Requires teaching `Sprigctl.run` to drain stderr
+        // line-by-line with a configurable predicate-based early
+        // exit, and ideally an `# agent: ready` marker emitted by
+        // the agent after its first refresh so the test can
+        // distinguish startup from steady-state. Bigger refactor
+        // than this stop-gap deserves.
         let out = try await Sprigctl.run([
             "agent",
-            "--duration", "1.5",
+            "--duration", "5.0",
             "--polling-interval", "0.1",
             "--stats-interval", "0.2",
             repo.path
