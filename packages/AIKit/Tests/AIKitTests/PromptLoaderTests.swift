@@ -151,3 +151,49 @@ struct PromptLoaderDirectoryTests {
         }
     }
 }
+
+@Suite("PromptLoader — bundled")
+struct PromptLoaderBundleTests {
+    @Test("loadBundled(named:) resolves the shipped commit-message-v1 prompt")
+    func loadCommitMessagePrompt() throws {
+        let prompt = try PromptLoader.loadBundled(named: "commit-message-v1")
+        #expect(prompt.name == "commit-message-v1")
+        // Spot-check the prompt content rather than asserting a
+        // verbatim string — the file is the source of truth and
+        // may legitimately evolve. The Conventional-Commit hint
+        // and the no-marketing-language constraint are the load-
+        // bearing parts that shape callers' expectations.
+        #expect(prompt.body.contains("Conventional Commit"))
+        #expect(prompt.body.contains("imperative"))
+        #expect(!prompt.body.isEmpty)
+    }
+
+    @Test("loadBundled(named:) throws notFound for an absent prompt")
+    func notFoundThrows() {
+        do {
+            _ = try PromptLoader.loadBundled(named: "definitely-not-shipped")
+            Issue.record("expected throw")
+        } catch let error as PromptLoaderError {
+            switch error {
+            case let .notFound(name, _):
+                #expect(name == "definitely-not-shipped")
+            default:
+                Issue.record("expected .notFound, got \(error)")
+            }
+        } catch {
+            Issue.record("expected PromptLoaderError, got \(error)")
+        }
+    }
+
+    @Test("loadAllBundled() includes every shipped prompt, sorted by name")
+    func loadAllBundled() throws {
+        let prompts = try PromptLoader.loadAllBundled()
+        // At least the commit-message-v1 we ship today. Asserting
+        // membership rather than exact count lets follow-up prompts
+        // land without touching this test.
+        #expect(prompts.contains { $0.name == "commit-message-v1" })
+        // Sorted invariant.
+        let names = prompts.map(\.name)
+        #expect(names == names.sorted())
+    }
+}

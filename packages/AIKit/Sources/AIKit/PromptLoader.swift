@@ -2,14 +2,15 @@
 //
 // Two seams:
 //
+// - ``loadBundled(named:)`` / ``loadAllBundled()`` — resolves
+//   AIKit's shipped prompts (`Sources/AIKit/Prompts/*.md` declared
+//   as `.process`'d resources in `Package.swift`) via the
+//   SwiftPM-generated `Bundle.module`. `Bundle.module` is internal,
+//   which is why the bundle isn't a parameter on the public API.
 // - ``load(named:from:)`` / ``loadAll(from:)`` — directory-based.
 //   Tests use temp directories; the user-overridable case (caller
 //   has dropped custom prompts in `~/Library/Application Support/
 //   Sprig/Prompts/` or similar) calls into here directly.
-// - ``load(named:in:)`` / ``loadAll(in:)`` — bundle-based. The
-//   default `Bundle.module` resolves AIKit's shipped prompts in
-//   `Sources/AIKit/Prompts/*.md`. Lands in commit 2 on this
-//   branch alongside the SwiftPM resource wiring.
 //
 // Lookup is by filename-without-extension. A prompt named
 // `commit-message-v1` maps to a file `commit-message-v1.md`.
@@ -25,6 +26,50 @@ public enum PromptLoader {
     /// (so prompt diffs render well in GitHub, tooling can syntax-
     /// highlight, etc.).
     public static let fileExtension = "md"
+
+    /// Load one of AIKit's shipped prompts by name. Resolves from
+    /// `Bundle.module` — the `Sources/AIKit/Prompts/*.md` files
+    /// declared as `.process`'d resources in `Package.swift`.
+    ///
+    /// `Bundle.module` is internal to AIKit (SwiftPM-generated), so
+    /// it can't appear in the public signature; callers that want
+    /// user-overridable prompts should use ``load(named:from:)``
+    /// with an explicit directory URL.
+    public static func loadBundled(named name: String) throws -> Prompt {
+        guard let url = Bundle.module.url(
+            forResource: name,
+            withExtension: fileExtension
+        ) else {
+            throw PromptLoaderError.notFound(
+                name: name,
+                at: Bundle.module.bundleURL
+            )
+        }
+        return try load(from: url, name: name)
+    }
+
+    /// Load every prompt shipped in AIKit. Returns sorted by name.
+    ///
+    /// Uses `bundle.urls(forResourcesWithExtension:subdirectory:)`
+    /// — SwiftPM's `.process` resource declaration flattens the
+    /// `Prompts/` subdir into the bundle root, so the subdirectory
+    /// argument is nil rather than `"Prompts"`. The Linux
+    /// (swift-corelibs-foundation) signature returns `[NSURL]?`
+    /// rather than the `[URL]?` on Apple platforms, hence the
+    /// `.map { $0 as URL }` bridge.
+    public static func loadAllBundled() throws -> [Prompt] {
+        let nsurls = Bundle.module.urls(
+            forResourcesWithExtension: fileExtension,
+            subdirectory: nil
+        ) ?? []
+        let urls = nsurls.map { $0 as URL }
+        var prompts: [Prompt] = []
+        for url in urls {
+            let name = url.deletingPathExtension().lastPathComponent
+            try prompts.append(load(from: url, name: name))
+        }
+        return prompts.sorted { $0.name < $1.name }
+    }
 
     /// Load one prompt by name from `directory`. Returns the
     /// parsed ``Prompt``; throws ``PromptLoaderError`` for missing
@@ -58,7 +103,7 @@ public enum PromptLoader {
         var prompts: [Prompt] = []
         for url in markdowns {
             let name = url.deletingPathExtension().lastPathComponent
-            prompts.append(try load(from: url, name: name))
+            try prompts.append(load(from: url, name: name))
         }
         return prompts.sorted { $0.name < $1.name }
     }
