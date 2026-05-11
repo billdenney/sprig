@@ -54,19 +54,25 @@
 
         public func stop() async {
             // Atomically grab and clear state so a concurrent stop()
-            // is a no-op.
-            lock.lock()
-            let rootsToClose = state.roots
-            let tasksToWait = state.tasks
-            let cont = state.continuation
-            state.roots = []
-            state.tasks = []
-            state.continuation = nil
-            lock.unlock()
+            // is a no-op. `NSLock.withLock` is the async-safe shape:
+            // bare `lock()` / `unlock()` are `@unavailable` from
+            // async contexts in Swift 6 on Windows (and warn-only on
+            // Linux, which is why this passed local Linux compile
+            // but failed Windows CI).
+            //
+            // We return the whole `State` snapshot (a value type) so
+            // the call doesn't trip SwiftLint's `large_tuple` rule.
+            let snapshot: State = lock.withLock {
+                let snap = state
+                state.roots = []
+                state.tasks = []
+                state.continuation = nil
+                return snap
+            }
 
             // (1) Mark each Task cancelled so its loop sees
             //     `Task.isCancelled` after the blocking I/O wakes.
-            for task in tasksToWait {
+            for task in snapshot.tasks {
                 task.cancel()
             }
 
@@ -74,7 +80,7 @@
             //     loops actually return and observe cancellation.
             //     `CancelIoEx(handle, nil)` cancels every pending I/O
             //     on the handle issued by the calling process.
-            for root in rootsToClose {
+            for root in snapshot.roots {
                 _ = CancelIoEx(root.handle, nil)
             }
 
@@ -82,16 +88,16 @@
             //     close the handle out from under it (closing while
             //     `ReadDirectoryChangesW` is still pending is
             //     undefined per `winbase.h`).
-            for task in tasksToWait {
+            for task in snapshot.tasks {
                 _ = await task.value
             }
 
             // (4) Now safe to close handles.
-            for root in rootsToClose {
+            for root in snapshot.roots {
                 _ = CloseHandle(root.handle)
             }
 
-            cont?.finish()
+            snapshot.continuation?.finish()
         }
 
         // MARK: - Setup
@@ -206,9 +212,11 @@
                     nil // lpCompletionRoutine
                 )
 
-                if success == 0 {
-                    // CancelIoEx during stop() lands here with
-                    // ERROR_OPERATION_ABORTED. Other errors are
+                if !success {
+                    // `ReadDirectoryChangesW` returns Swift's `Bool`
+                    // (WinSDK maps Win32 `BOOL` to native `Bool`),
+                    // not `Int`. CancelIoEx during stop() lands here
+                    // with ERROR_OPERATION_ABORTED. Other errors are
                     // unrecoverable (handle invalid, FS unmounted,
                     // etc.).
                     let err = GetLastError()
@@ -271,9 +279,12 @@
             // against truncation.
             while offset + 12 <= byteCount {
                 let recordPtr = buffer.advanced(by: offset)
-                let nextEntryOffset = recordPtr.load(as: DWORD.self, fromByteOffset: 0)
-                let action = recordPtr.load(as: DWORD.self, fromByteOffset: 4)
-                let nameLengthBytes = Int(recordPtr.load(as: DWORD.self, fromByteOffset: 8))
+                // `UnsafeRawPointer.load`'s argument order is
+                // `(fromByteOffset:as:)`. Linux's Swift was lenient
+                // about swapping; Windows's Swift is strict.
+                let nextEntryOffset = recordPtr.load(fromByteOffset: 0, as: DWORD.self)
+                let action = recordPtr.load(fromByteOffset: 4, as: DWORD.self)
+                let nameLengthBytes = Int(recordPtr.load(fromByteOffset: 8, as: DWORD.self))
                 let nameWordCount = nameLengthBytes / 2 // bytes -> UInt16 (WCHAR)
 
                 let hasParseableName = nameWordCount > 0
