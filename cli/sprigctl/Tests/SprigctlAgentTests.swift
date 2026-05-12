@@ -159,10 +159,22 @@ struct SprigctlAgentTests {
         // refresh) before any stats interval fires. macOS / Linux
         // exit at `--duration` regardless, so runtime cost is
         // uniform across platforms.
+        //
+        // `--polling-interval 0.5` (rather than 0.1 like the other
+        // tests in this suite) reduces the agent's `git status`
+        // spawn rate from 50/run to 10/run, which materially
+        // lowers exposure to the upstream Linux Foundation flake
+        // F1 (see `docs/architecture/cross-platform-quirks.md`).
+        // Polling rate is irrelevant to this test's assertion (which
+        // only checks `# stats:` stderr output from the
+        // stats-interval timer, independent of polling). Other tests
+        // in this suite assert on badge changes and need 0.1s
+        // polling to observe the mutation in their tighter
+        // `--duration` window.
         let out = try await Sprigctl.run([
             "agent",
             "--duration", "5.0",
-            "--polling-interval", "0.1",
+            "--polling-interval", "0.5",
             "--stats-interval", "0.2",
             repo.path
         ])
