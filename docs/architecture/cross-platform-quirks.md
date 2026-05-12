@@ -201,7 +201,42 @@ These are cases where the same Swift source code compiles on one platform's tool
 - **Where in the repo** — `packages/PlatformKit/Sources/PlatformKit/FileWatcher.swift` (protocol + default impl); `packages/WatcherKit/Sources/Windows/WatcherKitWindows.swift` (override + `markRootReady()` callback); `packages/WatcherKit/Tests/WatcherKitTests/ReadDirectoryChangesWatcherTests.swift` (test usage).
 - **U:** Not a bug — `ReadDirectoryChangesW` semantics are documented. The pattern of "watcher exposes an explicit readiness signal for tests" would be worth pulling into a Swift-on-server file-watcher library if one ever forms.
 
-### E2. macOS `Process.waitUntilExit()` deadlocks on fast-exiting children
+### E2. `Foundation.Data.write(to:)` on Windows uses `CREATE_ALWAYS`
+
+- **Symptom** — a test that writes once to a pre-existing file, then asserts on receiving a `.modified` event from `ReadDirectoryChangesWatcher`, intermittently sees `.created` (or `.created` *and* `.modified`) on Windows.
+- **Root cause** — Foundation's `Data.write(to:options:)` with the default empty options opens the file with `CREATE_ALWAYS` semantics on Windows, which truncates an existing file (effectively delete-then-create). The kernel may emit `FILE_ACTION_ADDED` (for the truncated recreate), `FILE_ACTION_MODIFIED` (for the subsequent write), or both, depending on driver and buffering state. macOS / Linux see a plain `O_WRONLY|O_TRUNC` → `.modified`.
+- **Fix pattern** — write the test predicate against "any event for this file path," not against a specific `WatchEventKind`:
+  ```swift
+  // ❌ Flakes on Windows
+  until: { evs in evs.contains { $0.kind == .modified } }
+
+  // ✅ Robust everywhere; consumers re-stat regardless of kind anyway
+  until: { evs in evs.contains { $0.path.lastPathComponent == "a.txt" } }
+  ```
+  Production consumers (badges, `RepoAgent`'s coalescer) re-stat on every event regardless of kind, so the kind is rarely load-bearing in real code — only in tests asserting on it.
+- **Where in the repo** — `packages/WatcherKit/Tests/WatcherKitTests/ReadDirectoryChangesWatcherTests.swift` (`modifyDetected`).
+- **U:** Not a bug — `CREATE_ALWAYS` is the documented Win32 semantics. Foundation could plausibly use `OPEN_EXISTING|O_TRUNC` equivalents to match Unix semantics, but that's a behaviour change with its own compat fallout. Live with it.
+
+### E3. `FILE_NOTIFY_CHANGE_LAST_WRITE` / `..._SIZE` notifications delayed by kernel cache flush
+
+- **Symptom** — `ReadDirectoryChangesW` emits create/remove events in milliseconds but write events arrive several seconds later, especially on hosted runners under I/O pressure.
+- **Root cause** — Microsoft's `ReadDirectoryChangesW` documentation notes that `FILE_NOTIFY_CHANGE_LAST_WRITE` and `FILE_NOTIFY_CHANGE_SIZE` notifications are deferred until the kernel actually flushes the file's write cache to disk. `FILE_NOTIFY_CHANGE_FILE_NAME` (create / delete / rename) events fire immediately and are not subject to this delay.
+- **Fix pattern** — give write-dependent tests headroom (10 s is comfortable on hosted runners); structurally prefer create / remove assertions when possible:
+  ```swift
+  private static let eventTimeoutSec: Double = 10.0  // kernel cache-flush headroom
+  ```
+- **Where in the repo** — `packages/WatcherKit/Tests/WatcherKitTests/ReadDirectoryChangesWatcherTests.swift` (`eventTimeoutSec`).
+- **U:** Documented Win32 behaviour. Not actionable upstream.
+
+### E4. Hosted-Windows agent process startup consumes seconds, not milliseconds
+
+- **Symptom** — sprigctl CLI tests with `--duration 1.5` or shorter never observe a periodic stderr emission (stats lines, ready markers, etc.) on Windows hosted runners; the same tests pass instantly on macOS / Linux.
+- **Root cause** — hosted-Windows agent startup (process spawn + Swift runtime init + Foundation init + git init + first refresh against a fresh fixture repo) routinely consumes 1–3 seconds under load, before any periodic tick is observable. The slow path is the combination of Windows process-creation overhead and Foundation cold-start. macOS / Linux settle in ~200 ms.
+- **Fix pattern** — budget `--duration ≥ 5.0` on any sprigctl test that asserts on periodic output. macOS / Linux exit at the `--duration` cutoff regardless, so the runtime cost is uniform — there's no penalty for being generous on the Windows ceiling.
+- **Where in the repo** — `cli/sprigctl/Tests/SprigctlAgentTests.swift` (`statsIntervalPrintsLines`).
+- **U:** Not actionable upstream; it's the cost of hosted-Windows runners under load. A self-hosted Windows runner would tighten this materially but isn't planned.
+
+### E5. macOS `Process.waitUntilExit()` deadlocks on fast-exiting children
 
 - **Symptom** — `Process.run(); process.waitUntilExit()` hangs indefinitely when the spawned child exits in < 50ms.
 - **Root cause** — race in Foundation's `Process` cleanup machinery: the termination handler fires *before* `waitUntilExit()` registers the wait, then the wait never wakes.
@@ -227,7 +262,15 @@ These are cases where the same Swift source code compiles on one platform's tool
 - **Where in the repo** — `.github/workflows/ci-linux.yml` (the retry-once block).
 - **U:** Filed as `swiftlang/swift-corelibs-foundation#5472`. Fix on a fork at `billdenney/swift-corelibs-foundation:fix/process-d_name-buffer-overrun`. Drop the workflow retry when a Swift toolchain release picks up the fix.
 
-### F2. `ordo-one/package-benchmark` unsupported on Windows
+### F2. `FileHandle.readToEnd()` SIGSEGV on Linux under parallel test load
+
+- **Symptom** — `*** Program crashed: Bad pointer dereference ...` with `FileHandle._readDataOfLength(_:untilEOF:options:) + 623 in libFoundation.so` in the stack, observed when many tests concurrently spawn `Process` instances and drain their pipes (e.g. `CatFileBatchTests` + sprigctl tests + WatcherKit subprocess tests running in parallel under Swift Testing). Linux-only — Apple Foundation has its own `FileHandle` machinery; Windows Foundation likewise.
+- **Root cause** — a libFoundation race in `FileHandle._readDataOfLength` when multiple readers run concurrently. The crash is at the bulk-read path inside libFoundation, after a `read(2)` call. Not the same as F1 (`findMaximumOpenFromProcSelfFD`) — the workflow's retry-once script correctly distinguishes them by stack signature and refuses to retry on this flake.
+- **Fix pattern** — none yet at the source level. The flake rate is low enough that a single CI re-run usually clears it; track instances to decide whether to broaden the retry-once script to cover both signatures.
+- **Where in the repo** — observed in `cli/sprigctl/Tests/SprigctlSupport.swift` `readToEnd(_:)` (line ~89) and `packages/GitCore/Sources/GitCore/Runner.swift`'s equivalent helper. Workflow signature check in `.github/workflows/ci-linux.yml`.
+- **U:** Worth a fresh `swiftlang/swift-corelibs-foundation` issue once we have a reliable minimum repro. Until then: note the SHA + CI run when it reappears so we can collect signatures.
+
+### F3. `ordo-one/package-benchmark` unsupported on Windows
 
 - **Symptom** — `swift build` failures on Windows around benchmark-target resource files.
 - **Root cause** — `package-benchmark` writes per-platform threshold JSON files with names that collide alphabetically on Windows's case-insensitive default filesystem. Tracked as ordo-one/package-benchmark#308.
