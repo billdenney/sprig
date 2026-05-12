@@ -4,9 +4,10 @@
 // builds.
 //
 // Mirrors the shape of `PollingFileWatcherTests.PollingFileWatcherRealFSTests`
-// (create / modify / remove + lifecycle) but with tight timeouts —
-// `ReadDirectoryChangesW` is reactive, so events should land well
-// under a second.
+// (create / modify / remove + lifecycle). Each test calls
+// `await watcher.awaitReady()` between `start()` and the mutation
+// so the kernel notification is guaranteed live before the change
+// fires — no time-based pre-write sleep.
 
 #if os(Windows)
     import Foundation
@@ -50,38 +51,20 @@
             }
         }
 
-        // No `preWriteDelayNs` anymore — see ``FileWatcher/awaitReady()``.
-        // Tests `await watcher.awaitReady()` between `start()` and
-        // firing the mutation, which signals deterministically when
-        // the kernel notification is registered. Earlier iterations
-        // of this suite used a time-based delay (100ms initially,
-        // bumped to 500ms after PR #89's CI flakes) and remained
-        // sensitive to hosted-runner Task-scheduling latency. The
-        // structural fix is in `ReadDirectoryChangesWatcher`:
-        // per-root Tasks call back into the watcher just before
-        // their first `ReadDirectoryChangesW`, and `awaitReady`
-        // resumes when every Task has done so.
-
-        /// Reactive watcher — events arrive when the kernel emits
-        /// them, not on a poll tick. The predicate-driven `collect`
-        /// exits the moment the event arrives so happy paths
-        /// complete in milliseconds; the ceiling only matters when
+        /// Maximum wait for the predicate to match. The collector
+        /// exits the moment an event arrives, so happy-path tests
+        /// finish in milliseconds; this ceiling only fires when
         /// something is genuinely slow.
         ///
-        /// 10s headroom (rather than 1–2s) because of a documented
-        /// Windows quirk: `FILE_NOTIFY_CHANGE_LAST_WRITE` and
+        /// 10s headroom because `FILE_NOTIFY_CHANGE_LAST_WRITE` and
         /// `FILE_NOTIFY_CHANGE_SIZE` notifications are delayed until
-        /// the kernel flushes the file's write cache. For small
-        /// writes on a busy hosted runner, that flush can take
-        /// several seconds. `FILE_NOTIFY_CHANGE_FILE_NAME` events
-        /// (create / remove / rename) fire immediately, so the
-        /// other tests in this suite typically complete in
-        /// milliseconds; only `modifyDetected` is structurally
-        /// vulnerable to the cache-flush delay. See
-        /// `docs/architecture/cross-platform-quirks.md` (entry E1)
-        /// and Microsoft's
-        /// `ReadDirectoryChangesW` docs note on cache-flush
-        /// behaviour.
+        /// the kernel flushes the write cache (Microsoft's
+        /// `ReadDirectoryChangesW` docs note this explicitly).
+        /// `FILE_NOTIFY_CHANGE_FILE_NAME` events (create / remove /
+        /// rename) fire immediately, so only `modifyDetected` is
+        /// structurally exposed to the cache-flush delay — but the
+        /// ceiling applies uniformly so all tests share one
+        /// configuration knob.
         private static let eventTimeoutSec: Double = 10.0
 
         @Test("creating a file produces a .created event")
@@ -117,31 +100,16 @@
             await watcher.awaitReady()
             try Data("one\ntwo\n".utf8).write(to: file)
 
-            // Predicate intentionally matches *any* event for
-            // `a.txt`, not just `.modified`. Two Windows-specific
-            // reasons:
-            //
-            // 1. `Foundation.Data.write(to:)` without `.atomic` opens
-            //    with `CREATE_ALWAYS` on Windows, which truncates
-            //    the existing file. The kernel may emit
-            //    `FILE_ACTION_ADDED` (for the truncated recreate)
-            //    OR `FILE_ACTION_MODIFIED` (for the subsequent
-            //    write) depending on driver + buffering state. Both
-            //    are correct from the watcher's perspective —
-            //    "something changed for this file" is the signal
-            //    consumers actually want.
-            //
-            // 2. The pure `.modified` predicate ran into another
-            //    Windows quirk:
-            //    `FILE_NOTIFY_CHANGE_LAST_WRITE`/`...CHANGE_SIZE`
-            //    notifications are delayed until cache flush
-            //    (Microsoft documents this on the
-            //    `ReadDirectoryChangesW` API page). With the
-            //    permissive predicate the test passes on whichever
-            //    action the kernel happened to emit first.
-            //
-            // Pre-`.modified`-only predicate fixture flake: see CI
-            // run 25689125187 / PR #89.
+            // Predicate matches *any* event for `a.txt`, not just
+            // `.modified`. `Foundation.Data.write(to:)` without
+            // `.atomic` opens with `CREATE_ALWAYS` on Windows, which
+            // truncates the existing file — the kernel may emit
+            // `FILE_ACTION_ADDED` (for the truncated recreate) or
+            // `FILE_ACTION_MODIFIED` (for the subsequent write)
+            // depending on driver state. Both are correct signal
+            // from the watcher's perspective: "something changed
+            // for this file." Consumers (badges, RepoAgent's
+            // coalescer) re-stat on every event regardless of kind.
             let events = await collect(
                 from: stream,
                 until: { evs in evs.contains(where: {

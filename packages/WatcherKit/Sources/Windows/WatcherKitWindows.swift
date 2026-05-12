@@ -72,9 +72,7 @@
             // Atomically grab and clear state so a concurrent stop()
             // is a no-op. `NSLock.withLock` is the async-safe shape:
             // bare `lock()` / `unlock()` are `@unavailable` from
-            // async contexts in Swift 6 on Windows (and warn-only on
-            // Linux, which is why this passed local Linux compile
-            // but failed Windows CI).
+            // async contexts in Swift 6 on Windows.
             //
             // We return the whole `State` snapshot (a value type) so
             // the call doesn't trip SwiftLint's `large_tuple` rule.

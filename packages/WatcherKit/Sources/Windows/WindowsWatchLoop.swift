@@ -112,10 +112,8 @@
                 )
 
                 if !success {
-                    // `ReadDirectoryChangesW` returns Swift's `Bool`
-                    // (WinSDK maps Win32 `BOOL` to native `Bool`),
-                    // not `Int`. CancelIoEx during stop() lands here
-                    // with ERROR_OPERATION_ABORTED. Other errors are
+                    // CancelIoEx during stop() lands here with
+                    // ERROR_OPERATION_ABORTED. Other errors are
                     // unrecoverable (handle invalid, FS unmounted,
                     // etc.).
                     let err = GetLastError()
@@ -178,9 +176,6 @@
             // against truncation.
             while offset + 12 <= byteCount {
                 let recordPtr = buffer.advanced(by: offset)
-                // `UnsafeRawPointer.load`'s argument order is
-                // `(fromByteOffset:as:)`. Linux's Swift was lenient
-                // about swapping; Windows's Swift is strict.
                 let nextEntryOffset = recordPtr.load(fromByteOffset: 0, as: DWORD.self)
                 let action = recordPtr.load(fromByteOffset: 4, as: DWORD.self)
                 let nameLengthBytes = Int(recordPtr.load(fromByteOffset: 8, as: DWORD.self))

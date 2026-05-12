@@ -154,29 +154,11 @@ struct SprigctlAgentTests {
 
         // `--duration 5.0` at `--stats-interval 0.2` budgets for ≥25
         // stats ticks on a fast runner; the assertion below requires
-        // only ≥2. Earlier values failed on Windows hosted runners:
-        //
-        // - PR #70: 0.6 → 1.5 s after a Windows CI flake left only
-        //   ~0.4 s for stats after agent startup.
-        // - PR #92 (CI run 25696584319): 1.5 s flaked again — the
-        //   Windows agent printed `# agent: watching <path>` but
-        //   zero stats lines in 1.5 s. Hosted-runner agent startup
-        //   (process spawn + Foundation init + git init + initial
-        //   refresh of a fresh repo) burned through the entire
-        //   window.
-        //
-        // 5.0 s is generous headroom. macOS / Linux runners exit at
-        // the `--duration` cutoff regardless, so the runtime cost
-        // is uniform across platforms.
-        //
-        // Structural alternative (deferred): stream stderr in real
-        // time and exit as soon as we've seen ≥2 stats lines.
-        // Requires teaching `Sprigctl.run` to drain stderr
-        // line-by-line with a configurable predicate-based early
-        // exit, and ideally an `# agent: ready` marker emitted by
-        // the agent after its first refresh so the test can
-        // distinguish startup from steady-state. Bigger refactor
-        // than this stop-gap deserves.
+        // only ≥2. The 5s ceiling covers hosted-Windows agent startup
+        // (process spawn + Foundation init + git init + initial
+        // refresh) before any stats interval fires. macOS / Linux
+        // exit at `--duration` regardless, so runtime cost is
+        // uniform across platforms.
         let out = try await Sprigctl.run([
             "agent",
             "--duration", "5.0",
