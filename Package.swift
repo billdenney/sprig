@@ -116,11 +116,23 @@ let package = Package(
     targets:
     tier1Targets.flatMap { name -> [Target] in
         let deps: [Target.Dependency] = tier1Dependencies[name] ?? []
+        // Per-target resource overrides. AIKit ships its prompts
+        // (ADR 0037) as `.process`'d resources so `Bundle.module`
+        // can locate them at runtime; the loader stays directory-
+        // based for the user-overridable case but defaults to the
+        // bundled set. Other Tier-1 packages have no resources.
+        let resources: [Resource] = switch name {
+        case "AIKit":
+            [.process("Prompts")]
+        default:
+            []
+        }
         return [
             .target(
                 name: name,
                 dependencies: deps,
-                path: "packages/\(name)/Sources/\(name)"
+                path: "packages/\(name)/Sources/\(name)",
+                resources: resources
             ),
             .testTarget(
                 name: "\(name)Tests",
