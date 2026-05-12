@@ -12,6 +12,15 @@ jobs:
       image: swift:6.3-noble
     steps:
       - uses: actions/checkout@v6
+      - name: Install libjemalloc-dev
+        # `swift test --filter AIEvals` still builds every target in
+        # the package — including `SprigCoreBenchmarks`, which depends
+        # on package-benchmark, which links jemalloc. Bundled on macOS,
+        # missing on Linux without this. Mirrors the same step in
+        # ci-linux.yml.
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends libjemalloc-dev
       - run: swift test --filter AIEvals
         env:
           SPRIG_AI_EVAL_FIXTURES: tests/ai-evals/fixtures
