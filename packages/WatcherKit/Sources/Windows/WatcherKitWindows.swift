@@ -21,17 +21,33 @@
     ///
     /// See `docs/architecture/fs-watching.md` for the full strategy.
     public final class ReadDirectoryChangesWatcher: FileWatcher, @unchecked Sendable {
-        /// One watched directory's open HANDLE plus the URL it was
-        /// opened from. The HANDLE is closed in ``stop()``.
-        private struct WatchedRoot: @unchecked Sendable {
-            let handle: HANDLE
-            let url: URL
-        }
+        // `WatchedRoot` and the static `WindowsWatchLoop` namespace
+        // live in `WindowsWatchLoop.swift` — same module, internal
+        // visibility — to keep this file under SwiftLint's
+        // `file_length` cap.
 
         private struct State: @unchecked Sendable {
             var roots: [WatchedRoot] = []
             var tasks: [Task<Void, Never>] = []
             var continuation: AsyncStream<WatchEvent>.Continuation?
+
+            /// True once ``start(paths:)`` has been called at least
+            /// once. Distinguishes "never started, awaitReady must
+            /// queue" from "all per-root Tasks have signaled ready,
+            /// awaitReady resumes immediately."
+            var startedAtLeastOnce = false
+
+            /// Per-root Tasks that haven't yet signaled "I've
+            /// registered the kernel notification." Decremented by
+            /// ``markRootReady()`` from each Task's preamble; when
+            /// it reaches 0 we resume every queued awaitReady caller.
+            var pendingReadyCount = 0
+
+            /// `awaitReady` callers parked here while
+            /// `pendingReadyCount > 0`. Resumed by
+            /// ``markRootReady()`` when the counter hits 0, or by
+            /// ``stop()`` so they don't hang on a torn-down watcher.
+            var readyContinuations: [CheckedContinuation<Void, Never>] = []
         }
 
         private let lock = NSLock()
@@ -56,17 +72,20 @@
             // Atomically grab and clear state so a concurrent stop()
             // is a no-op. `NSLock.withLock` is the async-safe shape:
             // bare `lock()` / `unlock()` are `@unavailable` from
-            // async contexts in Swift 6 on Windows (and warn-only on
-            // Linux, which is why this passed local Linux compile
-            // but failed Windows CI).
+            // async contexts in Swift 6 on Windows.
             //
             // We return the whole `State` snapshot (a value type) so
             // the call doesn't trip SwiftLint's `large_tuple` rule.
+            // `startedAtLeastOnce` stays `true` post-stop so a
+            // post-stop awaitReady() resumes immediately rather than
+            // hanging.
             let snapshot: State = lock.withLock {
                 let snap = state
                 state.roots = []
                 state.tasks = []
                 state.continuation = nil
+                state.pendingReadyCount = 0
+                state.readyContinuations = []
                 return snap
             }
 
@@ -98,6 +117,76 @@
             }
 
             snapshot.continuation?.finish()
+
+            // (5) Resume any awaitReady() callers that were parked
+            //     before any Task got a chance to signal ready.
+            //     Without this they'd hang forever waiting for a
+            //     watcher that's already gone.
+            for continuation in snapshot.readyContinuations {
+                continuation.resume()
+            }
+        }
+
+        // MARK: - awaitReady
+
+        /// Wait until every per-root `ReadDirectoryChangesW`
+        /// notification request has been registered with the kernel.
+        ///
+        /// Each per-root Task signals "ready" inside its preamble,
+        /// immediately before its first synchronous
+        /// `ReadDirectoryChangesW` call. There's a microsecond-scale
+        /// userspace gap between the signal and the syscall, but no
+        /// observable test client can fire a filesystem mutation
+        /// faster than that gap (the mutation itself goes through
+        /// `Data.write(to:)` + `WriteFile` + close, hundreds of µs
+        /// minimum). In practice this gives deterministic
+        /// "watcher-is-live" semantics for tests.
+        ///
+        /// Must be called after ``start(paths:)``. Calling it
+        /// without an intervening `start` will block forever (a
+        /// deliberate misuse trap rather than a silent no-op).
+        public func awaitReady() async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let resumeNow: Bool = lock.withLock {
+                    guard state.startedAtLeastOnce else {
+                        // start() hasn't run yet — queue and wait.
+                        state.readyContinuations.append(continuation)
+                        return false
+                    }
+                    guard state.pendingReadyCount > 0 else {
+                        // All roots have already signaled ready,
+                        // OR no roots were spawned (e.g.
+                        // start(paths: []) or all paths invalid).
+                        return true
+                    }
+                    state.readyContinuations.append(continuation)
+                    return false
+                }
+                if resumeNow { continuation.resume() }
+            }
+        }
+
+        /// Per-root Task callback: "I've registered with the kernel."
+        /// Decrements ``State/pendingReadyCount`` and, if it hits
+        /// zero, drains and resumes every parked ``awaitReady`` caller.
+        ///
+        /// Called from the synchronous body of the detached Task
+        /// (not from an async context); the lock is taken
+        /// synchronously and continuations are resumed AFTER the
+        /// lock is released to avoid any chance of re-entry.
+        private func markRootReady() {
+            let toResume: [CheckedContinuation<Void, Never>] = lock.withLock {
+                if state.pendingReadyCount > 0 {
+                    state.pendingReadyCount -= 1
+                }
+                guard state.pendingReadyCount == 0 else { return [] }
+                let pending = state.readyContinuations
+                state.readyContinuations = []
+                return pending
+            }
+            for continuation in toResume {
+                continuation.resume()
+            }
         }
 
         // MARK: - Setup
@@ -110,229 +199,50 @@
             var spawnedTasks: [Task<Void, Never>] = []
 
             for path in paths {
-                guard let handle = Self.openDirectoryHandle(at: path) else {
+                guard let handle = WindowsWatchLoop.openDirectoryHandle(at: path) else {
                     continue
                 }
                 let root = WatchedRoot(handle: handle, url: path)
-                let task = Task<Void, Never>.detached(priority: .utility) {
-                    Self.runWatchLoop(for: root, continuation: continuation)
+                let task = Task<Void, Never>.detached(priority: .utility) { [weak self] in
+                    WindowsWatchLoop.run(
+                        for: root,
+                        continuation: continuation,
+                        onReady: { [weak self] in self?.markRootReady() }
+                    )
                 }
                 openedRoots.append(root)
                 spawnedTasks.append(task)
             }
 
+            // Wire up the state + readyness counter atomically.
+            // `startedAtLeastOnce = true` always; `pendingReadyCount`
+            // tracks tasks that haven't entered their first
+            // `ReadDirectoryChangesW` yet. For the empty-roots edge
+            // case (no paths opened) this stays 0 and any awaitReady
+            // call resumes immediately.
+            let toResume: [CheckedContinuation<Void, Never>] = lock.withLock {
+                if state.continuation != nil {
+                    preconditionFailure("ReadDirectoryChangesWatcher.start called twice")
+                }
+                state.roots = openedRoots
+                state.tasks = spawnedTasks
+                state.continuation = openedRoots.isEmpty ? nil : continuation
+                state.startedAtLeastOnce = true
+                state.pendingReadyCount = openedRoots.count
+                // If we won't be spawning any per-root Tasks,
+                // there's no one to call `markRootReady`. Drain
+                // queued waiters right now so they're not stuck.
+                guard openedRoots.isEmpty else { return [] }
+                let pending = state.readyContinuations
+                state.readyContinuations = []
+                return pending
+            }
+
             if openedRoots.isEmpty {
                 continuation.finish()
-                return
             }
-
-            lock.lock()
-            if state.continuation != nil {
-                lock.unlock()
-                preconditionFailure("ReadDirectoryChangesWatcher.start called twice")
-            }
-            state.roots = openedRoots
-            state.tasks = spawnedTasks
-            state.continuation = continuation
-            lock.unlock()
-        }
-
-        /// Open a directory HANDLE suitable for `ReadDirectoryChangesW`.
-        /// Returns nil on failure (path doesn't exist, permission
-        /// denied, etc.); caller skips that path.
-        private static func openDirectoryHandle(at url: URL) -> HANDLE? {
-            // `CreateFileW` takes UTF-16; build a null-terminated
-            // wide-char array from the URL's path.
-            let pathString = url.path
-            var wide = Array(pathString.utf16)
-            wide.append(0) // null terminator
-
-            return wide.withUnsafeBufferPointer { buf -> HANDLE? in
-                let h = CreateFileW(
-                    buf.baseAddress,
-                    DWORD(FILE_LIST_DIRECTORY),
-                    DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE),
-                    nil,
-                    DWORD(OPEN_EXISTING),
-                    // BACKUP_SEMANTICS is required to open a
-                    // directory; it permits opening anything the
-                    // caller has SE_BACKUP_NAME for, which on a
-                    // user-owned directory is just the directory
-                    // itself. No security implications for our use.
-                    DWORD(FILE_FLAG_BACKUP_SEMANTICS),
-                    nil
-                )
-                return h == INVALID_HANDLE_VALUE ? nil : h
-            }
-        }
-
-        // MARK: - Watch loop
-
-        /// Filter mask covering the same event categories
-        /// `PollingFileWatcher` surfaces. Adjust if the
-        /// ``FileWatcher`` protocol grows finer-grained kinds.
-        private static let notifyFilter: DWORD = .init(
-            FILE_NOTIFY_CHANGE_FILE_NAME
-                | FILE_NOTIFY_CHANGE_DIR_NAME
-                | FILE_NOTIFY_CHANGE_LAST_WRITE
-                | FILE_NOTIFY_CHANGE_SIZE
-                | FILE_NOTIFY_CHANGE_CREATION
-                | FILE_NOTIFY_CHANGE_ATTRIBUTES
-        )
-
-        /// 64 KiB buffer for one `ReadDirectoryChangesW` cycle.
-        /// Microsoft docs say larger buffers are clamped at 64 KiB on
-        /// some FS drivers anyway; smaller buffers risk
-        /// `bytesReturned == 0` (overflow signal) on busy roots.
-        private static let bufferByteCount: Int = 64 * 1024
-
-        /// Per-root watch loop. Synchronous (blocks in
-        /// `ReadDirectoryChangesW`); cancelled by `CancelIoEx` from
-        /// ``stop()``.
-        private static func runWatchLoop(
-            for root: WatchedRoot,
-            continuation: AsyncStream<WatchEvent>.Continuation
-        ) {
-            let buffer = UnsafeMutableRawPointer.allocate(
-                byteCount: bufferByteCount,
-                alignment: MemoryLayout<DWORD>.alignment
-            )
-            defer { buffer.deallocate() }
-
-            while !Task.isCancelled {
-                var bytesReturned: DWORD = 0
-                let success = ReadDirectoryChangesW(
-                    root.handle,
-                    buffer,
-                    DWORD(bufferByteCount),
-                    true, // bWatchSubtree — recurse into subdirectories
-                    notifyFilter,
-                    &bytesReturned,
-                    nil, // lpOverlapped (synchronous)
-                    nil // lpCompletionRoutine
-                )
-
-                if !success {
-                    // `ReadDirectoryChangesW` returns Swift's `Bool`
-                    // (WinSDK maps Win32 `BOOL` to native `Bool`),
-                    // not `Int`. CancelIoEx during stop() lands here
-                    // with ERROR_OPERATION_ABORTED. Other errors are
-                    // unrecoverable (handle invalid, FS unmounted,
-                    // etc.).
-                    let err = GetLastError()
-                    if err != DWORD(ERROR_OPERATION_ABORTED) {
-                        continuation.yield(WatchEvent(
-                            path: root.url,
-                            kind: .overflow,
-                            timestamp: Date()
-                        ))
-                    }
-                    return
-                }
-
-                if bytesReturned == 0 {
-                    // Kernel ran out of buffer space and dropped
-                    // events. ``WatchEventKind/overflow`` tells
-                    // callers to rescan from scratch.
-                    continuation.yield(WatchEvent(
-                        path: root.url,
-                        kind: .overflow,
-                        timestamp: Date()
-                    ))
-                    continue
-                }
-
-                parseAndEmit(
-                    buffer: buffer,
-                    byteCount: Int(bytesReturned),
-                    under: root,
-                    continuation: continuation
-                )
-            }
-        }
-
-        /// Parse a buffer of `FILE_NOTIFY_INFORMATION` records and
-        /// emit one `WatchEvent` per record.
-        ///
-        /// Record layout (per `winnt.h`):
-        ///
-        /// ```
-        /// DWORD NextEntryOffset;  // bytes from start of this record to next; 0 = last
-        /// DWORD Action;           // FILE_ACTION_*
-        /// DWORD FileNameLength;   // FileName size in bytes (not chars)
-        /// WCHAR FileName[1];      // variable-length UTF-16, NOT null-terminated
-        /// ```
-        ///
-        /// `FileName` is path-relative-to-root with backslash
-        /// separators; we convert to forward slashes when composing
-        /// the URL so downstream consumers see the same shape as
-        /// macOS / Linux.
-        private static func parseAndEmit(
-            buffer: UnsafeMutableRawPointer,
-            byteCount: Int,
-            under root: WatchedRoot,
-            continuation: AsyncStream<WatchEvent>.Continuation
-        ) {
-            let now = Date()
-            var offset = 0
-            // Each record's header is 12 bytes (3 DWORDs); guard
-            // against truncation.
-            while offset + 12 <= byteCount {
-                let recordPtr = buffer.advanced(by: offset)
-                // `UnsafeRawPointer.load`'s argument order is
-                // `(fromByteOffset:as:)`. Linux's Swift was lenient
-                // about swapping; Windows's Swift is strict.
-                let nextEntryOffset = recordPtr.load(fromByteOffset: 0, as: DWORD.self)
-                let action = recordPtr.load(fromByteOffset: 4, as: DWORD.self)
-                let nameLengthBytes = Int(recordPtr.load(fromByteOffset: 8, as: DWORD.self))
-                let nameWordCount = nameLengthBytes / 2 // bytes -> UInt16 (WCHAR)
-
-                let hasParseableName = nameWordCount > 0
-                    && offset + 12 + nameLengthBytes <= byteCount
-                if hasParseableName {
-                    let nameStart = recordPtr.advanced(by: 12)
-                    var chars = [UInt16](repeating: 0, count: nameWordCount + 1)
-                    chars.withUnsafeMutableBufferPointer { dst in
-                        if let base = dst.baseAddress {
-                            base.update(
-                                from: nameStart.assumingMemoryBound(to: UInt16.self),
-                                count: nameWordCount
-                            )
-                        }
-                    }
-                    // chars[nameWordCount] stays 0 — null terminator
-                    // for `String(decodingCString:)`.
-                    let relativeBackslashed = String(decodingCString: chars, as: UTF16.self)
-                    let relativeForward = relativeBackslashed.replacingOccurrences(
-                        of: "\\",
-                        with: "/"
-                    )
-                    let url = root.url.appendingPathComponent(relativeForward)
-                    continuation.yield(WatchEvent(
-                        path: url,
-                        kind: mapAction(action),
-                        timestamp: now
-                    ))
-                }
-
-                if nextEntryOffset == 0 { break }
-                offset += Int(nextEntryOffset)
-            }
-        }
-
-        private static func mapAction(_ action: DWORD) -> WatchEventKind {
-            switch action {
-            case DWORD(FILE_ACTION_ADDED):
-                .created
-            case DWORD(FILE_ACTION_REMOVED):
-                .removed
-            case DWORD(FILE_ACTION_MODIFIED):
-                .modified
-            case DWORD(FILE_ACTION_RENAMED_OLD_NAME),
-                 DWORD(FILE_ACTION_RENAMED_NEW_NAME):
-                .renamed
-            default:
-                .unknown
+            for continuation in toResume {
+                continuation.resume()
             }
         }
     }
