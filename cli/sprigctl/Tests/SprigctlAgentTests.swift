@@ -152,18 +152,16 @@ struct SprigctlAgentTests {
         try await Sprigctl.spawnGit(["add", "a.txt"], cwd: repo)
         try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
 
-        // `--duration 1.5` at `--stats-interval 0.2` budgets for ≥6
+        // `--duration 5.0` at `--stats-interval 0.2` budgets for ≥25
         // stats ticks on a fast runner; the assertion below requires
-        // only ≥2. Earlier value of 0.6 s left ~0.4 s for ticks after
-        // agent startup, which a slow Windows hosted runner could
-        // chew through and produce only one tick before the
-        // `--duration` cutoff fired (PR #70 hit this on Windows CI).
-        // 1.5 s is comfortable headroom; macOS / Linux runners exit
-        // at the `--duration` cutoff regardless, so the runtime cost
-        // is uniform across platforms.
+        // only ≥2. The 5s ceiling covers hosted-Windows agent startup
+        // (process spawn + Foundation init + git init + initial
+        // refresh) before any stats interval fires. macOS / Linux
+        // exit at `--duration` regardless, so runtime cost is
+        // uniform across platforms.
         let out = try await Sprigctl.run([
             "agent",
-            "--duration", "1.5",
+            "--duration", "5.0",
             "--polling-interval", "0.1",
             "--stats-interval", "0.2",
             repo.path
