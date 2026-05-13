@@ -1,33 +1,46 @@
 // Status100kFileBudgetTests.swift
 //
-// M1 → M2 exit gate (ii — the 100k-file half): wall-clock budget for
+// M1 → M2 exit gate (the 100k-file half): wall-clock budget for
 // `git status --porcelain=v2 -z` + `PorcelainV2Parser.parse(_:)` on a
 // synthesized 100 000-file repo. ADR 0021's full budget set (CPU%, RSS,
 // status latency) requires a self-hosted runner for stable measurement;
-// this test is the hosted-CI smoke check that catches catastrophic
-// regressions (orders-of-magnitude blow-outs in parse time, accidental
-// O(N²) walks in either git or the parser) without waiting on the
-// self-hosted runner provisioning.
+// this test is the opt-in smoke that catches catastrophic regressions
+// (orders-of-magnitude blow-outs in parse time, accidental O(N²) walks).
 //
-// What this DOES assert:
-//   - 100k-file repo can be created on hosted CI in reasonable time.
+// **Opt-in by design.** This suite is gated behind the
+// `SPRIG_RUN_SCALE_TESTS=1` environment variable and **does not run on
+// default `swift test` or any hosted-CI workflow**. Reason: 100 k file
+// synthesis dominates per-job wall-clock time on hosted CI runners
+// (~10–30 s on macOS/Linux SSDs; potentially several minutes on
+// Windows where individual filesystem ops can take ~2 s per the
+// cross-platform-quirks catalog). Running it on every PR would
+// quintuple or worse the CI bill for a smoke check that catches the
+// same regressions the smaller fixture tests already do. The benchmark
+// ladder in `Benchmarks/SprigCoreBenchmarks.swift` carries the official
+// 100 k perf-comparison budget; that workflow targets the self-hosted
+// runner and goes nightly-green once it's online.
+//
+// **When this DOES run:**
+//   - Locally, ad-hoc: `SPRIG_RUN_SCALE_TESTS=1 swift test --filter Status100kFileBudgetTests`
+//   - On the future self-hosted nightly workflow (it can set the env
+//     var alongside the benchmark invocation).
+//   - On a manually-triggered hosted CI workflow if we ever decide to
+//     spot-check (e.g. before a release tag).
+//
+// **What this asserts** (when enabled):
+//   - 100k-file repo can be synthesized + queried within a generous
+//     wall-clock budget.
 //   - One `git status` walk against that repo, plus a full parse of its
-//     porcelain-v2 output, completes inside the wall-clock budget.
-//   - The parsed model is non-trivial (entries reflect the 10 % dirty
+//     porcelain-v2 output, completes inside the 60 s measured-window
+//     ceiling (synthesis time runs before the clock starts).
+//   - The parsed model is non-trivial (entries reflect the ~10 % dirty
 //     subset the synthesizer creates).
 //
-// What this DOES NOT assert (those still wait on the self-hosted
+// **What this does NOT assert** (those still need the self-hosted
 // runner — see `docs/ci/self-hosted.md`):
 //   - Sustained CPU % under load.
 //   - Peak RSS / steady-state memory.
 //   - Status latency *after* an fsmonitor warm-up (ADR 0024).
-//
-// The 60-second budget is deliberately generous: hosted-CI 100 k file
-// status on Windows + cold fsmonitor can take ~20 s on healthy runs,
-// and the Foundation flake catalog calls out variable filesystem
-// latency. A regression that breaks even this loose budget is a real
-// signal worth investigating. Tighten when the assertion shows
-// consistent slack on every platform's CI history.
 
 import Foundation
 import GitCore
@@ -36,6 +49,12 @@ import Testing
 
 @Suite(
     "M1 → M2 gate (100k-file fixture): git status + parse wall-clock budget",
+    .enabled(
+        if: ProcessInfo.processInfo.environment["SPRIG_RUN_SCALE_TESTS"] == "1",
+        "Opt-in via SPRIG_RUN_SCALE_TESTS=1 — disabled by default on hosted CI"
+            + " because 100k file synthesis is expensive (several minutes on Windows)."
+            + " See file header."
+    ),
     .timeLimit(.minutes(15))
 )
 struct Status100kFileBudgetTests {
