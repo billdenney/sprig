@@ -2,15 +2,17 @@
 //
 // Slice S2 of ADR 0033 — invoke `git update-ref` to write the snapshot
 // ref a destructive operation needs in order to be reversible. Slice S1
-// (`SnapshotRefName`) defined the on-disk shape; this file actually
-// drives git to put bytes there.
+// (`SnapshotRefName`) defined the on-disk shape; this file drives git
+// to put bytes there, plus the slice S4 ``withSnapshot`` helper that
+// wraps any destructive op in an automatic snapshot.
 //
-// What this is NOT (yet):
-//   - A higher-level "wrap a destructive op in a snapshot" helper. That
-//     belongs at the destructive-op call sites (merge, rebase, …) and
-//     lands as those features are built out.
+// What this is NOT:
 //   - A snapshot enumerator / pruner. That's `RepoState.SnapshotIndex`
 //     per ADR 0033's amendment — read path, separate slice.
+//   - The destructive-op call sites themselves. The merge / rebase /
+//     reset-hard / etc. callers each invoke ``withSnapshot`` (or
+//     ``createSnapshot`` directly) at their op boundary; this file
+//     supplies the safety primitive, not the orchestration.
 
 import Foundation
 import GitCore
@@ -94,6 +96,57 @@ public struct SnapshotWriter: Sendable {
         }
         _ = try await runner.run(["update-ref", snapshot.refName, target])
         return snapshot
+    }
+
+    /// Wrap a destructive operation in an automatic snapshot.
+    ///
+    /// Creates the snapshot ref (via ``createSnapshot(op:target:)``) and
+    /// then awaits `body`, passing the resulting ``SnapshotRefName`` so
+    /// the caller can log it, surface it in a task-window header strip
+    /// (per ADR 0033 amendment §13.3-A), or hand it to a "Revert this
+    /// operation" button.
+    ///
+    /// **Failure semantics.** If `body` throws, ``withSnapshot`` rethrows
+    /// the same error — but the snapshot ref has *already been written
+    /// to git refs* before `body` ran, so callers can recover the
+    /// pre-op state via `git update-ref HEAD <snapshot.refName>` (or
+    /// surface it through `sprigctl recover` / the Recover task window).
+    /// This is the entire point of the helper: the snapshot must outlive
+    /// the body's success or failure for the safety net to work.
+    ///
+    /// **Errors from the snapshot step.** If snapshot creation itself
+    /// fails (``SnapshotWriterError/invalidOp(_:)`` for a malformed op
+    /// tag, or a ``GitError`` from `git update-ref`), `body` is **not**
+    /// invoked. The caller sees only the snapshot-creation error and
+    /// can decide whether to retry, abort, or run the op unsnapshotted.
+    ///
+    /// **Tier matching.** Callers should look up
+    /// ``DestructiveOpTier/tier(for:)`` for the same `op` string before
+    /// deciding whether to call ``withSnapshot``: ``DestructiveOpTier/low``
+    /// ops don't need snapshots, ``medium`` and ``high`` do.
+    ///
+    /// - Parameters:
+    ///   - op: Op tag for the snapshot ref. Must satisfy
+    ///     ``SnapshotRefName/isValidOp(_:)``; typically one of the
+    ///     ``SnapshotRefName`` `opXxx` constants.
+    ///   - target: Revspec the snapshot ref points to. Defaults to
+    ///     `"HEAD"` (the common case — snapshot the current commit
+    ///     before mutating it). Any input `git update-ref` accepts as a
+    ///     newvalue works (SHA, branch, etc.).
+    ///   - body: The destructive operation. Receives the
+    ///     ``SnapshotRefName`` so it can log / display the ref.
+    /// - Returns: Whatever `body` returns.
+    /// - Throws: ``SnapshotWriterError/invalidOp(_:)`` or ``GitError`` if
+    ///   snapshot creation fails (body is not invoked); rethrows
+    ///   whatever `body` throws after the snapshot has been written.
+    @discardableResult
+    public func withSnapshot<T>(
+        op: String,
+        target: String = "HEAD",
+        _ body: (SnapshotRefName) async throws -> T
+    ) async throws -> T {
+        let snapshot = try await createSnapshot(op: op, target: target)
+        return try await body(snapshot)
     }
 }
 

@@ -340,10 +340,17 @@ private func synthesizeRepo(fileCount: Int) -> URL {
 }
 
 private func statusEndToEndBenchmarks() {
-    // 100k files would push setup time past 30 s on hosted CI; benchmark
-    // for that scale lives on the self-hosted runner workflow and is
-    // gated by ADR 0021 budgets.
-    for fileCount in [1000, 10000] {
+    // 100k-file synthesis takes ~20–30 s on hosted CI which would
+    // dominate any benchmark workflow run, so the production budget
+    // gate remains on the nightly self-hosted runner (ADR 0021).
+    // We DO measure 100k here so that when the self-hosted runner
+    // comes online, the full ladder runs without a config change;
+    // a hosted-CI integration smoke test
+    // (`tests/integration/.../Status100kFileBudgetTests.swift`)
+    // covers the M1 → M2 gate on every PR with a generous
+    // wall-clock budget while the perf-comparison numbers wait on
+    // the dedicated hardware.
+    for fileCount in [1000, 10000, 100_000] {
         // Synthesize at registration time, OUTSIDE the benchmark closure,
         // so the cost isn't attributed to the measured iterations.
         let repo = synthesizeRepo(fileCount: fileCount)

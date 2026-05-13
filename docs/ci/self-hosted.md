@@ -17,7 +17,7 @@ Companion: [`linux-matrix.md`](linux-matrix.md), [`../architecture/performance.m
 | `ci-windows` (build + test) | ✅ hosted `windows-2022` | — | Same |
 | Benchmark **smoke build** (every PR) | ✅ hosted | — | Just verifies the benchmark target compiles |
 | **E2E** (XCUITest driving signed builds) | ❌ not implemented | self-hosted macOS-arm64 | Needs a real Finder, real signing cert, real notarization — none available on hosted runners |
-| **Benchmarks** (perf gates / regression detection) | ❌ not implemented | self-hosted macOS-arm64 | Hosted runners vary ~3× CPU between runs (ADR 0021); not stable enough for perf regression detection |
+| **Benchmarks** (perf gates / regression detection) | ❌ not implemented | self-hosted macOS-arm64 | Hosted runners vary ~3× CPU between runs (ADR 0021); not stable enough for fine-grained perf regression detection. The **M1 → M2 100k-file gate** stays formally deferred here: the 100k variant is already wired into `Benchmarks/SprigCoreBenchmarks.swift`'s `statusEndToEndBenchmarks` ladder so it goes nightly-green automatically once the runner is online. An opt-in 100k smoke test (`tests/integration/.../Status100kFileBudgetTests.swift`, env-gated by `SPRIG_RUN_SCALE_TESTS=1`) exists for manual / future-nightly-workflow use — it's intentionally **not run on hosted-CI per-PR** because 100k file synthesis dominates job time without commensurate signal. |
 | **Release pipeline** (sign + notarize + publish) | ❌ not implemented | self-hosted macOS-arm64 | Developer ID signing key cannot leave a trusted machine |
 | **Windows E2E** (UI Automation against MSIX) | ❌ not implemented | self-hosted Windows | Once M2-Win lands; currently TBD |
 
