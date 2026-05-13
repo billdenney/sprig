@@ -17,7 +17,7 @@ Companion: [`linux-matrix.md`](linux-matrix.md), [`../architecture/performance.m
 | `ci-windows` (build + test) | ✅ hosted `windows-2022` | — | Same |
 | Benchmark **smoke build** (every PR) | ✅ hosted | — | Just verifies the benchmark target compiles |
 | **E2E** (XCUITest driving signed builds) | ❌ not implemented | self-hosted macOS-arm64 | Needs a real Finder, real signing cert, real notarization — none available on hosted runners |
-| **Benchmarks** (perf gates / regression detection) | ❌ not implemented | self-hosted macOS-arm64 | Hosted runners vary ~3× CPU between runs (ADR 0021); not stable enough for perf regression detection |
+| **Benchmarks** (perf gates / regression detection) | ❌ not implemented | self-hosted macOS-arm64 | Hosted runners vary ~3× CPU between runs (ADR 0021); not stable enough for perf regression detection. Currently parks the **M1 → M2 100k-file benchmark exit gate** (see `docs/planning/milestones.md` M1 line 37). The two other M1 → M2 gates (parser fidelity + watcher event budget) are wired into hosted CI and don't need this runner. |
 | **Release pipeline** (sign + notarize + publish) | ❌ not implemented | self-hosted macOS-arm64 | Developer ID signing key cannot leave a trusted machine |
 | **Windows E2E** (UI Automation against MSIX) | ❌ not implemented | self-hosted Windows | Once M2-Win lands; currently TBD |
 

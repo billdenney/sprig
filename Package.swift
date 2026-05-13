@@ -233,6 +233,35 @@ let package = Package(
                     "DiagKit"
                 ],
                 path: "cli/sprigctl/Tests"
+            ),
+            // ---- Integration tests — M1 → M2 exit gate (ADR 0021) ----
+            //
+            // `IntegrationSupport` is the shared library of fixture
+            // synthesizers (real `git init` + `git commit` per state).
+            // `IntegrationTests` wires the two M1 → M2 gates doable on
+            // hosted CI today: PorcelainV2Parser fidelity across the
+            // documented repo states (the literal M1 byte-match
+            // criterion interpreted as parser correctness; sprigctl
+            // status emits human/JSON output, not raw porcelain, so
+            // byte equality of binaries is impossible by design — see
+            // `milestones.md` commentary), and the EventCoalescer
+            // 10k-event wall-clock budget (proxy for ADR 0021's <2 %
+            // CPU watcher target). The 100k-file benchmark gate stays
+            // deferred to a self-hosted runner (see
+            // `docs/ci/self-hosted.md`).
+            .target(
+                name: "IntegrationSupport",
+                dependencies: ["GitCore"],
+                path: "tests/integration/Sources/IntegrationSupport"
+            ),
+            .testTarget(
+                name: "IntegrationTests",
+                dependencies: [
+                    "IntegrationSupport",
+                    "GitCore",
+                    "PlatformKit"
+                ],
+                path: "tests/integration/Tests/IntegrationTests"
             )
         ]
         + benchmarkTargets
