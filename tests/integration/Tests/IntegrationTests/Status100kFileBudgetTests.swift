@@ -51,9 +51,7 @@ import Testing
     "M1 → M2 gate (100k-file fixture): git status + parse wall-clock budget",
     .enabled(
         if: ProcessInfo.processInfo.environment["SPRIG_RUN_SCALE_TESTS"] == "1",
-        "Opt-in via SPRIG_RUN_SCALE_TESTS=1 — disabled by default on hosted CI"
-            + " because 100k file synthesis is expensive (several minutes on Windows)."
-            + " See file header."
+        "Opt-in via SPRIG_RUN_SCALE_TESTS=1 (disabled on hosted CI — see file header)"
     ),
     .timeLimit(.minutes(15))
 )
