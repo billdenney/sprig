@@ -6,6 +6,13 @@
 // Service on Windows) and consumers — shell extensions, sprigctl,
 // future task-window apps. JSON over XPC on macOS, JSON over named
 // pipes on Windows; the schema is transport-agnostic.
+//
+// **Wire-format stability:** the v1 contract is documented in
+// `packages/IPCSchema/STABILITY.md`. Encode + decode golden tests in
+// `Tests/IPCSchemaTests/WireFormatGoldenTests.swift` enforce it on
+// every PR; any unintended drift to the bytes those tests assert is a
+// failure. See the STABILITY doc before adding a new `EnvelopeMessage`
+// variant or changing an existing payload's field set.
 
 import Foundation
 
