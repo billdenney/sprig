@@ -164,6 +164,119 @@ public enum FixtureSynthesizer {
         return (dir, runner)
     }
 
+    // MARK: - Scale synthesizers
+
+    /// Build a committed repo containing `fileCount` tracked files plus
+    /// `dirtyFraction × fileCount` worktree-modified files. Used by the
+    /// M1 → M2 100k-file exit gate to validate ADR 0021's wall-clock
+    /// budget on a large repo without needing the self-hosted runner.
+    ///
+    /// The tree shape — `dirsPerLevel × dirsPerLevel` fan-out, files per
+    /// leaf — matches the existing `synthesizeRepo` benchmark helper so
+    /// timing is comparable between the integration test and the future
+    /// nightly benchmark run.
+    ///
+    /// **Time cost.** Linear in `fileCount`. 100 000 files takes ~5–30 s
+    /// of synthesis on hosted CI hardware before `git add -A` + commit;
+    /// budget calls accordingly. Cleanup (`cleanup(_:)`) on Windows for
+    /// 100 k files is also slow — call from a `defer` after the
+    /// assertion so test-time isn't budgeted against it.
+    ///
+    /// - Parameters:
+    ///   - fileCount: Total tracked files to create.
+    ///   - dirtyFraction: Fraction of files to leave worktree-dirty
+    ///     after the initial commit. `0.0` = clean repo, `1.0` =
+    ///     every file modified. Default `0.1` matches the benchmark
+    ///     synthesizer's "real status output to parse" pattern.
+    ///   - tag: Temp-dir suffix for diagnostics.
+    public static func makeRepoWithFileCount(
+        _ fileCount: Int,
+        dirtyFraction: Double = 0.1,
+        _ tag: String? = nil
+    ) async throws -> (URL, Runner) {
+        let tagString = tag ?? "filecount-\(fileCount)"
+        let root = try makeTempDir(tag: tagString)
+
+        let layout = FanoutLayout(fileCount: fileCount)
+        try writeFanoutFiles(under: root, layout: layout)
+
+        let runner = Runner(defaultWorkingDirectory: root)
+        _ = try await runner.run(["init", "-b", "main"])
+        _ = try await runner.run(["config", "user.email", "test@sprig.app"])
+        _ = try await runner.run(["config", "user.name", "Sprig Test"])
+        _ = try await runner.run(["config", "commit.gpgsign", "false"])
+        _ = try await runner.run(["add", "-A"])
+        _ = try await runner.run(["commit", "-m", "seed"])
+
+        if dirtyFraction > 0 {
+            try dirtyFanoutFiles(under: root, layout: layout, dirtyFraction: dirtyFraction)
+        }
+
+        return (root, runner)
+    }
+
+    /// 2-level fan-out dimensions for the scale synthesizer. Same shape
+    /// as the existing `Benchmarks/SprigCoreBenchmarks.swift` repo
+    /// synthesizer so timing comparisons stay apples-to-apples.
+    private struct FanoutLayout {
+        let dirsPerLevel = 32
+        let fileCount: Int
+
+        var filesPerLeaf: Int {
+            max(1, fileCount / (dirsPerLevel * dirsPerLevel))
+        }
+    }
+
+    /// Initial-fill pass — writes `fileCount` distinct files under the
+    /// fan-out hierarchy. Each file gets unique content so git's hash
+    /// dedupe doesn't collapse them into one blob.
+    private static func writeFanoutFiles(under root: URL, layout: FanoutLayout) throws {
+        var written = 0
+        for outerIndex in 0 ..< layout.dirsPerLevel where written < layout.fileCount {
+            for innerIndex in 0 ..< layout.dirsPerLevel where written < layout.fileCount {
+                let dir = root
+                    .appendingPathComponent("d\(outerIndex)")
+                    .appendingPathComponent("d\(innerIndex)")
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let stop = min(layout.filesPerLeaf, layout.fileCount - written)
+                for fileIndex in 0 ..< stop {
+                    let file = dir.appendingPathComponent("f\(fileIndex).txt")
+                    try Data("seed\(written)\n".utf8).write(to: file)
+                    written += 1
+                }
+            }
+        }
+    }
+
+    /// Dirty pass — re-writes ~`dirtyFraction × fileCount` files so the
+    /// post-commit `git status` has entries to emit and parse, not just
+    /// the cheap branch/header path.
+    private static func dirtyFanoutFiles(
+        under root: URL,
+        layout: FanoutLayout,
+        dirtyFraction: Double
+    ) throws {
+        let dirtyEvery = max(1, Int((1.0 / dirtyFraction).rounded()))
+        var visited = 0
+        var dirtied = 0
+        for outerIndex in 0 ..< layout.dirsPerLevel where visited < layout.fileCount {
+            for innerIndex in 0 ..< layout.dirsPerLevel where visited < layout.fileCount {
+                let dir = root
+                    .appendingPathComponent("d\(outerIndex)")
+                    .appendingPathComponent("d\(innerIndex)")
+                let stop = min(layout.filesPerLeaf, layout.fileCount - visited)
+                for fileIndex in 0 ..< stop {
+                    if visited % dirtyEvery == 0 {
+                        let file = dir.appendingPathComponent("f\(fileIndex).txt")
+                        try Data("dirty-\(dirtied)\n".utf8).write(to: file)
+                        dirtied += 1
+                    }
+                    visited += 1
+                }
+            }
+        }
+    }
+
     // MARK: - File helpers
 
     /// Write `content` to `relativePath` under `dir`, creating parent
