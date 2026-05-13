@@ -27,18 +27,24 @@ jobs:
         # Mac-only adapter sources are excluded by #if os(macOS).
         run: swift build
       - name: Run tests (portable subset)
-        # One automatic retry on the test step because of the upstream
-        # SIGSEGV in `Foundation.findMaximumOpenFromProcSelfFD()` on
-        # Linux (over-reads dirent.d_name; tracked at
+        # Up to TWO automatic retries on the test step because of the
+        # upstream SIGSEGV in `Foundation.findMaximumOpenFromProcSelfFD()`
+        # on Linux (over-reads dirent.d_name; tracked at
         # swiftlang/swift-corelibs-foundation#5472, fix on a fork at
         # billdenney/swift-corelibs-foundation:fix/process-d_name-buffer-overrun).
         # The bug manifests as a process-wide crash during test
         # execution any time `Foundation.Process.run()` happens to hit
-        # a near-page-boundary dirent — about 5 % of CI runs across
-        # this repo's test suite. The crash is environmental, not a
-        # regression in any specific test, so retrying once clears
-        # nearly all flakes without masking real failures (a real
-        # test bug fails both attempts deterministically).
+        # a near-page-boundary dirent. Per the cross-platform-quirks
+        # catalog (`docs/architecture/cross-platform-quirks.md` F1) the
+        # baseline hit rate is ~5 % per CI run, rising with concurrent
+        # Process.run() activity — i.e. with how much of the test suite
+        # spawns child processes. As that suite grew (sprigctl, the
+        # M1→M2 integration tests, the AgentKit IPC end-to-end tests),
+        # we observed back-to-back failures often enough that a single
+        # retry was no longer sufficient; bumping `max=3` keeps the
+        # false-fail rate well below 1 % without masking real
+        # regressions (a deterministic test bug fails all three
+        # attempts back-to-back).
         #
         # Drop this retry once a Swift toolchain release picks up
         # PR #5472. The other CI legs (`ci-macos`, `ci-windows`)
@@ -48,7 +54,7 @@ jobs:
         run: |
           set -e
           attempt=1
-          max=2
+          max=3
           while true; do
             if swift test; then
               exit 0
@@ -57,7 +63,7 @@ jobs:
               echo "::error::Linux test suite failed $max times — not the upstream Foundation flake."
               exit 1
             fi
-            echo "::warning::Linux test attempt $attempt failed; retrying once. Likely the upstream Foundation findMaximumOpenFromProcSelfFD() flake (swiftlang/swift-corelibs-foundation#5472)."
+            echo "::warning::Linux test attempt $attempt failed; retrying (max $max attempts). Likely the upstream Foundation findMaximumOpenFromProcSelfFD() flake (swiftlang/swift-corelibs-foundation#5472)."
             attempt=$((attempt + 1))
           done
 
