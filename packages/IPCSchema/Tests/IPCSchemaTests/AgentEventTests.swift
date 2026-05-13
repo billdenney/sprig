@@ -141,26 +141,8 @@ struct AgentEventTests {
         }
     }
 
-    // MARK: wire shape sanity (regression guard)
-
-    @Test("badgeChanged JSON has stable kind/payload shape (regression guard)")
-    func wireShapeRegression() throws {
-        let original = try Envelope(
-            schemaVersion: 1,
-            id: uuid("00000000-0000-0000-0000-000000000001"),
-            message: AgentEvent.badgeChanged(BadgeChangedPayload(
-                subscriptionId: uuid("00000000-0000-0000-0000-000000000002"),
-                path: "/r/f",
-                badge: "modified"
-            ))
-        )
-        let data = try encode(original)
-        let json = String(data: data, encoding: .utf8) ?? ""
-        let expected = """
-        {"id":"00000000-0000-0000-0000-000000000001","kind":"badgeChanged",\
-        "payload":{"badge":"modified","path":"\\/r\\/f","subscriptionId":"00000000-0000-0000-0000-000000000002"},\
-        "schemaVersion":1}
-        """
-        #expect(json == expected, "wire format drifted; got \(json)")
-    }
+    // Wire-format golden test for badgeChanged moved to
+    // `WireFormatGoldenTests.swift`, where every message variant's
+    // golden test lives. That file is the single source of truth for
+    // the v1 wire-format contract.
 }
