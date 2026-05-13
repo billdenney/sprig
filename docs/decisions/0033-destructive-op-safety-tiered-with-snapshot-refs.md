@@ -62,3 +62,12 @@ Sprig surfaces snapshot refs through three coordinated UIs:
 - Master plan §3 (original 0033) and §13.3-A (amendment).
 - CLAUDE.md — summarizes load-bearing rules across multiple ADRs.
 - Related ADRs: 0030 (Finder-first architecture), 0034 (no menu-bar helper), 0066 (stale `index.lock` recovery surfaces alerts via the same Notification Center channel).
+
+## Implementation map
+
+- `packages/SafetyKit/Sources/SafetyKit/SnapshotRefName.swift` — wire-stable ref-name format (slice S1).
+- `packages/SafetyKit/Sources/SafetyKit/SnapshotWriter.swift` — `createSnapshot(op:target:)` writes the ref via `git update-ref` (S2); `withSnapshot(op:target:_:)` wraps any destructive op with an auto-snapshot (S4) — body's throw rethrows, but the ref persists.
+- `packages/RepoState/Sources/RepoState/SnapshotIndex.swift` — read + prune path (S3 per amendment §13.3-A).
+- `packages/SafetyKit/Sources/SafetyKit/DestructiveOpTier.swift` — three-tier confirmation policy data type (`.low` / `.medium` / `.high`) with `requiresSnapshot`, `requiresTypedPhrase`, `undoBannerPolicy` accessors and a fail-closed `tier(for: opTag)` lookup (S5).
+- `apps/{macos,windows}/.../TaskWindows/RecoverWindow/` — Recover task window (Tier 3, separate from SafetyKit).
+- `cli/sprigctl/.../RecoverCommand.swift` — `sprigctl recover --list | --restore` (separate CLI work).
