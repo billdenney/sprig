@@ -14,14 +14,31 @@ import Testing
 struct CloneDialogViewModelTests {
     // MARK: - Fixture support
 
-    /// Build a bare repo at a temp path that has one commit. Returns
-    /// (bareRepoURL, sourceURL-string-to-clone-from). The clone source
-    /// is the bare repo's filesystem path.
-    private func makeBareUpstream() async throws -> (URL, String) {
-        let upstreamDir = try makeTempDir(tag: "upstream")
+    /// Self-cleaning bundle of temp dirs produced by ``makeBareUpstream``.
+    /// Callers `cleanup(_:)` both URLs to fully tear down the fixture
+    /// without touching anything outside the test's allocated temp
+    /// space.
+    private struct BareUpstreamFixture {
+        /// Parent dir holding the bare repo (`<parent>/upstream.git`).
+        /// Safe to `removeItem(at:)` — never the system temp root.
+        let upstreamParent: URL
+
+        /// Seed worktree the bare repo was cloned from. Independent
+        /// from `upstreamParent`; cleanup must hit both.
+        let seedDir: URL
+
+        /// String form of `<upstreamParent>/upstream.git` to hand to
+        /// `git clone` as the source URL.
+        let sourcePath: String
+    }
+
+    /// Build a bare repo at an isolated temp path that has one commit.
+    private func makeBareUpstream() async throws -> BareUpstreamFixture {
+        let upstreamParent = try makeTempDir(tag: "upstream-parent")
+        let upstreamDir = upstreamParent.appendingPathComponent("upstream.git")
         let seedDir = try makeTempDir(tag: "seed")
 
-        // Build a normal repo with one commit, then bare-clone into
+        // Build a normal repo with one commit, then bare-clone it into
         // upstreamDir. Bare so cloning into a working-tree dir is
         // representative of pulling from a remote.
         let seedRunner = Runner(defaultWorkingDirectory: seedDir)
@@ -33,12 +50,20 @@ struct CloneDialogViewModelTests {
         _ = try await seedRunner.run(["add", "a.txt"])
         _ = try await seedRunner.run(["commit", "-m", "seed"])
 
-        let bareRunner = Runner(defaultWorkingDirectory: upstreamDir.deletingLastPathComponent())
+        // Bare-clone runs from the upstreamParent so the bare repo
+        // lands at upstreamParent/upstream.git (an isolated test dir,
+        // NOT the system temp root — that would let cleanup race
+        // against every other parallel test's fixtures).
+        let bareRunner = Runner(defaultWorkingDirectory: upstreamParent)
         _ = try await bareRunner.run([
-            "clone", "--bare", seedDir.path, upstreamDir.lastPathComponent
+            "clone", "--bare", seedDir.path, "upstream.git"
         ])
 
-        return (upstreamDir, upstreamDir.path)
+        return BareUpstreamFixture(
+            upstreamParent: upstreamParent,
+            seedDir: seedDir,
+            sourcePath: upstreamDir.path
+        )
     }
 
     private func makeTempDir(tag: String) throws -> URL {
@@ -126,12 +151,12 @@ struct CloneDialogViewModelTests {
 
     @Test("clone() against a real bare upstream lands in .success with the new worktree path")
     func cloneSucceeds() async throws {
-        let (bareURL, sourceURL) = try await makeBareUpstream()
+        let fixture = try await makeBareUpstream()
         let parentDir = try makeTempDir(tag: "parent")
-        defer { cleanup(bareURL, parentDir, bareURL.deletingLastPathComponent()) }
+        defer { cleanup(fixture.upstreamParent, fixture.seedDir, parentDir) }
 
         let targetPath = parentDir.appendingPathComponent("cloned").path
-        let request = CloneRequest(sourceURL: sourceURL, targetDirectory: targetPath)
+        let request = CloneRequest(sourceURL: fixture.sourcePath, targetDirectory: targetPath)
         let runner = Runner(defaultWorkingDirectory: parentDir)
         let vm = CloneDialogViewModel(request: request, runner: runner)
 
