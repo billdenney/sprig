@@ -1,0 +1,218 @@
+// PreferencesViewModelTests.swift
+//
+// Tests for PreferencesViewModel — JSON round-trip against an
+// injected temp-dir URL. No git involvement; pure Foundation.
+
+import Foundation
+@testable import TaskWindowKit
+import Testing
+
+@Suite("PreferencesViewModel — Codable round-trip + load/save semantics")
+struct PreferencesViewModelTests {
+    // MARK: - Fixture helpers
+
+    private func makeTempDir(tag: String) throws -> URL {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sprig-prefs-\(tag)-\(UUID().uuidString)")
+            .standardized
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func cleanup(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private static let fixedClock: @Sendable () -> Date = {
+        let date = Date(timeIntervalSince1970: 1_715_000_000)
+        return { date }
+    }()
+
+    // MARK: - Pure-data Codable round-trip
+
+    @Test("AppPreferences round-trips through JSONEncoder/JSONDecoder")
+    func appPreferencesRoundTrip() throws {
+        let original = AppPreferences(
+            schemaVersion: 1,
+            watchRoots: [
+                URL(fileURLWithPath: "/Users/x/Developer"),
+                URL(fileURLWithPath: "/Users/x/Projects")
+            ],
+            gitIdentity: GitIdentity(name: "Anne", email: "anne@example.com"),
+            branchSortRecencyFirst: false
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(original)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: data)
+
+        #expect(decoded == original)
+    }
+
+    @Test("AppPreferences default initializer is empty + recency-first")
+    func appPreferencesDefaults() {
+        let prefs = AppPreferences()
+        #expect(prefs.schemaVersion == 1)
+        #expect(prefs.watchRoots.isEmpty)
+        #expect(prefs.gitIdentity == nil)
+        #expect(prefs.branchSortRecencyFirst)
+    }
+
+    // MARK: - Load when file is missing
+
+    @Test("load() on a missing file leaves initial preferences and lands in .success")
+    func loadMissingFileIsSuccess() async throws {
+        let dir = try makeTempDir(tag: "missing")
+        defer { cleanup(dir) }
+        let prefsURL = dir.appendingPathComponent("prefs.json")
+        let initial = AppPreferences(branchSortRecencyFirst: false)
+
+        let vm = PreferencesViewModel(
+            preferencesURL: prefsURL,
+            initial: initial,
+            clock: Self.fixedClock
+        )
+        await vm.load()
+
+        // Initial preserved (file didn't exist, so nothing to load).
+        let prefs = await vm.preferences
+        #expect(prefs == initial)
+
+        let state = await vm.state
+        if case let .success(timestamp) = state {
+            #expect(timestamp == Date(timeIntervalSince1970: 1_715_000_000))
+        } else {
+            Issue.record("expected .success, got \(state)")
+        }
+    }
+
+    // MARK: - Save then load round-trip
+
+    @Test("save() writes JSON, subsequent load() reads it back")
+    func saveLoadRoundTrip() async throws {
+        let dir = try makeTempDir(tag: "save-load")
+        defer { cleanup(dir) }
+        let prefsURL = dir.appendingPathComponent("nested/prefs.json")
+        let edited = AppPreferences(
+            watchRoots: [URL(fileURLWithPath: "/tmp/x")],
+            gitIdentity: GitIdentity(name: "Bee", email: "bee@example.com"),
+            branchSortRecencyFirst: false
+        )
+
+        let writer = PreferencesViewModel(
+            preferencesURL: prefsURL,
+            initial: edited,
+            clock: Self.fixedClock
+        )
+        await writer.save()
+        let writerState = await writer.state
+        if case .success = writerState {
+            // ok
+        } else {
+            Issue.record("save() should be .success, got \(writerState)")
+        }
+        #expect(FileManager.default.fileExists(atPath: prefsURL.path))
+
+        // A fresh VM with different initial defaults loads back the
+        // saved value (proving the file actually drives the load).
+        let reader = PreferencesViewModel(
+            preferencesURL: prefsURL,
+            initial: AppPreferences(),
+            clock: Self.fixedClock
+        )
+        await reader.load()
+        let loaded = await reader.preferences
+        #expect(loaded == edited)
+    }
+
+    // MARK: - Save creates parent directories
+
+    @Test("save() creates the parent directory if it doesn't exist")
+    func saveCreatesParent() async throws {
+        let dir = try makeTempDir(tag: "parent")
+        defer { cleanup(dir) }
+        let deepURL = dir
+            .appendingPathComponent("a")
+            .appendingPathComponent("b")
+            .appendingPathComponent("c")
+            .appendingPathComponent("prefs.json")
+
+        let vm = PreferencesViewModel(
+            preferencesURL: deepURL,
+            initial: AppPreferences(),
+            clock: Self.fixedClock
+        )
+        await vm.save()
+        #expect(FileManager.default.fileExists(atPath: deepURL.path))
+    }
+
+    // MARK: - load() on malformed file fails
+
+    @Test("load() on a malformed JSON file lands in .failure")
+    func loadMalformedFails() async throws {
+        let dir = try makeTempDir(tag: "malformed")
+        defer { cleanup(dir) }
+        let prefsURL = dir.appendingPathComponent("prefs.json")
+        try Data("{ not json".utf8).write(to: prefsURL)
+
+        let vm = PreferencesViewModel(
+            preferencesURL: prefsURL,
+            initial: AppPreferences(),
+            clock: Self.fixedClock
+        )
+        await vm.load()
+
+        let state = await vm.state
+        if case .failure = state {
+            // ok
+        } else {
+            Issue.record("expected .failure, got \(state)")
+        }
+    }
+
+    // MARK: - update() doesn't persist
+
+    @Test("update(_:) mutates in-memory but does NOT touch disk until save()")
+    func updateDoesNotPersist() async throws {
+        let dir = try makeTempDir(tag: "update-no-persist")
+        defer { cleanup(dir) }
+        let prefsURL = dir.appendingPathComponent("prefs.json")
+
+        let vm = PreferencesViewModel(
+            preferencesURL: prefsURL,
+            initial: AppPreferences(),
+            clock: Self.fixedClock
+        )
+        let updated = AppPreferences(branchSortRecencyFirst: false)
+        await vm.update(updated)
+        #expect(await vm.preferences == updated)
+        #expect(FileManager.default.fileExists(atPath: prefsURL.path) == false)
+
+        await vm.save()
+        #expect(FileManager.default.fileExists(atPath: prefsURL.path))
+    }
+
+    // MARK: - reset() preserves preferences
+
+    @Test("reset() returns state to .idle without disturbing preferences")
+    func resetPreservesPreferences() async throws {
+        let dir = try makeTempDir(tag: "reset")
+        defer { cleanup(dir) }
+        let prefsURL = dir.appendingPathComponent("prefs.json")
+
+        let vm = PreferencesViewModel(
+            preferencesURL: prefsURL,
+            initial: AppPreferences(),
+            clock: Self.fixedClock
+        )
+        let edited = AppPreferences(branchSortRecencyFirst: false)
+        await vm.update(edited)
+        await vm.save()
+        #expect(await vm.state != .idle)
+
+        await vm.reset()
+        #expect(await vm.state == .idle)
+        #expect(await vm.preferences == edited)
+    }
+}
