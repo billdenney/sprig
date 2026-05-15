@@ -51,7 +51,13 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // versions, not just whatever was on PATH at compile time. The
     // value-type `EnvironmentReport` is pure-Foundation; the dep
     // is needed by the collector.
-    "DiagKit": ["GitCore"]
+    "DiagKit": ["GitCore"],
+    // TaskWindowKit's `CloneDialogViewModel` (and future
+    // task-window view models per ADR 0048) invokes git via
+    // `GitCore.Runner` for the actual operation each window
+    // represents (clone, commit, push, …). `TaskWindowState` itself
+    // is pure-Foundation; the dep is needed by the VMs.
+    "TaskWindowKit": ["GitCore"]
 ]
 
 let tier2Targets: [String] = [
