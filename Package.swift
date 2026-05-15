@@ -57,7 +57,14 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // `GitCore.Runner` for the actual operation each window
     // represents (clone, commit, push, …). `TaskWindowState` itself
     // is pure-Foundation; the dep is needed by the VMs.
-    "TaskWindowKit": ["GitCore"]
+    "TaskWindowKit": ["GitCore"],
+    // ConflictKit re-exports `GitCore.UnmergedEntry` /
+    // `UnmergedStage` / `GitFileMode` via classification helpers
+    // (`ConflictKind.classify(_:)`) so M4 MergeConflictResolver can
+    // route each unmerged entry to its UI affordance. The marker-
+    // parser side of ConflictKit stays pure-Foundation; the dep is
+    // needed for the new typed-classifier surface.
+    "ConflictKit": ["GitCore"]
 ]
 
 let tier2Targets: [String] = [
