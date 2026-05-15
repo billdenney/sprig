@@ -7,6 +7,11 @@ Versioning: [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **DiffViewerViewModel** — fourth concrete M3 view model, the portable engine behind the macOS/Windows "Diff…" task window:
+  - New `DiffTarget` enum (`worktreeAgainstIndex` / `indexAgainstHead` / `commit(sha:)`) captures the three diff modes M3 needs at MVP. Each maps to one canonical git invocation; adding new cases (arbitrary `<rev>..<rev>` ranges, file-scoped diffs, `--remerge-diff`) is one switch entry plus a test.
+  - New `DiffPayload` value type carries the raw unified-diff bytes plus a `filesChanged: Int` count derived from `diff --git ` headers. Structured per-file / per-hunk parsing is deliberately deferred (likely a future `DiffKit`) until M4 MergeConflictResolver tells us what shape it needs.
+  - Actor-isolated `DiffViewerViewModel` exposes `target`, `payload`, and `state: TaskWindowState<Int>` (success payload = file count). `setTarget(_:)` swaps the target without auto-reloading and **preserves the prior payload** during the refetch so the UI doesn't blank mid-load. `cancel()` interrupts an in-flight load while leaving the prior payload intact; `reset()` returns state to `.idle` while preserving both payload and target.
+  - `countDiffGitHeaders(in:)` is a bytewise scanner that only counts markers at start-of-input or after a newline — so a commit message that happens to mention "diff --git" in passing doesn't inflate the file count. Internal-visible for tests; covered by a pure-function test.
 - **LogBrowserViewModel** — third concrete M3 view model, the portable engine behind the macOS/Windows "Show Log…" task window:
   - Actor-isolated VM exposing `revSpec` (default `HEAD`; accepts anything `git log` does), `pageSize` (default 50), `commits: [Commit]` (the accumulating page cache), `hasMore: Bool`, and `state: TaskWindowState<Int>` where the success payload is the total commits loaded across all pages so far.
   - `loadInitial()` discards the cache and loads the first page; `loadMore()` appends the next page via `--skip` + `--max-count`. `hasMore` flips to `false` automatically when git returns a short page (history exhausted).
