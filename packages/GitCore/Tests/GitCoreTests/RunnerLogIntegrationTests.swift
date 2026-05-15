@@ -40,7 +40,14 @@ struct RunnerLogIntegrationTests {
         #expect(entry.exitCode == 0)
         #expect(entry.cwd == root.path)
         #expect(entry.duration >= 0)
-        #expect(entry.duration < 5)
+        // Sanity upper bound — verifies a duration was captured at all
+        // and isn't some absurd value. NOT a perf gate. Windows CI has
+        // been observed at >5 s for `git status` under load
+        // (cross-platform-quirks catalog: Windows toolchain slower than
+        // Linux for the same Swift version). 30 s is generous enough
+        // to never flake while still catching e.g. an infinite-loop
+        // regression in the duration calculation itself.
+        #expect(entry.duration < 30)
         #expect(entry.failed == false)
     }
 
