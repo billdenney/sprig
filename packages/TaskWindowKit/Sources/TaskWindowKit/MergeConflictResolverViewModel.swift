@@ -16,11 +16,6 @@
 // `git update-index --cacheinfo` because the "blob" is a commit SHA.
 //
 // Deliberately deferred (M4 polish, not MVP):
-//   - Per-region text resolution (uses `ConflictedFile.applying(_:)`
-//     with per-`ConflictRegion` choices once diff-rendering selection
-//     UX is wired).
-//   - LFS pointer auto-fetch (a pick lands the pointer; the agent
-//     layer would trigger `git lfs fetch / checkout` separately).
 //   - AI-suggested resolutions (ADR 0028 gates this on M7).
 
 import ConflictKit
@@ -268,7 +263,7 @@ public actor MergeConflictResolverViewModel {
                 let catFile = try await CatFileBatch(repoURL: repoURL)
                 defer { Task { await catFile.close() } }
                 for (conflict, choice) in batch {
-                    try await Self.applySingle(
+                    try await MergeApplyPipeline.applySingle(
                         conflict: conflict,
                         choice: choice,
                         repoURL: repoURL,
@@ -287,78 +282,8 @@ public actor MergeConflictResolverViewModel {
         await runningTask?.value
     }
 
-    private static func applySingle(
-        conflict: ClassifiedConflict,
-        choice: ConflictedPathChoice,
-        repoURL: URL,
-        runner: Runner,
-        catFile: CatFileBatch
-    ) async throws {
-        // Branch on the choice kind. Whole-side picks (.ours / .theirs /
-        // .base) round-trip through `choice.stage` and the per-stage
-        // blob read; per-region text picks splice into the working-
-        // tree file via `ConflictedFile.applying(_:)`.
-        if case let .text(regions) = choice {
-            try applyPerRegionText(
-                conflict: conflict,
-                regions: regions,
-                repoURL: repoURL
-            )
-            _ = try await runner.run(["add", "--", conflict.entry.path])
-            return
-        }
-
-        guard let stageNumber = choice.stage else {
-            throw MergeApplyError.pending(path: conflict.entry.path)
-        }
-        guard let stage = conflict.entry.stages.first(where: { $0.stage == stageNumber }) else {
-            throw MergeApplyError.missingStage(
-                path: conflict.entry.path,
-                stage: stageNumber
-            )
-        }
-        switch stage.mode {
-        case .submodule:
-            // Gitlink: stage.sha is a commit SHA, not a blob. We can't
-            // write bytes — we update the index directly.
-            let modeOctal = String(stage.mode.rawMode, radix: 8)
-            _ = try await runner.run([
-                "update-index",
-                "--add",
-                "--cacheinfo",
-                "\(modeOctal),\(stage.sha),\(conflict.entry.path)"
-            ])
-        case .regularFile, .executable, .symlink, .unknown:
-            let blob = try await catFile.read(stage.sha)
-            let target = repoURL.appendingPathComponent(conflict.entry.path)
-            let parent = target.deletingLastPathComponent()
-            try FileManager.default.createDirectory(
-                at: parent,
-                withIntermediateDirectories: true
-            )
-            try blob.content.write(to: target)
-            _ = try await runner.run(["add", "--", conflict.entry.path])
-        }
-    }
-
-    /// Splice per-region resolutions into the working-tree file +
-    /// write back. Source is the markered file git wrote during the
-    /// failed merge; parsed via ``ConflictedFile/init(source:)``;
-    /// applied via ``ConflictedFile/applying(_:)``. Rejects non-text
-    /// kinds with ``MergeApplyError/textChoiceOnNonTextKind(path:)``.
-    private static func applyPerRegionText(
-        conflict: ClassifiedConflict,
-        regions: [ConflictResolution],
-        repoURL: URL
-    ) throws {
-        guard conflict.kind == .text else {
-            throw MergeApplyError.textChoiceOnNonTextKind(path: conflict.entry.path)
-        }
-        let target = repoURL.appendingPathComponent(conflict.entry.path)
-        let source = try String(contentsOf: target, encoding: .utf8)
-        let resolved = try ConflictedFile(source: source).applying(regions)
-        try resolved.write(to: target, atomically: true, encoding: .utf8)
-    }
+    // Apply helpers live in MergeApplyPipeline.swift so the VM stays
+    // under SwiftLint's file-length cap as the apply surface grows.
 
     private func runGit(_ argv: [String]) async {
         state = .busy(progress: nil)

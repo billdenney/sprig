@@ -30,4 +30,14 @@ public enum MergeApplyError: Error, Equatable, Sendable {
     /// (``ConflictedPathChoice/ours`` / ``theirs`` / ``base``) for
     /// binary / submodule / LFS-pointer / add-add conflicts instead.
     case textChoiceOnNonTextKind(path: String)
+
+    /// A whole-side resolution wrote the LFS pointer to disk and
+    /// staged it successfully, but `git lfs checkout` failed to
+    /// materialize the binary into the working tree. Typically
+    /// means git-lfs isn't installed (ADR 0029's "detect + one-click
+    /// Homebrew install" surface should kick in here) or the LFS
+    /// object isn't in cache and can't be fetched. The pointer and
+    /// the index entry are correct regardless — the user can
+    /// re-checkout later once LFS is healthy.
+    case lfsMaterializeFailed(path: String, underlying: String)
 }
