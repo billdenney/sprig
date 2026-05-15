@@ -27,20 +27,13 @@ import ConflictKit
 import Foundation
 import GitCore
 
-/// View model for the Resolve Conflicts task window. Holds the
-/// classified inventory + per-path choices + lifecycle state.
-///
-/// **Actor-isolated.** All mutable state lives behind the actor.
-///
-/// **Lifecycle.** Construct with the repo URL + Runner + (optionally)
-/// a `ConflictProbes` for binary / LFS detection (defaults to
-/// `.none`, which means everything that isn't submodule or add/add
-/// classifies as `.text`). Call ``refresh()`` to populate
-/// ``conflicts``. The UI calls ``choose(path:_:)`` per row;
-/// ``applyAll()`` walks every non-pending choice and writes it to
-/// disk + git-adds. ``finalize()`` runs `git commit` once every path
-/// is resolved; ``abort()`` runs `git merge --abort` to throw away
-/// the merge.
+/// View model for the Resolve Conflicts task window — actor-isolated;
+/// holds the classified inventory + per-path choices + lifecycle state.
+/// Construct with repo URL + `Runner` + optional `ConflictProbes` for
+/// binary / LFS detection; ``refresh()`` populates ``conflicts``;
+/// ``choose(path:_:)`` sets per-path picks; ``applyAll()`` writes them
+/// to disk + git-adds; ``finalize()`` / ``abort()`` dispatch through
+/// ``operation``'s `git <op> --continue / --abort` argv.
 public actor MergeConflictResolverViewModel {
     public let repoURL: URL
 
@@ -301,6 +294,20 @@ public actor MergeConflictResolverViewModel {
         runner: Runner,
         catFile: CatFileBatch
     ) async throws {
+        // Branch on the choice kind. Whole-side picks (.ours / .theirs /
+        // .base) round-trip through `choice.stage` and the per-stage
+        // blob read; per-region text picks splice into the working-
+        // tree file via `ConflictedFile.applying(_:)`.
+        if case let .text(regions) = choice {
+            try applyPerRegionText(
+                conflict: conflict,
+                regions: regions,
+                repoURL: repoURL
+            )
+            _ = try await runner.run(["add", "--", conflict.entry.path])
+            return
+        }
+
         guard let stageNumber = choice.stage else {
             throw MergeApplyError.pending(path: conflict.entry.path)
         }
@@ -332,6 +339,25 @@ public actor MergeConflictResolverViewModel {
             try blob.content.write(to: target)
             _ = try await runner.run(["add", "--", conflict.entry.path])
         }
+    }
+
+    /// Splice per-region resolutions into the working-tree file +
+    /// write back. Source is the markered file git wrote during the
+    /// failed merge; parsed via ``ConflictedFile/init(source:)``;
+    /// applied via ``ConflictedFile/applying(_:)``. Rejects non-text
+    /// kinds with ``MergeApplyError/textChoiceOnNonTextKind(path:)``.
+    private static func applyPerRegionText(
+        conflict: ClassifiedConflict,
+        regions: [ConflictResolution],
+        repoURL: URL
+    ) throws {
+        guard conflict.kind == .text else {
+            throw MergeApplyError.textChoiceOnNonTextKind(path: conflict.entry.path)
+        }
+        let target = repoURL.appendingPathComponent(conflict.entry.path)
+        let source = try String(contentsOf: target, encoding: .utf8)
+        let resolved = try ConflictedFile(source: source).applying(regions)
+        try resolved.write(to: target, atomically: true, encoding: .utf8)
     }
 
     private func runGit(_ argv: [String]) async {
@@ -368,18 +394,4 @@ public actor MergeConflictResolverViewModel {
         runningTask = nil
         state = .failure(failure)
     }
-}
-
-/// Errors thrown by the apply pipeline. Wrapped into
-/// ``TaskWindowState/failure`` for the VM's external surface; the
-/// typed cases exist so diagnostics tooling can categorize.
-public enum MergeApplyError: Error, Equatable, Sendable {
-    /// Caller asked to apply a path whose choice is still
-    /// ``ConflictedPathChoice/pending``.
-    case pending(path: String)
-
-    /// The requested stage isn't present in the conflict's entry
-    /// (e.g. ``ConflictedPathChoice/base`` asked for an add/add
-    /// conflict). The integer is the stage that was requested.
-    case missingStage(path: String, stage: Int)
 }
