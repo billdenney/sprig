@@ -1,13 +1,16 @@
 // AtomicWriteWithRetry.swift
 //
-// Windows-tolerant atomic file write helper used by the merge-conflict
-// apply pipeline (`MergeApplyPipeline.applyPerRegionText`).
+// Windows-tolerant atomic file write helper for the few places in
+// TaskWindowKit that write working-tree-visible files: the
+// merge-conflict apply pipeline (`MergeApplyPipeline.applyPerRegionText`)
+// and `PreferencesViewModel.save()`.
 //
 // Why this exists
 // ---------------
-// `String.write(to:atomically:encoding:)` does write-temp-then-rename.
-// On Windows the rename uses `MoveFileEx`, which fails with Win32
-// `ERROR_SHARING_VIOLATION` (code 32, surfaced through Foundation as
+// `Data.write(to:options:.atomic)` and `String.write(to:atomically:
+// encoding:)` do write-temp-then-rename. On Windows the rename step
+// uses `MoveFileEx`, which fails with Win32 `ERROR_SHARING_VIOLATION`
+// (code 32, surfaced through Foundation as
 // `CocoaError.fileWriteNoPermission`) when another process holds an
 // open handle on the target. The most common culprits:
 //
@@ -16,11 +19,12 @@
 //     file. Median scan time ~200 ms, worst case ~2 s.
 //
 //   * Text editors keeping the file open while the user resolves a
-//     conflict. The user's expected workflow is "tweak in editor →
-//     hit Apply in Sprig"; Sprig then races the editor's file watcher.
+//     conflict or edits a config file. The user's expected workflow
+//     is "tweak in editor → hit Apply / Save in Sprig"; Sprig then
+//     races the editor's file watcher.
 //
-//   * Other git clients running concurrently (e.g. `git status`
-//     issued by another tool's pre-commit hook).
+//   * Other git or sprig processes touching the same file mid-write
+//     (e.g. `git status` issued by another tool's pre-commit hook).
 //
 // macOS and Linux take the success path on the first attempt --
 // POSIX `rename(2)` overwrites a locked target -- so this is
@@ -35,10 +39,10 @@
 import Foundation
 
 enum AtomicWriteWithRetry {
-    /// Write `content` atomically to `url`, retrying with exponential
+    /// Write `data` atomically to `url`, retrying with exponential
     /// backoff on transient Windows file-sharing violations.
     static func run(
-        _ content: String,
+        _ data: Data,
         to url: URL,
         attempts: Int = 5,
         initialDelaySec: Double = 0.1
@@ -46,7 +50,7 @@ enum AtomicWriteWithRetry {
         var lastError: Error?
         for attempt in 0 ..< attempts {
             do {
-                try content.write(to: url, atomically: true, encoding: .utf8)
+                try data.write(to: url, options: .atomic)
                 return
             } catch let error as CocoaError where error.code == .fileWriteNoPermission {
                 // Transient sharing violation on Windows; back off + retry.
@@ -60,5 +64,16 @@ enum AtomicWriteWithRetry {
         // Out of retries -- surface the last seen error so the
         // caller's typed-error handling kicks in unchanged.
         throw lastError ?? CocoaError(.fileWriteUnknown)
+    }
+
+    /// String overload -- encodes UTF-8 then defers to the Data form.
+    static func run(
+        _ content: String,
+        to url: URL,
+        attempts: Int = 5,
+        initialDelaySec: Double = 0.1
+    ) async throws {
+        let data = Data(content.utf8)
+        try await run(data, to: url, attempts: attempts, initialDelaySec: initialDelaySec)
     }
 }
