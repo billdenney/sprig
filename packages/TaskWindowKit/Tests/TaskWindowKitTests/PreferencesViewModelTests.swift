@@ -28,6 +28,33 @@ struct PreferencesViewModelTests {
         return { date }
     }()
 
+    /// Poll `FileManager.fileExists(atPath:)` until it returns true or
+    /// the deadline elapses, sleeping `pollInterval` between attempts.
+    ///
+    /// **Why this exists** (Windows-specific race): `Data.write(to:options:.atomic)`
+    /// returns successfully on Windows after the underlying `MoveFileEx`
+    /// completes, but the new file isn't necessarily visible to
+    /// `FileManager.fileExists` (which goes through `FindFirstFile` /
+    /// `GetFileAttributes`) for up to ~2 s on busy hosted runners. The
+    /// cross-platform-quirks catalog documents this; the polling-watcher
+    /// suite uses the same pattern. On macOS / Linux the predicate
+    /// returns true on the first poll, so this is a no-op there.
+    ///
+    /// Returns the final predicate value (true if visible within the
+    /// budget, false on timeout).
+    private func waitForFile(
+        at path: String,
+        timeout: TimeInterval = 5.0,
+        pollInterval: TimeInterval = 0.05
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: path) { return true }
+            try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+        }
+        return FileManager.default.fileExists(atPath: path)
+    }
+
     // MARK: - Pure-data Codable round-trip
 
     @Test("AppPreferences round-trips through JSONEncoder/JSONDecoder")
@@ -144,7 +171,7 @@ struct PreferencesViewModelTests {
             clock: Self.fixedClock
         )
         await vm.save()
-        #expect(FileManager.default.fileExists(atPath: deepURL.path))
+        #expect(await waitForFile(at: deepURL.path))
     }
 
     // MARK: - load() on malformed file fails
@@ -187,10 +214,14 @@ struct PreferencesViewModelTests {
         let updated = AppPreferences(branchSortRecencyFirst: false)
         await vm.update(updated)
         #expect(await vm.preferences == updated)
+        // `update(_:)` is in-memory only; the file shouldn't materialize.
+        // No `waitForFile` here — we're asserting non-existence, and on
+        // every platform Foundation reports a not-yet-created file as
+        // missing immediately.
         #expect(FileManager.default.fileExists(atPath: prefsURL.path) == false)
 
         await vm.save()
-        #expect(FileManager.default.fileExists(atPath: prefsURL.path))
+        #expect(await waitForFile(at: prefsURL.path))
     }
 
     // MARK: - reset() preserves preferences
