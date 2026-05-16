@@ -1,11 +1,16 @@
 // NamedPipeTransport.swift
 //
-// Windows named-pipe ``Transport`` implementation. The agent runs as
-// a Windows Service and hosts the server end (`CreateNamedPipeW`);
-// each shell-extension / sprigctl client opens the client end
-// (`CreateFileW`). Both ends speak the same byte-mode wire format
-// the rest of Sprig's IPC uses: 4-byte little-endian length prefix
-// followed by the JSON envelope body.
+// Windows named-pipe ``Transport`` implementation. Design rationale +
+// alternatives considered: ADR 0067 (single-client blocking-IO MVP,
+// IOCP refactor as the next slice). Reference patterns:
+// `docs/research/windows-shell-apis.md` "Named-pipe IPC: the server
+// side".
+//
+// The agent runs as a Windows Service and hosts the server end
+// (`CreateNamedPipeW`); each shell-extension / sprigctl client opens
+// the client end (`CreateFileW`). Both ends speak the same byte-mode
+// wire format the rest of Sprig's IPC uses: 4-byte little-endian
+// length prefix followed by the JSON envelope body.
 //
 // Tier 2 platform impl. The Tier 1 `Transport` protocol is portable;
 // only this file is Windows-specific. Mac equivalent (XPC) lives in
