@@ -45,9 +45,22 @@ struct RepoAgentTests {
     /// Wait up to `timeout` for the sink to deliver at least one envelope
     /// matching `predicate`. Returns the matched envelope or nil on
     /// timeout.
+    ///
+    /// Platform-conditional default: 5 s on macOS / Linux, 30 s on
+    /// Windows. The agent loop carries ~5 s of Windows-specific
+    /// overhead under hosted-runner load (polling-watcher fs-visibility
+    /// lag + `git status` process spawn).
+    private static let defaultTimeout: Duration = {
+        #if os(Windows)
+            return .seconds(30)
+        #else
+            return .seconds(5)
+        #endif
+    }()
+
     private func awaitEnvelope(
         from sink: InMemoryBadgeEventSink,
-        timeout: Duration = .seconds(5),
+        timeout: Duration = Self.defaultTimeout,
         where predicate: @escaping @Sendable (Envelope<AgentEvent>) -> Bool = { _ in true }
     ) async -> Envelope<AgentEvent>? {
         await withTaskGroup(of: Envelope<AgentEvent>?.self) { group in

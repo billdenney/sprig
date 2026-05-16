@@ -299,7 +299,7 @@ public actor MergeConflictResolverViewModel {
         // blob read; per-region text picks splice into the working-
         // tree file via `ConflictedFile.applying(_:)`.
         if case let .text(regions) = choice {
-            try applyPerRegionText(
+            try await applyPerRegionText(
                 conflict: conflict,
                 regions: regions,
                 repoURL: repoURL
@@ -346,18 +346,21 @@ public actor MergeConflictResolverViewModel {
     /// failed merge; parsed via ``ConflictedFile/init(source:)``;
     /// applied via ``ConflictedFile/applying(_:)``. Rejects non-text
     /// kinds with ``MergeApplyError/textChoiceOnNonTextKind(path:)``.
+    /// The write goes through ``AtomicWriteWithRetry`` to absorb
+    /// transient Windows file-sharing violations (Defender, editors,
+    /// concurrent git clients).
     private static func applyPerRegionText(
         conflict: ClassifiedConflict,
         regions: [ConflictResolution],
         repoURL: URL
-    ) throws {
+    ) async throws {
         guard conflict.kind == .text else {
             throw MergeApplyError.textChoiceOnNonTextKind(path: conflict.entry.path)
         }
         let target = repoURL.appendingPathComponent(conflict.entry.path)
         let source = try String(contentsOf: target, encoding: .utf8)
         let resolved = try ConflictedFile(source: source).applying(regions)
-        try resolved.write(to: target, atomically: true, encoding: .utf8)
+        try await AtomicWriteWithRetry.run(resolved, to: target)
     }
 
     private func runGit(_ argv: [String]) async {

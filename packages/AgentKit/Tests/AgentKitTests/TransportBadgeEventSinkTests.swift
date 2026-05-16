@@ -42,9 +42,25 @@ struct TransportBadgeEventSinkTests {
 
     /// Wait up to `timeout` for the next decoded envelope on `client`.
     /// Returns nil on timeout.
+    ///
+    /// Platform-conditional default: 5 s on macOS / Linux (the
+    /// envelope typically lands in <1 s on those platforms), 30 s on
+    /// Windows. The full agent loop (watcher → coalescer → status
+    /// refresher → broadcaster → transport) carries ~5 s of Windows-
+    /// specific overhead under hosted-runner load: ~2 s polling-watcher
+    /// fs-visibility lag, ~1-2 s `git status` process spawn, plus
+    /// scheduler latency.
+    private static let defaultTimeout: Duration = {
+        #if os(Windows)
+            return .seconds(30)
+        #else
+            return .seconds(5)
+        #endif
+    }()
+
     private func awaitEnvelope(
         on client: any Transport,
-        timeout: Duration = .seconds(5)
+        timeout: Duration = Self.defaultTimeout
     ) async -> Envelope<AgentEvent>? {
         await withTaskGroup(of: Envelope<AgentEvent>?.self) { group in
             group.addTask {
