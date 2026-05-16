@@ -95,16 +95,6 @@ struct MergeConflictResolverPerRegionTests {
         await vm.choose(path: "a.txt", .text(regions: [.ours, .theirs]))
         await vm.applyOne(path: "a.txt")
 
-        // Diagnostic: surface the VM state when apply doesn't land,
-        // so hosted-CI failures point at the underlying error mode
-        // (sharing violation, IO error, etc.) instead of just
-        // "marker still present." Remove once the Windows surface is
-        // stable on hosted runners.
-        let postState = await vm.state
-        if case let .failure(failure) = postState {
-            Issue.record("apply failed: \(failure.description) (type: \(failure.underlyingTypeName ?? "nil"))")
-        }
-
         // Working tree now contains main's line 1 + feature's line 7.
         let resolved = try readFile(dir.appendingPathComponent("a.txt"))
         #expect(resolved.contains("a-main"))
