@@ -29,7 +29,7 @@ enum MergeApplyPipeline {
         catFile: CatFileBatch
     ) async throws {
         if case let .text(regions) = choice {
-            try applyPerRegionText(
+            try await applyPerRegionText(
                 conflict: conflict,
                 regions: regions,
                 repoURL: repoURL
@@ -70,18 +70,21 @@ enum MergeApplyPipeline {
     /// failed merge; parsed via ``ConflictedFile/init(source:)``;
     /// applied via ``ConflictedFile/applying(_:)``. Rejects non-text
     /// kinds with ``MergeApplyError/textChoiceOnNonTextKind(path:)``.
+    /// The write goes through ``AtomicWriteWithRetry`` to absorb
+    /// transient Windows file-sharing violations (Defender, editors,
+    /// concurrent git clients).
     static func applyPerRegionText(
         conflict: ClassifiedConflict,
         regions: [ConflictResolution],
         repoURL: URL
-    ) throws {
+    ) async throws {
         guard conflict.kind == .text else {
             throw MergeApplyError.textChoiceOnNonTextKind(path: conflict.entry.path)
         }
         let target = repoURL.appendingPathComponent(conflict.entry.path)
         let source = try String(contentsOf: target, encoding: .utf8)
         let resolved = try ConflictedFile(source: source).applying(regions)
-        try resolved.write(to: target, atomically: true, encoding: .utf8)
+        try await AtomicWriteWithRetry.run(resolved, to: target)
     }
 
     /// Update the index directly for a submodule stage. The stage's
