@@ -39,9 +39,29 @@ struct RoutedBadgeEventSinkTests {
     /// the next decoded `AgentEvent`. Returns nil on either timeout.
     /// Used by the multi-client tests to pull (ack, badge-event) for
     /// each client.
+    ///
+    /// Platform-conditional default: 3 s on macOS / Linux (where the
+    /// ack + event pair typically lands in <1 s), 30 s on Windows.
+    /// The full agent loop (watcher → coalescer → status refresher →
+    /// broadcaster → routed sink → both transport pairs) carries ~5 s
+    /// of Windows-specific overhead under hosted-runner load
+    /// (polling-watcher fs-visibility lag ~2 s, `git status` process
+    /// spawn ~1-2 s, scheduler latency); since this helper has to
+    /// collect TWO independent envelopes, the doubled wall-clock cost
+    /// makes the 3 s ceiling especially tight on Windows. The
+    /// short-circuit on first match means macOS / Linux see no
+    /// added cost from the larger Windows budget.
+    private static let defaultTimeout: Duration = {
+        #if os(Windows)
+            return .seconds(30)
+        #else
+            return .seconds(3)
+        #endif
+    }()
+
     private func awaitAckAndEvent(
         on client: any Transport,
-        timeout: Duration = .seconds(3)
+        timeout: Duration = Self.defaultTimeout
     ) async -> (Envelope<AgentResponse>, Envelope<AgentEvent>)? {
         await withTaskGroup(
             of: (Envelope<AgentResponse>, Envelope<AgentEvent>)?.self

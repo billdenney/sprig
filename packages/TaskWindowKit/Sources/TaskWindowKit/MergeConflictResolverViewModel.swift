@@ -284,6 +284,10 @@ public actor MergeConflictResolverViewModel {
 
     // Apply helpers live in MergeApplyPipeline.swift so the VM stays
     // under SwiftLint's file-length cap as the apply surface grows.
+    // (The retry-on-Win32-sharing-violation that PR #108 introduced
+    // on this branch has been moved into MergeApplyPipeline by main's
+    // PR #107 extraction; the per-region apply path there already
+    // routes through AtomicWriteWithRetry.run().)
 
     private func runGit(_ argv: [String]) async {
         state = .busy(progress: nil)

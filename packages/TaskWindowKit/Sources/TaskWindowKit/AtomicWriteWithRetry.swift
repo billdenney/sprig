@@ -30,11 +30,14 @@
 // POSIX `rename(2)` overwrites a locked target -- so this is
 // effectively Windows-only behavior with zero overhead elsewhere.
 //
-// Retry schedule: five attempts with backoff `100 ms → 200 ms →
-// 400 ms → 800 ms → 1.6 s` (cumulative ≈ 3.1 s), matched to Defender's
-// scan-completion distribution. Falls through to throw the last seen
-// error if all attempts fail, preserving the caller's typed-error
-// surface unchanged.
+// Retry schedule: eight attempts with backoff `250 ms → 500 ms →
+// 1 s → 2 s → 4 s → 8 s → 16 s → 32 s` (cumulative ≈ 64 s).
+// The previous tighter schedule (5×100ms, ~3.1 s total) was exhausting
+// on hosted Windows runners under heavy parallel-test load, where
+// Defender + the runner's scheduler can keep a single file
+// inaccessible for tens of seconds. Falls through to throw the last
+// seen error if all attempts fail, preserving the caller's typed-
+// error surface unchanged.
 
 import Foundation
 
@@ -44,8 +47,8 @@ enum AtomicWriteWithRetry {
     static func run(
         _ data: Data,
         to url: URL,
-        attempts: Int = 5,
-        initialDelaySec: Double = 0.1
+        attempts: Int = 8,
+        initialDelaySec: Double = 0.25
     ) async throws {
         var lastError: Error?
         for attempt in 0 ..< attempts {
@@ -70,8 +73,8 @@ enum AtomicWriteWithRetry {
     static func run(
         _ content: String,
         to url: URL,
-        attempts: Int = 5,
-        initialDelaySec: Double = 0.1
+        attempts: Int = 8,
+        initialDelaySec: Double = 0.25
     ) async throws {
         let data = Data(content.utf8)
         try await run(data, to: url, attempts: attempts, initialDelaySec: initialDelaySec)
