@@ -200,7 +200,12 @@ public actor PreferencesViewModel {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let data = try encoder.encode(snapshot)
-                try data.write(to: url, options: .atomic)
+                // Routes through AtomicWriteWithRetry to absorb
+                // transient Windows file-sharing violations
+                // (Defender's real-time scanner, editors holding the
+                // prefs file open, etc.). Single attempt on macOS /
+                // Linux; up to ~3.1 s of retry on Windows.
+                try await AtomicWriteWithRetry.run(data, to: url)
                 await self?.recordSuccess(at: timestamp)
             } catch is CancellationError {
                 await self?.recordFailure(.init(description: "Preferences save cancelled."))
