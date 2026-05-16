@@ -85,30 +85,30 @@ struct PollingFileWatcherDiffTests {
     }
 }
 
-// PollingFileWatcher's live-FS suite is the *fallback*-path coverage
-// on Windows — production traffic goes through
-// `ReadDirectoryChangesWatcher` (added in PR #88). Windows hosted
-// runners under load have intermittent multi-second latency in
-// `FileManager.contentsOfDirectory`'s underlying `FindFirstFile` /
-// `FindNextFile`, which is structurally what the polling watcher
-// queries. That latency previously made this suite flaky on Windows,
-// so the suite was disabled there entirely.
-//
-// **Re-enabled with per-platform budgets**: rather than tune one
-// budget across all three OSes (which left Windows with too little
-// margin while macOS / Linux paid for the headroom in suite time),
-// the pre-write delay and event timeout below are platform-
-// conditional. Windows gets ~5× the wall-clock budget to absorb its
-// worst-case `FindFirstFile` lag (the cross-platform-quirks catalog
-// documents up to ~2 s per filesystem op on hosted runners); macOS
-// and Linux keep their tight budgets so the suite still finishes in
-// ~1 s on those platforms.
-//
-// This is one of the rare places we use `#if os(...)` in
-// portable-package source. CLAUDE.md's tier-1 rule bans behavioral
-// branching on `os()`; this is a test-only TIMING constant, not a
-// behavior branch (the same code paths run on every platform with
-// only the deadlines changing).
+/// PollingFileWatcher's live-FS suite is the *fallback*-path coverage
+/// on Windows — production traffic goes through
+/// `ReadDirectoryChangesWatcher` (added in PR #88). Windows hosted
+/// runners under load have intermittent multi-second latency in
+/// `FileManager.contentsOfDirectory`'s underlying `FindFirstFile` /
+/// `FindNextFile`, which is structurally what the polling watcher
+/// queries. That latency previously made this suite flaky on Windows,
+/// so the suite was disabled there entirely.
+///
+/// **Re-enabled with per-platform budgets**: rather than tune one
+/// budget across all three OSes (which left Windows with too little
+/// margin while macOS / Linux paid for the headroom in suite time),
+/// the pre-write delay and event timeout below are platform-
+/// conditional. Windows gets ~5× the wall-clock budget to absorb its
+/// worst-case `FindFirstFile` lag (the cross-platform-quirks catalog
+/// documents up to ~2 s per filesystem op on hosted runners); macOS
+/// and Linux keep their tight budgets so the suite still finishes in
+/// ~1 s on those platforms.
+///
+/// This is one of the rare places we use `#if os(...)` in
+/// portable-package source. CLAUDE.md's tier-1 rule bans behavioral
+/// branching on `os()`; this is a test-only TIMING constant, not a
+/// behavior branch (the same code paths run on every platform with
+/// only the deadlines changing).
 @Suite("PollingFileWatcher end-to-end on real filesystem")
 struct PollingFileWatcherRealFSTests {
     private func makeTempDir(_ label: String) throws -> URL {
