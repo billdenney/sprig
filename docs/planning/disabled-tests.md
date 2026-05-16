@@ -4,16 +4,7 @@ The list of tests currently disabled on CI, why, and what unblocks re-enabling. 
 
 ## Currently disabled
 
-### `PollingFileWatcherRealFSTests` (whole suite) — disabled on Windows 2026-05-09
-
-- **Where:** `packages/WatcherKit/Tests/WatcherKitTests/PollingFileWatcherTests.swift` — the suite is wrapped in `#if !os(Windows)`. The pure-logic `PollingFileWatcherDiffTests` suite still runs on every platform.
-- **Symptom:** `createDetected` (and intermittently `modifyDetected` / `removeDetected`) fail on Windows hosted runners with `events: []` — the polling watcher's `FileManager.contentsOfDirectory` snapshot doesn't surface the new/changed/removed file within the test budget.
-- **Suspected root cause:** Foundation's `contentsOfDirectory` on Windows uses `FindFirstFile` / `FindNextFile`, which under hosted-runner load can lag well past the documented "~2s median" filesystem-visibility budget. The polling design (snapshot every 50ms via `readdir`) is structurally vulnerable to that latency.
-- **Why this is OK to disable on Windows specifically:** the polling watcher is the *fallback* path on Windows — production traffic uses `ReadDirectoryChangesWatcher` (added in PR #88, file `Sources/Windows/WatcherKitWindows.swift`). The fallback's design is intentionally simple and slow; testing it under stringent timing on a runner whose filesystem semantics it's not optimized for produces noise without exercising real bugs. macOS + Linux still run the full live-FS suite, where the polling watcher is the production path.
-- **What unblocks re-enabling:** either (a) provisioning a self-hosted Windows runner where filesystem visibility is stable enough to satisfy the original 5s budget reliably, or (b) factoring the polling-watcher tests so the budget is configurable per-platform with Windows getting a generous (~30s) headroom (acknowledging the test's actually testing the kernel + Foundation more than the watcher's own logic on that platform).
-- **Diagnostic artifacts:** PR #87 CI run ([action 25601505900](https://github.com/billdenney/sprig/actions/runs/25601505900)) — `createDetected` failed with `events: []` after the 5s ceiling. Earlier flakes traced to the same shape on PRs #22, #23 (pre-write delay bump); PR #66 (event timeout bump 3s → 5s).
-- **Disable PR:** `#88`
-- **Owner:** maintainer + me (re-enable when the trigger condition above is met)
+_(none)_
 
 ## Format
 
@@ -42,6 +33,7 @@ When re-enabling, the entry above gets removed from this file (not crossed out �
 Useful when triaging a similar future flake. Strict format is not required for the historical list — a one-line summary with PR links suffices.
 
 - **`SprigctlWatchTests.macShortDurationExits`** — disabled 2026-04-26 (PR #12 / SprigctlSupport landing) attributed to "FSEvents hang on hosted macos-14"; re-enabled in PR `feat/reenable-fsevents-watch-test` (2026-04-30) after PR #16's stack-trace watchdog showed the actual root cause was `Process.waitUntilExit()` racing fast-exiting children, which PR #16 fixed via `GitCore.ProcessTerminationGate`.
+- **`PollingFileWatcherRealFSTests` (Windows)** — disabled 2026-05-09 (PR #88) because Windows hosted-runner `FindFirstFile` lag exceeded the suite's 5 s budget. Re-enabled 2026-05-16 in PR `ci/reenable-pollingwatcher-windows-budgets` by making `preWriteDelayNs` and `eventTimeoutSec` platform-conditional (Windows: 2.5 s / 30 s; macOS + Linux: 500 ms / 5 s). Verified locally on a Windows Server 2022 dockur/windows VM matching the GitHub Actions `windows-2022` runner image; suite passes 11/11 in 2.6 s on Windows, 0.5 s on Linux (no regression).
 
 ## Why this file exists, not GitHub Issues
 

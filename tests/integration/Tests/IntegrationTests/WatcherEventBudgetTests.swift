@@ -41,8 +41,9 @@ struct WatcherEventBudgetTests {
     ///   1 s leaves ~5× margin for hosted-runner load spikes.
     /// - Windows: 3 s. Hosted Windows runners exhibit higher
     ///   variance under load (process spawn overhead, scheduler
-    ///   latency, Defender hooks); recent CI saw 1.32 s on the prior
-    ///   1.0 s budget. 3 s gives ~3× margin on top of the worst-case
+    ///   latency, Defender hooks); PR #107's CI saw 1.028 s and
+    ///   PR #108's saw 1.32 s on the prior 1.0 s budget. 3 s gives
+    ///   ~3× margin on top of the worst-case
     ///   measurement so transient slowdowns don't flake the budget
     ///   gate. Pure CPU work shouldn't be 3× slower on Windows in
     ///   steady state, so persistent failures still surface real
