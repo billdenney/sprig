@@ -6,6 +6,9 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **`PollingFileWatcherRealFSTests` re-enabled on Windows.** Disabled since PR #88 due to Windows `FindFirstFile` lag exceeding the test's 5 s budget; now runs on all three OSes with per-platform timing budgets — Windows 2.5 s pre-write delay + 30 s event timeout (5–10× the worst-case `~2 s` hosted-runner filesystem-visibility lag documented in `docs/architecture/cross-platform-quirks.md`), macOS + Linux unchanged at 500 ms + 5 s. Verified locally on a dockur/windows Server 2022 VM (the local mirror of the GitHub Actions `windows-2022` runner image): 11/11 pass in 2.6 s on Windows, 0.5 s on Linux. Closes the Windows coverage gap the polling-watcher disable left open.
+
 ### Added
 - **`PlatformKit.PathResolver`** — the portable path-resolution protocol from master plan §2 / ADR 0048. Resolves Sprig's well-known per-user directories (`appSupport`, `cache`) without per-OS code at the call site.
   - Protocol-only public surface (`PathResolver`) plus a default implementation (`FoundationPathResolver`) backed by `FileManager.url(for:in:appropriateFor:create:)`, which maps to the platform-correct `SearchPathDirectory` root on every supported OS: macOS `~/Library/Application Support` / `~/Library/Caches`, Linux XDG paths (`~/.local/share` / `~/.cache`), Windows `%APPDATA%` / `%LOCALAPPDATA%`. The `appName` (default `"Sprig"`) is appended; the directory is created on first call.
