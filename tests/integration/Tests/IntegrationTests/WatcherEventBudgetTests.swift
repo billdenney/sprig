@@ -34,14 +34,29 @@ struct WatcherEventBudgetTests {
     private static let pathPoolSize = 200
 
     /// Ceiling for the full ingest + drain pass at 10k events on a
-    /// hosted CI runner. 1 second is ~5× our local Linux measurement
-    /// (~200 ms is typical) — enough margin to absorb Windows
-    /// filesystem latency (per memory: up to 2 s on Windows for
-    /// unrelated filesystem ops, though pure CPU work like ingest
-    /// + drain isn't filesystem-bound) and the Linux Foundation
-    /// flake without flaking. Tighten when the assertion is shown to
-    /// have consistent slack on every platform's CI history.
-    private static let wallClockBudget: Duration = .milliseconds(1000)
+    /// hosted CI runner.
+    ///
+    /// Platform-conditional:
+    /// - macOS / Linux: 1 s. Typical local measurement is ~200 ms;
+    ///   1 s leaves ~5× margin for hosted-runner load spikes.
+    /// - Windows: 3 s. Hosted Windows runners exhibit higher
+    ///   variance under load (process spawn overhead, scheduler
+    ///   latency, Defender hooks); PR #107's CI saw 1.028 s on a
+    ///   1.0 s budget. 3 s gives ~3× margin on top of the worst-case
+    ///   measurement so transient slowdowns don't flake the budget
+    ///   gate. Pure CPU work shouldn't be 3× slower on Windows in
+    ///   steady state, so persistent failures still surface real
+    ///   coalescer regressions.
+    ///
+    /// Tighten on either platform when the assertion shows consistent
+    /// slack across that platform's CI history.
+    private static let wallClockBudget: Duration = {
+        #if os(Windows)
+            return .milliseconds(3000)
+        #else
+            return .milliseconds(1000)
+        #endif
+    }()
 
     @Test("EventCoalescer ingests + drains 10k synthetic events inside the wall-clock budget")
     func ingestAndDrainBudget() {

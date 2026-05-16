@@ -85,179 +85,203 @@ struct PollingFileWatcherDiffTests {
     }
 }
 
-// PollingFileWatcher's live-FS suite is the *fallback*-path coverage
-// on Windows — production traffic goes through
-// `ReadDirectoryChangesWatcher` (added in PR #88). Windows hosted
-// runners under load have intermittent multi-second latency in
-// `FileManager.contentsOfDirectory`'s underlying `FindFirstFile` /
-// `FindNextFile`, which is structurally what the polling watcher
-// queries. That latency made these tests a recurring flake source
-// even after two prior budget bumps (PR #22's pre-write delay 100ms
-// → 500ms; PR #67's event timeout 3s → 5s). Tracked in
-// `docs/planning/disabled-tests.md`.
-//
-// macOS + Linux still run this suite normally; the polling watcher
-// is exercised end-to-end on both per CLAUDE.md's "Tier 1 portable"
-// rule. The `Diff (pure)` suite above runs on every platform and
-// covers the actual diff logic.
-#if !os(Windows)
-    @Suite("PollingFileWatcher end-to-end on real filesystem")
-    struct PollingFileWatcherRealFSTests {
-        private func makeTempDir(_ label: String) throws -> URL {
-            let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-                .appendingPathComponent("sprig-polling-\(label)-\(UUID().uuidString)")
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            return dir
-        }
+/// PollingFileWatcher's live-FS suite is the *fallback*-path coverage
+/// on Windows — production traffic goes through
+/// `ReadDirectoryChangesWatcher` (added in PR #88). Windows hosted
+/// runners under load have intermittent multi-second latency in
+/// `FileManager.contentsOfDirectory`'s underlying `FindFirstFile` /
+/// `FindNextFile`, which is structurally what the polling watcher
+/// queries. That latency previously made this suite flaky on Windows,
+/// so the suite was disabled there entirely.
+///
+/// **Re-enabled with per-platform budgets**: rather than tune one
+/// budget across all three OSes (which left Windows with too little
+/// margin while macOS / Linux paid for the headroom in suite time),
+/// the pre-write delay and event timeout below are platform-
+/// conditional. Windows gets ~5× the wall-clock budget to absorb its
+/// worst-case `FindFirstFile` lag (the cross-platform-quirks catalog
+/// documents up to ~2 s per filesystem op on hosted runners); macOS
+/// and Linux keep their tight budgets so the suite still finishes in
+/// ~1 s on those platforms.
+///
+/// This is one of the rare places we use `#if os(...)` in
+/// portable-package source. CLAUDE.md's tier-1 rule bans behavioral
+/// branching on `os()`; this is a test-only TIMING constant, not a
+/// behavior branch (the same code paths run on every platform with
+/// only the deadlines changing).
+@Suite("PollingFileWatcher end-to-end on real filesystem")
+struct PollingFileWatcherRealFSTests {
+    private func makeTempDir(_ label: String) throws -> URL {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sprig-polling-\(label)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
 
-        /// Collect events from the stream until `predicate` is satisfied OR
-        /// `timeout` elapses. Returns whatever has accumulated.
-        private func collect(
-            from stream: AsyncStream<WatchEvent>,
-            until predicate: @Sendable @escaping ([WatchEvent]) -> Bool,
-            timeout: TimeInterval
-        ) async -> [WatchEvent] {
-            await withTaskGroup(of: [WatchEvent].self) { group in
-                group.addTask {
-                    var events: [WatchEvent] = []
-                    for await event in stream {
-                        events.append(event)
-                        if predicate(events) { break }
-                    }
-                    return events
+    /// Collect events from the stream until `predicate` is satisfied OR
+    /// `timeout` elapses. Returns whatever has accumulated.
+    private func collect(
+        from stream: AsyncStream<WatchEvent>,
+        until predicate: @Sendable @escaping ([WatchEvent]) -> Bool,
+        timeout: TimeInterval
+    ) async -> [WatchEvent] {
+        await withTaskGroup(of: [WatchEvent].self) { group in
+            group.addTask {
+                var events: [WatchEvent] = []
+                for await event in stream {
+                    events.append(event)
+                    if predicate(events) { break }
                 }
-                group.addTask {
-                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                    return []
-                }
-                let result = await group.next() ?? []
-                group.cancelAll()
-                return result
+                return events
             }
-        }
-
-        /// Pre-write delay for the live-watcher tests below. The watcher's
-        /// first snapshot is taken inside a Task scheduled when `start()`
-        /// returns; the file modification has to happen *after* that
-        /// snapshot or there's nothing for the diff to surface.
-        ///
-        /// 500 ms is generous: macOS / Linux runners settle in ~30–50 ms,
-        /// so this is mostly headroom. The headroom matters on Windows
-        /// hosted runners — main runs on commits 85ca3791 (PR #22) and
-        /// 2214e364 (PR #23) failed all three tests with `events → []`,
-        /// indicating the snapshot Task hadn't started before the
-        /// 100/150 ms file write fired. Bumping to 500 ms eliminates the
-        /// race; it adds ~1.5 s to total suite time, which is fine.
-        private static let preWriteDelayNs: UInt64 = 500_000_000
-
-        /// Maximum wait for the polling watcher to surface an expected
-        /// event. The `collect` helper exits as soon as the `until:`
-        /// predicate matches, so on macOS / Linux this caps near zero
-        /// because events arrive in <100 ms; the budget is for Windows.
-        ///
-        /// Windows filesystem updates can take up to ~2 s to propagate to
-        /// readers (the polling watcher's `readdir` snapshot included),
-        /// so the worst-case wait is `preWriteDelayNs (500 ms) + ~2 s
-        /// propagation + one poll interval (50 ms) ≈ 2.55 s`. The previous
-        /// 3.0 s budget left only ~450 ms of margin, which a busy Windows
-        /// runner would occasionally lose to. 5.0 s leaves comfortable
-        /// headroom without affecting macOS / Linux runtimes (the
-        /// `until:`-based `collect` returns the moment the event lands).
-        private static let eventTimeoutSec: Double = 5.0
-
-        @Test("creating a file produces a .created event")
-        func createDetected() async throws {
-            let root = try makeTempDir("create")
-            defer { try? FileManager.default.removeItem(at: root) }
-
-            let watcher = PollingFileWatcher(pollInterval: 0.05)
-            let stream = watcher.start(paths: [root])
-
-            // Allow the initial snapshot to settle, then introduce a file.
-            Task {
-                try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
-                try? Data("hi\n".utf8).write(to: root.appendingPathComponent("hello.txt"))
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return []
             }
-
-            let events = await collect(
-                from: stream,
-                until: { evs in evs.contains(where: { $0.kind == .created }) },
-                timeout: Self.eventTimeoutSec
-            )
-            await watcher.stop()
-            #expect(events.contains(where: { $0.kind == .created && $0.path.lastPathComponent == "hello.txt" }))
-        }
-
-        @Test("modifying a file produces a .modified event")
-        func modifyDetected() async throws {
-            let root = try makeTempDir("modify")
-            defer { try? FileManager.default.removeItem(at: root) }
-            let file = root.appendingPathComponent("a.txt")
-            try Data("one\n".utf8).write(to: file)
-
-            let watcher = PollingFileWatcher(pollInterval: 0.05)
-            let stream = watcher.start(paths: [root])
-
-            Task {
-                try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
-                try? Data("one\ntwo\n".utf8).write(to: file)
-            }
-
-            let events = await collect(
-                from: stream,
-                until: { evs in evs.contains(where: { $0.kind == .modified }) },
-                timeout: Self.eventTimeoutSec
-            )
-            await watcher.stop()
-            #expect(events.contains(where: { $0.kind == .modified && $0.path.lastPathComponent == "a.txt" }))
-        }
-
-        @Test("deleting a file produces a .removed event")
-        func removeDetected() async throws {
-            let root = try makeTempDir("remove")
-            defer { try? FileManager.default.removeItem(at: root) }
-            let file = root.appendingPathComponent("doomed.txt")
-            try Data("bye\n".utf8).write(to: file)
-
-            let watcher = PollingFileWatcher(pollInterval: 0.05)
-            let stream = watcher.start(paths: [root])
-
-            Task {
-                try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
-                try? FileManager.default.removeItem(at: file)
-            }
-
-            let events = await collect(
-                from: stream,
-                until: { evs in evs.contains(where: { $0.kind == .removed }) },
-                timeout: Self.eventTimeoutSec
-            )
-            await watcher.stop()
-            #expect(events.contains(where: { $0.kind == .removed && $0.path.lastPathComponent == "doomed.txt" }))
-        }
-
-        @Test("stop() finishes the stream so for-await terminates")
-        func stopFinishesStream() async throws {
-            let root = try makeTempDir("stop")
-            defer { try? FileManager.default.removeItem(at: root) }
-
-            let watcher = PollingFileWatcher(pollInterval: 0.05)
-            let stream = watcher.start(paths: [root])
-
-            // Issue stop() concurrently. The for-await loop should exit cleanly.
-            Task {
-                try? await Task.sleep(nanoseconds: 150_000_000)
-                await watcher.stop()
-            }
-
-            var seen = 0
-            for await _ in stream {
-                seen += 1
-                if seen > 100 { break } // safety net; stop() should kill the loop first
-            }
-            // No assertion on count — what we're testing is that the loop EXITS
-            // (otherwise the test would hang and the suite would time out).
-            #expect(seen <= 100)
+            let result = await group.next() ?? []
+            group.cancelAll()
+            return result
         }
     }
-#endif
+
+    /// Pre-write delay for the live-watcher tests below. The watcher's
+    /// first snapshot is taken inside a Task scheduled when `start()`
+    /// returns; the file modification has to happen *after* that
+    /// snapshot or there's nothing for the diff to surface.
+    ///
+    /// Platform-conditional:
+    /// - macOS / Linux: 500 ms is generous. Runners settle in ~30–50 ms,
+    ///   so this is mostly headroom. Bumping past 500 ms only adds suite
+    ///   time without catching anything new (main runs at 100 / 150 ms
+    ///   under PRs #22 / #23 caught the snapshot-race; 500 ms ended it).
+    /// - Windows: 2.5 s. Hosted Windows runner filesystem visibility can
+    ///   lag up to ~2 s on the `FindFirstFile` / `FindNextFile` calls
+    ///   that back `FileManager.contentsOfDirectory`
+    ///   (`docs/architecture/cross-platform-quirks.md`). Giving the
+    ///   initial snapshot 2.5 s before the test mutation absorbs that
+    ///   worst case + the 50 ms poll interval with headroom.
+    private static let preWriteDelayNs: UInt64 = {
+        #if os(Windows)
+            return 2_500_000_000
+        #else
+            return 500_000_000
+        #endif
+    }()
+
+    /// Maximum wait for the polling watcher to surface an expected
+    /// event. The `collect` helper exits as soon as the `until:`
+    /// predicate matches, so wall-clock cost is the time-to-event, not
+    /// this ceiling; the ceiling only matters when something's wrong.
+    ///
+    /// Platform-conditional:
+    /// - macOS / Linux: 5 s. Events typically arrive in <100 ms; 5 s is
+    ///   a generous backstop for hosted-runner load spikes.
+    /// - Windows: 30 s. Worst-case is `preWriteDelayNs (2.5 s) + 2 s
+    ///   FindFirstFile lag + poll interval (50 ms) ≈ 4.6 s`; 30 s leaves
+    ///   ~6× headroom on top, which the disabled-tests.md notes were
+    ///   needed to clear the recurring flake. Almost always returns
+    ///   well before the ceiling because `collect`'s `until:` predicate
+    ///   short-circuits on first match.
+    private static let eventTimeoutSec: Double = {
+        #if os(Windows)
+            return 30.0
+        #else
+            return 5.0
+        #endif
+    }()
+
+    @Test("creating a file produces a .created event")
+    func createDetected() async throws {
+        let root = try makeTempDir("create")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let watcher = PollingFileWatcher(pollInterval: 0.05)
+        let stream = watcher.start(paths: [root])
+
+        // Allow the initial snapshot to settle, then introduce a file.
+        Task {
+            try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
+            try? Data("hi\n".utf8).write(to: root.appendingPathComponent("hello.txt"))
+        }
+
+        let events = await collect(
+            from: stream,
+            until: { evs in evs.contains(where: { $0.kind == .created }) },
+            timeout: Self.eventTimeoutSec
+        )
+        await watcher.stop()
+        #expect(events.contains(where: { $0.kind == .created && $0.path.lastPathComponent == "hello.txt" }))
+    }
+
+    @Test("modifying a file produces a .modified event")
+    func modifyDetected() async throws {
+        let root = try makeTempDir("modify")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("a.txt")
+        try Data("one\n".utf8).write(to: file)
+
+        let watcher = PollingFileWatcher(pollInterval: 0.05)
+        let stream = watcher.start(paths: [root])
+
+        Task {
+            try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
+            try? Data("one\ntwo\n".utf8).write(to: file)
+        }
+
+        let events = await collect(
+            from: stream,
+            until: { evs in evs.contains(where: { $0.kind == .modified }) },
+            timeout: Self.eventTimeoutSec
+        )
+        await watcher.stop()
+        #expect(events.contains(where: { $0.kind == .modified && $0.path.lastPathComponent == "a.txt" }))
+    }
+
+    @Test("deleting a file produces a .removed event")
+    func removeDetected() async throws {
+        let root = try makeTempDir("remove")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("doomed.txt")
+        try Data("bye\n".utf8).write(to: file)
+
+        let watcher = PollingFileWatcher(pollInterval: 0.05)
+        let stream = watcher.start(paths: [root])
+
+        Task {
+            try? await Task.sleep(nanoseconds: Self.preWriteDelayNs)
+            try? FileManager.default.removeItem(at: file)
+        }
+
+        let events = await collect(
+            from: stream,
+            until: { evs in evs.contains(where: { $0.kind == .removed }) },
+            timeout: Self.eventTimeoutSec
+        )
+        await watcher.stop()
+        #expect(events.contains(where: { $0.kind == .removed && $0.path.lastPathComponent == "doomed.txt" }))
+    }
+
+    @Test("stop() finishes the stream so for-await terminates")
+    func stopFinishesStream() async throws {
+        let root = try makeTempDir("stop")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let watcher = PollingFileWatcher(pollInterval: 0.05)
+        let stream = watcher.start(paths: [root])
+
+        // Issue stop() concurrently. The for-await loop should exit cleanly.
+        Task {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            await watcher.stop()
+        }
+
+        var seen = 0
+        for await _ in stream {
+            seen += 1
+            if seen > 100 { break } // safety net; stop() should kill the loop first
+        }
+        // No assertion on count — what we're testing is that the loop EXITS
+        // (otherwise the test would hang and the suite would time out).
+        #expect(seen <= 100)
+    }
+}

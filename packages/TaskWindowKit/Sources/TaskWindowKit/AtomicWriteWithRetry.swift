@@ -1,9 +1,9 @@
 // AtomicWriteWithRetry.swift
 //
 // Windows-tolerant atomic file write helper for the few places in
-// TaskWindowKit that write working-tree-visible files (currently:
-// `PreferencesViewModel.save()`; future: `MergeApplyPipeline.swift`
-// in PR #107's stack).
+// TaskWindowKit that write working-tree-visible files: the
+// merge-conflict apply pipeline (`MergeApplyPipeline.applyPerRegionText`)
+// and `PreferencesViewModel.save()`.
 //
 // Why this exists
 // ---------------
@@ -18,9 +18,13 @@
 //     read-share-deny-write handle while scanning a freshly-written
 //     file. Median scan time ~200 ms, worst case ~2 s.
 //
-//   * Text editors keeping the file open while the user edits it.
+//   * Text editors keeping the file open while the user resolves a
+//     conflict or edits a config file. The user's expected workflow
+//     is "tweak in editor → hit Apply / Save in Sprig"; Sprig then
+//     races the editor's file watcher.
 //
-//   * Other git or sprig processes touching the same file mid-write.
+//   * Other git or sprig processes touching the same file mid-write
+//     (e.g. `git status` issued by another tool's pre-commit hook).
 //
 // macOS and Linux take the success path on the first attempt --
 // POSIX `rename(2)` overwrites a locked target -- so this is

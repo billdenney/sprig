@@ -1,63 +1,34 @@
 // MergeConflictResolverViewModel.swift
 //
-// M4 MVP-gate view model — the portable engine behind the
-// macOS/Windows "Resolve Conflicts…" task window. Surfaces the
-// classified conflict inventory, holds the user's per-path choices,
-// applies them to disk, and finalizes the merge.
+// M4 MVP-gate VM — the portable engine behind the "Resolve
+// Conflicts…" task window. Loads classified conflicts (via
+// UnmergedListing + ConflictKind), holds per-path choices, applies
+// them to disk, and finalizes / aborts the active midstream op
+// (merge / rebase / cherry-pick / revert / am — see
+// `GitCore.MidstreamOperation`).
 //
-// Tier 1, portable. Per ADR 0048, view models live here; the per-OS
-// shells in `apps/{macos,windows}/` bind to this VM's `conflicts`,
-// `choices`, `resolvedPaths`, and `state`.
+// Tier 1, portable; the per-OS shells in `apps/{macos,windows}/`
+// bind to this VM's `conflicts`, `choices`, `resolvedPaths`,
+// `operation`, and `state`.
 //
-// What this VM owns:
-//   - The classified conflict inventory (via UnmergedListing +
-//     ConflictKind).
-//   - Per-path resolution choices (`ConflictedPathChoice`).
-//   - Apply: read the chosen stage's blob via `CatFileBatch`, write
-//     to disk, `git add`. For submodule stages, swaps in
-//     `git update-index --cacheinfo` since the "blob" is a commit
-//     SHA, not bytes to write.
-//   - Finalize: `git commit` (auto-uses MERGE_MSG so the merge
-//     commit message reads "Merge branch 'feature-x' …" without
-//     the VM crafting one).
-//   - Abort: `git merge --abort`.
+// Apply pipeline: read the chosen stage's blob via `CatFileBatch`,
+// write to disk, `git add`. Submodule stages swap in
+// `git update-index --cacheinfo` because the "blob" is a commit SHA.
 //
-// What this VM doesn't own (deliberately, for the MVP cut):
-//   - Per-region text resolution (`ConflictedFile.applying(_:)`
-//     with per-`ConflictRegion` choices). Whole-side picks
-//     (`ours` / `theirs` / `base`) cover the table-stakes
-//     affordance; per-region polish lands in a follow-up once the
-//     diff-rendering selection UX is wired.
-//   - Rebase / cherry-pick / am state finalization. The merge case
-//     is the most common; the other midstream states (per master
-//     plan §10 Tier 1) become their own `finalize` branches in a
-//     follow-up that detects `<gitDir>/REBASE_HEAD`,
-//     `<gitDir>/CHERRY_PICK_HEAD`, etc.
-//   - LFS pointer auto-fetch. A whole-side pick of an LFS-pointer
-//     file lands the chosen pointer; the agent layer triggers
-//     `git lfs fetch` on the resulting working-tree state.
-//   - AI-suggested resolutions. ADR 0028 gates this on M7; the VM
-//     surface stays AI-free at M4 to keep MVP non-AI per the
-//     `MVP ASAP` direction.
+// Deliberately deferred (M4 polish, not MVP):
+//   - AI-suggested resolutions (ADR 0028 gates this on M7).
 
 import ConflictKit
 import Foundation
 import GitCore
 
-/// View model for the Resolve Conflicts task window. Holds the
-/// classified inventory + per-path choices + lifecycle state.
-///
-/// **Actor-isolated.** All mutable state lives behind the actor.
-///
-/// **Lifecycle.** Construct with the repo URL + Runner + (optionally)
-/// a `ConflictProbes` for binary / LFS detection (defaults to
-/// `.none`, which means everything that isn't submodule or add/add
-/// classifies as `.text`). Call ``refresh()`` to populate
-/// ``conflicts``. The UI calls ``choose(path:_:)`` per row;
-/// ``applyAll()`` walks every non-pending choice and writes it to
-/// disk + git-adds. ``finalize()`` runs `git commit` once every path
-/// is resolved; ``abort()`` runs `git merge --abort` to throw away
-/// the merge.
+/// View model for the Resolve Conflicts task window — actor-isolated;
+/// holds the classified inventory + per-path choices + lifecycle state.
+/// Construct with repo URL + `Runner` + optional `ConflictProbes` for
+/// binary / LFS detection; ``refresh()`` populates ``conflicts``;
+/// ``choose(path:_:)`` sets per-path picks; ``applyAll()`` writes them
+/// to disk + git-adds; ``finalize()`` / ``abort()`` dispatch through
+/// ``operation``'s `git <op> --continue / --abort` argv.
 public actor MergeConflictResolverViewModel {
     public let repoURL: URL
 
@@ -80,6 +51,15 @@ public actor MergeConflictResolverViewModel {
     /// `resolvedPaths`. Zero means the user can call ``finalize()``.
     public private(set) var state: TaskWindowState<Int> = .idle
 
+    /// Which midstream git operation the repo is currently in
+    /// (merge / rebase / cherry-pick / revert / am / none). Populated
+    /// by ``refresh()``. Drives ``finalize()`` and ``abort()`` to
+    /// pick the right `git <op> --continue` / `--abort` invocation
+    /// — `git merge --abort` for a merge, `git rebase --continue` for
+    /// a rebase, etc. Defaults to ``MidstreamOperation/none`` until
+    /// the first refresh.
+    public private(set) var operation: MidstreamOperation = .none
+
     private let runner: Runner
     private let probes: ConflictProbes
     private var runningTask: Task<Void, Never>?
@@ -97,11 +77,15 @@ public actor MergeConflictResolverViewModel {
     // MARK: - Inventory
 
     /// Re-read the conflicted-path inventory via
-    /// `git ls-files -u -z` + classify each entry. Preserves any
-    /// existing ``choices`` for paths that survived; drops choices
-    /// for paths that are no longer conflicted.
+    /// `git ls-files -u -z` + classify each entry. Also detects the
+    /// active midstream operation (``operation``) so ``finalize()``
+    /// and ``abort()`` dispatch the correct `git <op>` argv.
+    ///
+    /// Preserves any existing ``choices`` for paths that survived;
+    /// drops choices for paths that are no longer conflicted.
     public func refresh() async {
         do {
+            operation = try await MidstreamOperation.detect(repoURL: repoURL, runner: runner)
             let output = try await runner.run(["ls-files", "-u", "-z"])
             let entries = try UnmergedListing.parse(output.stdout)
             let classified = ConflictKind.classifyAll(entries, probes: probes)
@@ -187,9 +171,18 @@ public actor MergeConflictResolverViewModel {
 
     // MARK: - Finalize / abort
 
-    /// Complete the merge: `git commit` (which uses `.git/MERGE_MSG`
-    /// for the message automatically). Rejected if any path is
-    /// still unresolved.
+    /// Complete the active midstream operation, dispatching the
+    /// right `git` invocation per ``operation``:
+    ///
+    ///   - merge       → `git commit --no-edit` (writes the merge
+    ///                    commit using `.git/MERGE_MSG`)
+    ///   - rebase      → `git rebase --continue`
+    ///   - cherry-pick → `git cherry-pick --continue`
+    ///   - revert      → `git revert --continue`
+    ///   - am          → `git am --continue`
+    ///
+    /// Rejected if any path is still unresolved, if there's no
+    /// active midstream operation, or if ``conflicts`` is empty.
     public func finalize() async {
         if case .busy = state { return }
         guard !conflicts.isEmpty else {
@@ -202,18 +195,43 @@ public actor MergeConflictResolverViewModel {
             ))
             return
         }
-        await runGit(["commit", "--no-edit"])
+        guard let argv = operation.continueArguments else {
+            state = .failure(.init(
+                description: "No active midstream operation to finalize. Call refresh() first."
+            ))
+            return
+        }
+        await runGit(argv)
     }
 
-    /// Abandon the merge — `git merge --abort`. Resets working tree
-    /// to pre-merge state. All in-memory choices are dropped; the
-    /// next ``refresh()`` will return an empty inventory.
+    /// Abandon the active midstream operation, dispatching the right
+    /// `git <op> --abort` per ``operation``:
+    ///
+    ///   - merge       → `git merge --abort`
+    ///   - rebase      → `git rebase --abort`
+    ///   - cherry-pick → `git cherry-pick --abort`
+    ///   - revert      → `git revert --abort`
+    ///   - am          → `git am --abort`
+    ///
+    /// Resets working tree to its pre-op state. In-memory choices,
+    /// inventory, and resolvedPaths all clear; the next ``refresh()``
+    /// returns the now-empty inventory plus
+    /// ``MidstreamOperation/none``.
+    ///
+    /// Rejected if there's no active midstream operation.
     public func abort() async {
         if case .busy = state { return }
-        await runGit(["merge", "--abort"])
+        guard let argv = operation.abortArguments else {
+            state = .failure(.init(
+                description: "No active midstream operation to abort. Call refresh() first."
+            ))
+            return
+        }
+        await runGit(argv)
         choices = [:]
         resolvedPaths = []
         conflicts = []
+        operation = .none
     }
 
     /// Cancel the in-flight op.
@@ -245,7 +263,7 @@ public actor MergeConflictResolverViewModel {
                 let catFile = try await CatFileBatch(repoURL: repoURL)
                 defer { Task { await catFile.close() } }
                 for (conflict, choice) in batch {
-                    try await Self.applySingle(
+                    try await MergeApplyPipeline.applySingle(
                         conflict: conflict,
                         choice: choice,
                         repoURL: repoURL,
@@ -264,45 +282,8 @@ public actor MergeConflictResolverViewModel {
         await runningTask?.value
     }
 
-    private static func applySingle(
-        conflict: ClassifiedConflict,
-        choice: ConflictedPathChoice,
-        repoURL: URL,
-        runner: Runner,
-        catFile: CatFileBatch
-    ) async throws {
-        guard let stageNumber = choice.stage else {
-            throw MergeApplyError.pending(path: conflict.entry.path)
-        }
-        guard let stage = conflict.entry.stages.first(where: { $0.stage == stageNumber }) else {
-            throw MergeApplyError.missingStage(
-                path: conflict.entry.path,
-                stage: stageNumber
-            )
-        }
-        switch stage.mode {
-        case .submodule:
-            // Gitlink: stage.sha is a commit SHA, not a blob. We can't
-            // write bytes — we update the index directly.
-            let modeOctal = String(stage.mode.rawMode, radix: 8)
-            _ = try await runner.run([
-                "update-index",
-                "--add",
-                "--cacheinfo",
-                "\(modeOctal),\(stage.sha),\(conflict.entry.path)"
-            ])
-        case .regularFile, .executable, .symlink, .unknown:
-            let blob = try await catFile.read(stage.sha)
-            let target = repoURL.appendingPathComponent(conflict.entry.path)
-            let parent = target.deletingLastPathComponent()
-            try FileManager.default.createDirectory(
-                at: parent,
-                withIntermediateDirectories: true
-            )
-            try blob.content.write(to: target)
-            _ = try await runner.run(["add", "--", conflict.entry.path])
-        }
-    }
+    // Apply helpers live in MergeApplyPipeline.swift so the VM stays
+    // under SwiftLint's file-length cap as the apply surface grows.
 
     private func runGit(_ argv: [String]) async {
         state = .busy(progress: nil)
@@ -338,18 +319,4 @@ public actor MergeConflictResolverViewModel {
         runningTask = nil
         state = .failure(failure)
     }
-}
-
-/// Errors thrown by the apply pipeline. Wrapped into
-/// ``TaskWindowState/failure`` for the VM's external surface; the
-/// typed cases exist so diagnostics tooling can categorize.
-public enum MergeApplyError: Error, Equatable, Sendable {
-    /// Caller asked to apply a path whose choice is still
-    /// ``ConflictedPathChoice/pending``.
-    case pending(path: String)
-
-    /// The requested stage isn't present in the conflict's entry
-    /// (e.g. ``ConflictedPathChoice/base`` asked for an add/add
-    /// conflict). The integer is the stage that was requested.
-    case missingStage(path: String, stage: Int)
 }
