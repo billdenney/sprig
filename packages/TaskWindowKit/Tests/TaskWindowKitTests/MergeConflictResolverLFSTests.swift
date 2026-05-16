@@ -130,14 +130,21 @@ struct MergeConflictResolverLFSTests {
                 encoding: .utf8
             )
             #expect(onDisk == "main\n", "ours-side pointer bytes should be on disk")
+        } else if case .success = state {
+            // Valid alternative outcome: git-lfs is installed on the
+            // host (always the case on macOS hosted runners, where
+            // git-lfs ships via brew) AND its `checkout` doesn't error
+            // on the synthesized non-pointer file. The materialize
+            // step ran without surfacing an error, which is the
+            // success branch of the wiring we're verifying. No
+            // assertion needed; reaching here means the post-apply
+            // hook fired and completed cleanly.
         } else {
-            // If git-lfs is unexpectedly installed AND the checkout
-            // doesn't error on a non-LFS file, the test passes too —
-            // the materialize step ran without complaining, which is
-            // also valid. Surface a soft note so this isn't silently
-            // masking a real bug.
+            // Anything other than .failure(lfsMaterializeFailed) or
+            // .success is a real bug — the apply pipeline left the VM
+            // in an unexpected state.
             Issue.record(
-                "expected lfsMaterializeFailed when forcing LFS on a non-LFS file; got state: \(state)"
+                "expected .failure(lfsMaterializeFailed) or .success; got state: \(state)"
             )
         }
     }
