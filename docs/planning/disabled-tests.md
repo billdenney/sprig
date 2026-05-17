@@ -4,23 +4,24 @@ The list of tests currently disabled on CI, why, and what unblocks re-enabling. 
 
 ## Currently disabled
 
-### `NamedPipeTransportTests` (multi-test coverage) — limited to 1 of 8 tests on Windows, 2026-05-16
+### `NamedPipeTransportTests` (all tests) — disabled on Windows, 2026-05-16
 
-- **Where:** `packages/TransportKit/Tests/TransportKitTests/NamedPipeTransportTests.swift`. The suite contains only the smoke test `singleFrameRoundTrip`. Seven additional tests covering `multipleFramesPreserveFraming`, `emptyFrameRoundTrip`, `bidirectionalSend`, `closeFinishesStream`, `sendAfterCloseThrows`, `peerCloseSurfacesAsStreamFinish`, and `oversizedFrameRejected` were verified passing **individually** during the introducing PR (via `swift test --filter <test-name>`) but are omitted from the source until the multi-test-hang root cause is fixed.
-- **Symptom:** when two or more `NamedPipeTransport` tests run inside the same `swift-test` process, the second test gets stuck before printing its `◊ Test started` marker. The next `swift-test` invocation can't rebuild `SprigPackageTests.xctest` (link fails with `permission denied`), suggesting a lingering process / file lock from the prior bundle.
-- **Suspected root cause:** between-test cleanup of `NamedPipeTransport` instances leaves some Windows-side resource (pipe handle, GCD-queued read loop, or the `SprigPackageTests.xctest` image itself) blocked. Tracing through SSH didn't surface the actual stuck call. The hang reproduces deterministically on the local dockur/windows VM; not specific to hosted-CI load.
-- **What's been tried** (none fixed the multi-test hang):
+- **Where:** `packages/TransportKit/Tests/TransportKitTests/NamedPipeTransportTests.swift`. The single smoke test `singleFrameRoundTrip` is marked `.disabled(...)`. Seven additional tests (`multipleFramesPreserveFraming`, `emptyFrameRoundTrip`, `bidirectionalSend`, `closeFinishesStream`, `sendAfterCloseThrows`, `peerCloseSurfacesAsStreamFinish`, `oversizedFrameRejected`) were verified passing **individually** on the local dockur/windows VM via `swift test --filter <test-name>` during PR #111 but are omitted from source until the hang is understood.
+- **Symptom (local + hosted CI, two flavors of the same root cause):**
+  - **Local VM:** when two or more `NamedPipeTransport` tests run inside the same `swift-test` process, the second test gets stuck before printing its `◊ Test started` marker. The next `swift-test` invocation can't rebuild `SprigPackageTests.xctest` (link fails with `permission denied`), suggesting a lingering file lock.
+  - **Hosted Windows CI (PR #111 first run):** even the lone smoke test in the new file caused the `Run tests` step to hang past the workflow's old no-timeout setting — over an hour in `in_progress` after build completed. Could not get test output because the job never returned. PR #111 adds `timeout-minutes: 30` to the Windows workflow as a failsafe so future hangs fail fast.
+- **Suspected root cause:** the GCD-hosted read loop or `ConnectNamedPipe` blocking-I/O hold interacts badly with the full Sprig test bundle's process state. Tracing didn't surface the actual stuck call. The hang reproduces on the local dockur/windows VM with the multi-test scenario; hosted CI exposes a worse variant that affects even a single test in the new file.
+- **What's been tried** (none fixed the hang in the multi-test scenario):
   - swift-testing `.serialized` suite trait
   - `--no-parallel` swift-test flag
-  - Moving `ReadFile` / `ConnectNamedPipe` off the Swift cooperative pool onto `DispatchQueue.global(qos: .userInitiated)` to keep blocking I/O off the cooperative scheduler
-  - Replacing `defer { Task { close() } }` with a `withConnectedPair` helper that closes both ends synchronously before returning
+  - Moving `ReadFile` / `ConnectNamedPipe` off Swift's cooperative pool onto `DispatchQueue.global(qos: .userInitiated)`
+  - Synchronous cleanup via a `withConnectedPair` helper instead of deferred close-Task
   - `CancelIoEx` + `CloseHandle` in `close()` so the peer's `ReadFile` returns `ERROR_BROKEN_PIPE`
   - Killing all `Sprig*` / `swift*` / `clang*` / `lld*` processes between runs and removing the locked `.xctest` file
   - Restarting the dockur/windows container
-  - Timeouts up to 8 minutes
-- **What unblocks re-enabling:** the proper long-term fix is OVERLAPPED I/O + `CreateThreadpoolIo` (an IOCP-based async transport) -- documented in `docs/research/windows-shell-apis.md` as the production pattern. That refactor is also required by the multi-client server (the next M2-Win slice), so the re-enables ride along with it.
-- **Why this is OK to limit on Windows for now:** production use is one `NamedPipeTransport` per agent connection, lived for the agent's lifetime. The multi-instance test scenario doesn't reflect real production usage. The byte-level Transport contract is also covered on every platform by `InProcessTransport` tests (`InProcessTransportTests.swift`), which exercise the protocol's invariants without per-OS blocking I/O. The retained smoke test exercises every load-bearing component (`server`, `client`, `connectedPair`, length-prefix framing, GCD-hosted read loop, lock-protected send, end-to-end byte round-trip), so a structural regression to the production code still fails CI.
-- **Disable PR:** `feat/transportkit-windows-namedpipe`.
+- **What unblocks re-enabling:** the proper long-term fix is OVERLAPPED I/O + `CreateThreadpoolIo` (an IOCP-based async transport) — documented in `docs/research/windows-shell-apis.md` as the production pattern + ADR 0067 as the planned next-slice refactor. That rewrite also enables the multi-client server, so the re-enables ride along with it.
+- **Why this is OK on Windows for now:** production use is one `NamedPipeTransport` per agent connection, lived for the agent's lifetime. The single-test scenario isn't representative of production load either, but the disable buys time for the right structural fix. The byte-level `Transport` contract is also covered on every platform by `InProcessTransport` tests (`InProcessTransportTests.swift`), which exercise the protocol's invariants without per-OS blocking I/O. Coverage of the Windows `NamedPipeTransport` itself is reduced to "compiles cleanly" until the IOCP refactor lands.
+- **Disable PR:** `feat/transportkit-windows-namedpipe` (PR #111).
 - **Owner:** me (re-enable when the IOCP-based variant lands).
 
 ## Format

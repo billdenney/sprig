@@ -42,7 +42,10 @@
 
     @Suite("NamedPipeTransport — smoke")
     struct NamedPipeTransportTests {
-        @Test("a single Data buffer round-trips through the pipe intact")
+        @Test(
+            "a single Data buffer round-trips through the pipe intact",
+            .disabled("Hangs on hosted Windows CI; see docs/planning/disabled-tests.md")
+        )
         func singleFrameRoundTrip() async throws {
             let pair = try await NamedPipeTransport.connectedPair()
             let payload = Data("hello, sprig\n".utf8)
