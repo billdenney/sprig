@@ -20,6 +20,12 @@ on:
 jobs:
   build-test:
     runs-on: windows-2022
+    # Failsafe: the underlying GitHub Actions default is 6 hours, which
+    # is what bit PR #111's first Windows run (a hung test step kept
+    # the job alive for an hour-plus before we noticed). 30 minutes is
+    # generous for a healthy run (typical: ~10 min build + ~50 s test)
+    # while still failing-fast on a true hang.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
