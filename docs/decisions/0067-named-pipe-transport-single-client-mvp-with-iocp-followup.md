@@ -1,50 +1,51 @@
-# ADR 0067 — Named-pipe transport: single-client blocking-IO MVP, IOCP refactor for multi-client follow-up
+# ADR 0067 — Named-pipe transport: OVERLAPPED single-client MVP, multi-client + `CreateThreadpoolIo` follow-up
 
 ## Status
 
-Accepted (2026-05-16). Companion: ADR 0048 (Tier-2 cross-platform adapter rules), `docs/research/windows-shell-apis.md` "Named-pipe IPC: the server side".
+Accepted (2026-05-16, amended in-PR after the synchronous-IO attempt deadlocked CI). Companion: ADR 0048 (Tier-2 cross-platform adapter rules), `docs/research/windows-shell-apis.md` "Named-pipe IPC: the server side".
 
 ## Context
 
-`TransportKit/Windows` needs a real implementation of the byte-oriented `Transport` protocol so M2-Win's shell extension + Windows Service host can talk to `SprigAgent` over IPC. Windows' canonical IPC primitive is named pipes (`CreateNamedPipeW` server side, `CreateFileW` client side); every existing Sprig prior-art reference (TortoiseGit's `TGitCache.exe`, TortoiseSVN's `TSVNCache.exe`, OneDrive's overlay daemon) uses them.
+`TransportKit/Windows` needs a real implementation of the byte-oriented `Transport` protocol so M2-Win's shell extension + Windows Service host can talk to `SprigAgent` over IPC. Windows' canonical IPC primitive is named pipes; every Sprig prior-art reference (TortoiseGit, TortoiseSVN, OneDrive) uses them.
 
 Two architectural questions had to be answered before a usable transport could ship:
 
-1. **Single-client vs multi-client server**: real M2-Win agents serve every Explorer process on the desktop (typically 1–4 instances per session). The native named-pipe pattern for multi-client uses `PIPE_UNLIMITED_INSTANCES` with an accept loop that creates a fresh pipe instance for each connection.
-2. **Synchronous I/O vs OVERLAPPED / IOCP**: blocking `ReadFile` is simpler to wire to Swift's `AsyncStream<Data>`, but OVERLAPPED I/O + `CreateThreadpoolIo` is the production-grade pattern that scales beyond a handful of pipe instances.
-
-A simultaneous answer to both ("multi-client + IOCP from day one") is the right end state, but doing it in one swing is a large, error-prone slice for a Swift-on-Windows codebase. The IOCP plumbing needs `OVERLAPPED` structs, completion callbacks, `CancelIoEx` plumbing for cancellation, and a careful AsyncStream wrapper — none of which are present in the existing codebase.
+1. **Single-client vs multi-client server**: real M2-Win agents serve every Explorer process on the desktop (typically 1–4 instances per session). The native named-pipe pattern for multi-client uses `PIPE_UNLIMITED_INSTANCES` with an accept loop that creates a fresh pipe instance for each connection, typically with `CreateThreadpoolIo` for async fan-out.
+2. **Synchronous I/O vs OVERLAPPED**: the initial attempt at this ADR was "synchronous I/O is simpler; ship that as the MVP, IOCP later." That decision was reversed *in-PR* (see "What changed and why" below) after the synchronous-I/O variant deadlocked hosted Windows CI: `CancelIoEx` is a documented no-op for non-OVERLAPPED I/O, and `CloseHandle` on a handle with pending blocking I/O is documented as undefined behavior. With those two cancellation mechanisms unavailable, the read loop's blocking `ReadFile` could not be deterministically terminated on `close()`. On hosted CI the race always tipped the wrong way; the loop never exited, GCD's pool eventually saturated, the entire test step hung.
 
 ## Decision
 
-Ship a **single-client, blocking-I/O `NamedPipeTransport`** as the M2-Win foundation primitive. The multi-client accept loop and the OVERLAPPED + IOCP refactor land together as the next M2-Win slice; the single-client primitive's API surface is shaped to compose under either future implementation without breakage.
+Ship a **single-client, OVERLAPPED-I/O `NamedPipeTransport`** as the M2-Win foundation primitive. The multi-client accept loop + `CreateThreadpoolIo`-based fan-out remain the next M2-Win slice; the single-client primitive's API surface is shaped to compose under that future wrapper without breakage.
 
 Specific decisions baked into the MVP:
 
+- **OVERLAPPED I/O on every read, write, and accept.** `CreateNamedPipeW` / `CreateFileW` use `FILE_FLAG_OVERLAPPED`. Every `ReadFile`, `WriteFile`, and `ConnectNamedPipe` carries an `OVERLAPPED` struct with a completion event. Reads wait on `WaitForMultipleObjects([readCompleteEvent, cancelEvent])`; `close()` signals `cancelEvent` and the read loop wakes deterministically, cancels its pending I/O via `CancelIoEx` (which **does** work for OVERLAPPED I/O), signals a `readLoopExitedEvent`, and exits. `close()` then waits for `readLoopExitedEvent` on a background GCD thread (so the cooperative pool isn't blocked) before closing the pipe handle. This eliminates every "undefined behavior" code path the synchronous variant relied on.
 - **Byte-mode pipe** (`PIPE_TYPE_BYTE | PIPE_READMODE_BYTE`), with 4-byte little-endian length-prefix framing in our own code. Matches XPC's framing on macOS and the future D-Bus/UNIX-socket path on Linux, keeping `IPCSchema.EnvelopeCodec` single-implementation across every transport. Deliberately not `PIPE_TYPE_MESSAGE` (which has its own length encoding) — the framing benefit is illusory at our payload sizes (largest legitimate envelope ~10 MB), and using it would fork the codec.
-- **Read loop on `DispatchQueue.global(qos: .userInitiated)`, not Swift's cooperative pool.** Blocking `ReadFile` holds an OS thread for the duration of the read; pinning even a handful of cooperative-pool threads with blocking I/O starves every other async task in the process (including the test's own teardown code). GCD's `global` queue has dynamic thread growth and stays out of the cooperative scheduler's way entirely. The IOCP refactor will eliminate the blocking-thread cost; until then, GCD is the right pool.
+- **Read loop on `DispatchQueue.global(qos: .userInitiated)`.** Even with OVERLAPPED I/O, `WaitForMultipleObjects` is a blocking OS call; running it on GCD's `global` queue keeps Swift's cooperative pool free for other async work. GCD has dynamic thread growth + a much larger ceiling, so per-transport read loops don't compete with the cooperative scheduler.
 - **Sends serialize via `Synchronization.Mutex<Void>`** (Swift 6's `Synchronization` module). The Windows Swift toolchain marks `NSLock.lock`/`unlock` as unavailable from async contexts; `Mutex` is the portable async-safe replacement.
-- **`close()` performs `CancelIoEx` + `CloseHandle` + `finish()` in that order.** The cancel wakes the local blocking read; the close-handle is what propagates `ERROR_BROKEN_PIPE` to the peer's next read, which is how the peer learns we disconnected. `deinit` is best-effort cleanup gated on a close-state flag so a double-`CloseHandle` (undefined behavior on Windows — can close an unrelated handle reallocated to the same value) is impossible.
-- **`SendableHandle` wrapper.** `HANDLE` is `UnsafeMutableRawPointer` and doesn't carry `Sendable` conformance, but Win32 pipe handles are thread-safe to share per MSDN; the `@unchecked Sendable` wrapper makes that claim auditable.
+- **`@preconcurrency import WinSDK`.** Win32 types like `OVERLAPPED`, `HANDLE`, etc. don't carry `Sendable` conformance. They're documented as thread-safe for their MSDN-defined usage; the `@preconcurrency` attribute downgrades the resulting Sendable-strictness errors to warnings, with explicit `SendableHandle` wrappers where we cross GCD boundaries to make the safety claim auditable.
+- **`close()` blocks briefly waiting for the read loop to exit.** Bounded at 5 s so a buggy loop can't deadlock the caller forever; the healthy path is microseconds. Run on a background GCD thread so the cooperative pool stays unblocked while the wait happens.
 
-Explicitly deferred to the IOCP follow-up:
+Explicitly deferred to the multi-client follow-up:
 
-- **Multi-client accept loop with `PIPE_UNLIMITED_INSTANCES`.** Single instance per `server()` call for now; agents serve one client per `NamedPipeTransport` for now (which won't ship until the next slice anyway).
+- **Multi-client accept loop with `PIPE_UNLIMITED_INSTANCES`.** Single instance per `server()` call; the wrapper above this primitive will spawn one `NamedPipeTransport` per accepted client.
+- **`CreateThreadpoolIo` fan-out.** This single-client MVP uses one GCD thread per transport, which is right-sized for the agent's connection count (1–4 Explorer instances per session) but doesn't scale to dozens. The multi-client wrapper introduces threadpool-based completion handling.
 - **Per-user-SID DACL** restricting the pipe to the owning user's logon SID (per the windows-shell-apis.md "DACL: per-user-SID restriction" section). The default security descriptor grants `Everyone`; production agents will override.
-- **Client reconnect on broken pipe.** The shell-extension client wraps each round-trip in `WaitNamedPipe` + jittered retry on `ERROR_BROKEN_PIPE`. Lives in the agent-side wrapper, not the transport.
-- **OVERLAPPED I/O + `CreateThreadpoolIo` (IOCP)** for async-friendly I/O. This is what scales beyond ~one client per pipe name and what gets rid of the blocking-thread hold during reads.
+- **Client reconnect on broken pipe.** Lives in the agent-side wrapper, not the transport.
 
 ## Test coverage
 
-The named-pipe transport's smoke test (`singleFrameRoundTrip`) exercises every load-bearing component (`server`, `client`, `connectedPair`, length-prefix framing, GCD-hosted read loop, lock-protected send, end-to-end byte round-trip). Seven additional tests (multiple frames, empty frame, bidirectional send, close finishes stream, send-after-close throws, peer-close surfaces as stream finish, oversized frame rejected) **each pass individually** via `swift test --filter <test-name>` on the Windows VM, but triggering ≥2 of them in the same `swift-test` process causes a hang whose root cause is opaque (build-time `permission denied` on `SprigPackageTests.xctest` rewrites suggests a lingering file lock from the previous test bundle, possibly Defender real-time scanning). The follow-up tests are tracked in `docs/planning/disabled-tests.md` and rejoin the suite when the IOCP refactor lands (which will rewrite the affected code paths anyway).
-
-The byte-level `Transport` contract is also covered cross-platform by `InProcessTransportTests`, so the protocol's invariants stay protected even with the Windows multi-test gap.
+All 8 byte-level contract tests pass on the local Windows VM in 0.064 s when run together in one `swift-test` process: `singleFrameRoundTrip`, `multipleFramesPreserveFraming`, `emptyFrameRoundTrip`, `bidirectionalSend`, `closeFinishesStream`, `sendAfterCloseThrows`, `peerCloseSurfacesAsStreamFinish`, `oversizedFrameRejected`. The multi-test deadlock that motivated the in-PR refactor is gone. Coverage also rides on the cross-platform `InProcessTransportTests` for protocol-invariant checks that don't need a per-OS blocking-I/O surface.
 
 ## Alternatives considered
 
-### IOCP from day one
+### Synchronous I/O + `CloseHandle`-to-cancel (the original MVP plan)
 
-The "right" architecture, but a much larger slice. Risk-adjusted ROI says ship the single-client primitive first (it's enough for the next M2-Win slice's needs) and tackle IOCP when we're ready to write the multi-client accept loop simultaneously. Doing both at once would have multiplied the unknowns.
+Tried first; deadlocked on the multi-test scenario locally and hung the entire hosted Windows CI step. The two mechanisms it relied on for cancellation are documented as either no-ops (`CancelIoEx` on non-OVERLAPPED handles) or undefined behavior (`CloseHandle` on handles with pending I/O). Recovered by refactoring to OVERLAPPED.
+
+### Synchronous I/O + `CancelSynchronousIo` on the read thread's handle
+
+`CancelSynchronousIo` cancels synchronous I/O on a *specific* thread, identified by a Win32 thread handle. Would require `OpenThread(GetCurrentThreadId(), …)` from inside the read loop to grab a self-handle, store it, and have `close()` retrieve it. Tried in-PR; hit Swift 6 strict-concurrency hurdles around `Mutex<HANDLE?>` and didn't yield clean results in the time available. OVERLAPPED is the cleaner end-state anyway and obsoletes this approach.
 
 ### Sockets instead of named pipes
 
@@ -54,12 +55,12 @@ Considered briefly. Loopback TCP sockets are cross-platform-uniform but lose the
 
 The OS-level message-boundary feature would replace our 4-byte length prefix on Windows. Rejected because it would fork `IPCSchema.EnvelopeCodec` between Windows (no length prefix) and every other transport (length prefix); the consistency win across XPC / D-Bus / pipe outweighs the marginal byte savings.
 
-### Swift `Task.detached` for the read loop
-
-Tried first; quickly hit deadlocks under multi-test execution because blocking `ReadFile` on the cooperative pool starves every other async task in the process. The GCD switch was the fix.
-
 ## Consequences
 
-- M2-Win's next slice can build the Windows Service host on top of `NamedPipeTransport.server(...)` as-is, treating each service host instance as serving one client. Production won't ship one-client-per-host of course, but the slice ordering is sound.
-- The IOCP refactor that lands next becomes a near-pure rewrite of the I/O internals: the public API (`server`, `client`, `connectedPair`, `send`, `messages`, `close`) stays unchanged; callers don't notice. The test coverage gap (7 tests disabled) closes simultaneously because the IOCP rewrite changes the GCD-vs-cooperative-pool tradeoff entirely.
+- M2-Win's next slice (the Windows Service host) can build on top of `NamedPipeTransport.server(...)` as-is, treating each service host instance as serving one client.
+- The multi-client wrapper is a pure additive layer above this primitive — no internal rewrite required. `CreateThreadpoolIo` slots into the wrapper, not the primitive.
 - A future contributor reading this ADR + the `NamedPipeTransport.swift` header comment + the windows-shell-apis.md design notes has enough context to extend the transport without re-deriving every decision.
+
+## What changed and why (in-PR amendment, 2026-05-19)
+
+The original draft of this ADR (committed earlier in PR #111) accepted "ship synchronous I/O first; do IOCP later." That decision was reversed mid-PR after hosted Windows CI hung for over an hour on the synchronous variant's `Run tests` step — the cancellation mechanisms it relied on were documented as no-ops / undefined behavior, and CI environment differences (Defender holds, scheduler quirks, parallel-test load) tipped the race against us reliably. The OVERLAPPED refactor landed within the same PR; the ADR was rewritten to match. The original "blocking-IO + IOCP-later" framing is preserved above under "Alternatives considered" so the failed approach is documented for future contributors.

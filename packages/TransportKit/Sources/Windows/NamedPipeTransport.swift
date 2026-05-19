@@ -1,8 +1,7 @@
 // NamedPipeTransport.swift
 //
 // Windows named-pipe ``Transport`` implementation. Design rationale +
-// alternatives considered: ADR 0067 (single-client blocking-IO MVP,
-// IOCP refactor as the next slice). Reference patterns:
+// alternatives considered: ADR 0067. Reference patterns:
 // `docs/research/windows-shell-apis.md` "Named-pipe IPC: the server
 // side".
 //
@@ -13,53 +12,63 @@
 // length prefix followed by the JSON envelope body.
 //
 // Tier 2 platform impl. The Tier 1 `Transport` protocol is portable;
-// only this file is Windows-specific. Mac equivalent (XPC) lives in
-// `Sources/Mac/TransportKitMac.swift`; Linux equivalent (D-Bus /
-// UNIX socket) lands in `Sources/Linux/` when prioritized.
+// only this file (+ companion files) is Windows-specific. Mac
+// equivalent (XPC) lives in `Sources/Mac/TransportKitMac.swift`;
+// Linux equivalent (D-Bus / UNIX socket) lands in `Sources/Linux/`
+// when prioritized.
 //
-// Design notes:
-// - Byte mode (`PIPE_TYPE_BYTE | PIPE_READMODE_BYTE`), 4-byte LE
+// File split (SwiftLint file_length / type_body caps):
+// - `NamedPipeTransport.swift` (this file) -- class core, lifecycle,
+//   send, messages, close, read loop.
+// - `NamedPipeTransport+Factories.swift` -- public + test-helper
+//   factories (`server`, `client`, `connectedPair`).
+// - `NamedPipeIO.swift` -- internal value types + low-level
+//   OVERLAPPED-read helpers (`SendableHandle`, `NamedPipeIO`).
+//
+// Design notes (see ADR 0067 for the full alternatives-considered):
+// - **OVERLAPPED I/O on every read, write, and accept.** Synchronous
+//   ReadFile cannot be cancelled by `CancelIoEx` (it's a no-op for
+//   non-OVERLAPPED I/O), and relying on `CloseHandle` to unblock
+//   pending I/O is documented as undefined behavior. With OVERLAPPED,
+//   every blocking step is a `WaitForMultipleObjects` on
+//   `[ioCompleteEvent, cancelEvent]`; ``close()`` signals
+//   ``cancelEvent`` and the loop wakes deterministically.
+// - **Byte mode** (`PIPE_TYPE_BYTE | PIPE_READMODE_BYTE`), 4-byte LE
 //   length prefix; matches the framing other transports use so
 //   `IPCSchema.EnvelopeCodec` stays single-impl.
-// - Read loop runs on `DispatchQueue.global(qos:)`, NOT Swift's
-//   cooperative pool: blocking `ReadFile` would starve the cooperative
-//   pool if multiple transports were active. See `startReadLoop` for
-//   the full rationale.
-// - `send(_:)` serializes concurrent writes via `Mutex<Void>` (Swift 6
-//   `Synchronization`) -- `NSLock.lock` is `@unavailable` from async
-//   on the Windows toolchain.
-// - `close()` runs `CancelIoEx` + `CloseHandle`. Cancelling the I/O
-//   wakes the read loop locally; closing the handle is what makes the
-//   PEER's next `ReadFile` see `ERROR_BROKEN_PIPE` (peer-close
-//   propagation).
+// - **`send(_:)` serializes concurrent writes** via `Mutex<Void>`
+//   (Swift 6 `Synchronization`) -- `NSLock.lock` is `@unavailable`
+//   from async on the Windows toolchain.
+// - **``close()`` coordinates with the read loop** via a
+//   ``readLoopExitedEvent`` (manual-reset): signal cancel, await the
+//   loop's exit signal off the cooperative pool, then close all
+//   handles. This makes close() deterministic and frees the loop's
+//   GCD thread back to the pool.
 //
 // Deliberately deferred (follow-up slices):
 // - Multi-client server (the agent's accept loop wraps this primitive).
-// - DACL: per-user-SID restriction (production agent must override
-//   the default `Everyone` SD -- see `docs/research/windows-shell-apis.md`).
+// - DACL: per-user-SID restriction.
 // - Client reconnect on `ERROR_BROKEN_PIPE` (agent-side wrapper).
-// - OVERLAPPED I/O + `CreateThreadpoolIo` for async-friendly reads
-//   (the IOCP refactor; also what the multi-client server needs).
+// - `CreateThreadpoolIo`-based async fan-out for the multi-client
+//   server -- this single-client primitive uses one GCD thread per
+//   transport, right-sized for the agent's connection count.
 
 #if os(Windows)
     import Foundation
     import Synchronization
-    import WinSDK
 
-    /// Sendable wrapper for `HANDLE` (`UnsafeMutableRawPointer`),
-    /// which doesn't carry `Sendable` conformance. The Win32 pipe
-    /// handle is process-local + thread-safe to use across threads
-    /// per MSDN, so passing it into GCD closures via this wrapper is
-    /// safe in practice even though the compiler can't prove it.
-    private struct SendableHandle: @unchecked Sendable {
-        let raw: HANDLE
-    }
+    // `@preconcurrency` treats Win32 types as Sendable-warnings rather
+    // than errors. Necessary for `OVERLAPPED`, `HANDLE`, etc. which are
+    // C types without Sendable conformance but documented as safe to
+    // share across threads in their MSDN-defined usage.
+    @preconcurrency import WinSDK
 
     /// Windows named-pipe ``Transport`` -- one endpoint, one peer.
     /// Construct via ``server(pipeName:)`` (agent side, waits for one
-    /// client) or ``client(pipeName:)`` (extension side, connects to
-    /// an existing pipe). ``connectedPair(pipeName:)`` is the test
-    /// helper that wires both ends inside one process.
+    /// client), ``client(pipeName:)`` (extension side, connects to an
+    /// existing pipe), or ``connectedPair(pipeName:)`` (test helper
+    /// that wires both ends inside one process). See the
+    /// `+Factories` companion file.
     public final class NamedPipeTransport: Transport, @unchecked Sendable {
         /// Maximum frame size accepted from the peer. Bounds memory
         /// when a peer claims an absurd length prefix. 16 MB sits
@@ -68,153 +77,74 @@
         /// address-space limits of a 64-bit process.
         public static let maxFrameSize: Int = 16 * 1024 * 1024
 
-        /// Win32 handle to the open pipe. Owned; closed in
-        /// ``close()`` and finalized in `deinit`.
-        private let handle: HANDLE
+        let handle: HANDLE
+        private let readCompleteEvent: HANDLE
+        private let writeCompleteEvent: HANDLE
+        private let cancelEvent: HANDLE
+        private let readLoopExitedEvent: HANDLE
 
         private let inbound: AsyncStream<Data>
         private let inboundContinuation: AsyncStream<Data>.Continuation
 
-        /// Serializes concurrent ``send(_:)`` calls so frame bytes
-        /// don't interleave on the wire. `Mutex` (Swift 6
-        /// `Synchronization` module) is the portable async-safe
-        /// alternative to `NSLock` -- Windows Swift toolchain marks
-        /// `NSLock.lock`/`unlock` unavailable from async contexts.
         private let sendLock = Mutex<Void>(())
-
-        /// Latched once ``close()`` runs (or the read loop discovers
-        /// the peer closed). Reads/writes after this throw
-        /// ``TransportError/closed``.
         private let closeState = Mutex<Bool>(false)
 
         // MARK: - Lifecycle
 
-        private init(handle: HANDLE) {
+        init(handle: HANDLE) throws {
             self.handle = handle
+            let events = try Self.makeEvents()
+            readCompleteEvent = events[0]
+            writeCompleteEvent = events[1]
+            cancelEvent = events[2]
+            readLoopExitedEvent = events[3]
+
             let (stream, continuation) = AsyncStream<Data>.makeStream()
             inbound = stream
             inboundContinuation = continuation
+
             startReadLoop()
         }
 
         deinit {
-            // Best-effort cleanup; `close()` is the intended path.
-            // The closeState gate prevents double-`CloseHandle`
-            // (undefined behavior on Windows -- can close an unrelated
-            // handle reallocated to the same value).
+            // Best-effort cleanup if the caller dropped us without
+            // calling `close()`. The closeState gate prevents
+            // double-`CloseHandle` (undefined behavior on Windows).
             let alreadyClosed = closeState.withLock { $0 }
             if !alreadyClosed {
+                SetEvent(cancelEvent)
+                // Give the read loop ~1 s to exit before we close
+                // the pipe handle; longer waits in deinit are unsafe.
+                _ = WaitForSingleObject(readLoopExitedEvent, 1000)
                 CloseHandle(handle)
             }
+            CloseHandle(readCompleteEvent)
+            CloseHandle(writeCompleteEvent)
+            CloseHandle(cancelEvent)
+            CloseHandle(readLoopExitedEvent)
         }
 
-        // MARK: - Factories
-
-        /// Create the server end of a named pipe and wait for a single
-        /// client to connect. The pipe is created at
-        /// `\\.\pipe\<pipeName>` and stays alive for one client; for
-        /// multi-client serving, wrap an accept loop around this.
-        ///
-        /// Throws ``TransportError/sendFailed`` carrying the Win32
-        /// error code if `CreateNamedPipeW` or `ConnectNamedPipe`
-        /// fails.
-        public static func server(pipeName: String) async throws -> NamedPipeTransport {
-            let fullName = canonicalPipePath(pipeName)
-            let handle = fullName.withCString(encodedAs: UTF16.self) { wide in
-                CreateNamedPipeW(
-                    wide,
-                    DWORD(PIPE_ACCESS_DUPLEX),
-                    DWORD(PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT),
-                    1, // single instance for this MVP; multi-client wrapper above
-                    DWORD(bufferSize),
-                    DWORD(bufferSize),
-                    0, // default timeout (used only by WaitNamedPipe)
-                    nil // default security descriptor -- production
-                    //     agent overrides with a SID-restricted DACL
-                )
-            }
-            guard let handle, handle != INVALID_HANDLE_VALUE else {
-                throw TransportError.sendFailed(
-                    reason: "CreateNamedPipeW(\(fullName)) failed: GetLastError=\(GetLastError())"
-                )
-            }
-
-            // Wait for the client. `ConnectNamedPipe` with a NULL
-            // OVERLAPPED blocks the calling thread; we run it on
-            // GCD's global queue rather than the Swift cooperative
-            // pool so the cooperative pool stays free for other
-            // async work (see the rationale on `startReadLoop` for
-            // why blocking I/O on the cooperative pool is a deadlock
-            // hazard). `ERROR_PIPE_CONNECTED` means the client beat
-            // us to the connect call -- still success. Cooperative
-            // cancellation isn't wired through; a caller that cancels
-            // during accept leaks the pipe instance until a peer
-            // attempts to connect or the process exits. Adding proper
-            // cancellation requires OVERLAPPED + IOCP, which lands
-            // with the multi-client server in a follow-up.
-            let sendable = SendableHandle(raw: handle)
-            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    if ConnectNamedPipe(sendable.raw, nil) == false {
-                        let err = GetLastError()
-                        if err != ERROR_PIPE_CONNECTED {
-                            CloseHandle(sendable.raw)
-                            cont.resume(throwing: TransportError.sendFailed(
-                                reason: "ConnectNamedPipe failed: GetLastError=\(err)"
-                            ))
-                            return
-                        }
+        /// Create the four manual-reset events the transport needs,
+        /// in this order: read-complete, write-complete, cancel,
+        /// read-loop-exited. Cleans up on partial failure -- a half-
+        /// initialized transport is a leak hazard the public init
+        /// wants to avoid.
+        private static func makeEvents() throws -> [HANDLE] {
+            var events: [HANDLE] = []
+            events.reserveCapacity(4)
+            for label in ["readComplete", "writeComplete", "cancel", "readLoopExited"] {
+                guard let ev = CreateEventW(nil, true, false, nil) else {
+                    let err = GetLastError()
+                    for h in events {
+                        CloseHandle(h)
                     }
-                    cont.resume()
+                    throw TransportError.sendFailed(
+                        reason: "CreateEventW(\(label)) failed: GetLastError=\(err)"
+                    )
                 }
+                events.append(ev)
             }
-
-            return NamedPipeTransport(handle: handle)
-        }
-
-        /// Connect to an existing named pipe as a client. The pipe at
-        /// `\\.\pipe\<pipeName>` must already exist (i.e. some other
-        /// process has called ``server(pipeName:)`` or equivalent).
-        ///
-        /// Throws ``TransportError/sendFailed`` if `CreateFileW`
-        /// fails -- usual case is `ERROR_FILE_NOT_FOUND` (no server)
-        /// or `ERROR_PIPE_BUSY` (server saturated; caller should
-        /// `WaitNamedPipe` + retry).
-        public static func client(pipeName: String) async throws -> NamedPipeTransport {
-            let fullName = canonicalPipePath(pipeName)
-            let handle = fullName.withCString(encodedAs: UTF16.self) { wide in
-                CreateFileW(
-                    wide,
-                    DWORD(GENERIC_READ) | DWORD(GENERIC_WRITE),
-                    0, // no sharing -- one client per server instance
-                    nil,
-                    DWORD(OPEN_EXISTING),
-                    0, // synchronous I/O; future async variant goes here
-                    nil
-                )
-            }
-            guard let handle, handle != INVALID_HANDLE_VALUE else {
-                throw TransportError.sendFailed(
-                    reason: "CreateFileW(\(fullName)) failed: GetLastError=\(GetLastError())"
-                )
-            }
-            return NamedPipeTransport(handle: handle)
-        }
-
-        /// Test convenience: spin up a server end, connect a client
-        /// end to it, return both wired together. Uses a UUID-suffixed
-        /// pipe name so concurrent test runs don't collide.
-        public static func connectedPair(
-            pipeName: String = "sprig-test-\(UUID().uuidString)"
-        ) async throws -> (server: NamedPipeTransport, client: NamedPipeTransport) {
-            async let serverEnd = server(pipeName: pipeName)
-            // Tiny delay so the server's ConnectNamedPipe call is
-            // posted before the client's CreateFileW races in. Without
-            // it, the client occasionally beats the server's
-            // CreateNamedPipeW and gets ERROR_FILE_NOT_FOUND.
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            let clientEnd = try await client(pipeName: pipeName)
-            return try await (serverEnd, clientEnd)
+            return events
         }
 
         // MARK: - Transport conformance
@@ -231,10 +161,9 @@
             var lengthLE = UInt32(data.count).littleEndian
             let header = withUnsafeBytes(of: &lengthLE) { Data($0) }
 
-            // Hold `sendLock` across both writeAll calls so concurrent
-            // sends don't interleave (header from caller A followed by
-            // payload from caller B). `Mutex.withLock` rethrows so the
-            // `writeAll` errors surface unchanged.
+            // Hold `sendLock` across both writes so concurrent sends
+            // don't interleave (header from caller A then payload
+            // from caller B).
             try sendLock.withLock { _ in
                 try writeAll(header)
                 try writeAll(data)
@@ -246,8 +175,6 @@
         }
 
         public func close() async {
-            // Atomically transition isClosed false → true; bail if
-            // already closed (idempotent per protocol contract).
             let alreadyClosed = closeState.withLock { closed -> Bool in
                 if closed { return true }
                 closed = true
@@ -255,19 +182,27 @@
             }
             guard !alreadyClosed else { return }
 
-            // Order matters:
-            //   1. CancelIoEx wakes the read loop's blocking ReadFile.
-            //   2. CloseHandle releases the OS pipe handle so the
-            //      PEER's next ReadFile sees ERROR_BROKEN_PIPE -- this
-            //      is what propagates the close signal across the wire
-            //      (a peer with no other way to know our intent).
-            //   3. finish() the local inbound continuation so the
-            //      local iterator sees the stream end.
-            // The closeState flag we just set tells deinit not to
-            // double-close the handle.
-            CancelIoEx(handle, nil)
-            CloseHandle(handle)
+            // Signal cancellation; the read loop sees the signal in
+            // its `WaitForMultipleObjects` call, cancels its pending
+            // I/O via `CancelIoEx` (works for OVERLAPPED), signals
+            // `readLoopExitedEvent`, and returns.
+            SetEvent(cancelEvent)
             inboundContinuation.finish()
+
+            // Wait for the read loop to fully exit before closing
+            // the pipe handle. Off the cooperative pool so we don't
+            // block it.
+            let pipeHandle = SendableHandle(raw: handle)
+            let exitedEvent = SendableHandle(raw: readLoopExitedEvent)
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    // 5 s ceiling so a buggy read loop can't deadlock
+                    // close() forever; healthy path is microseconds.
+                    _ = WaitForSingleObject(exitedEvent.raw, 5000)
+                    CloseHandle(pipeHandle.raw)
+                    cont.resume()
+                }
+            }
         }
 
         // MARK: - Internals
@@ -277,123 +212,97 @@
             if alreadyClosed { throw TransportError.closed }
         }
 
-        /// Blocking write of every byte; loops on partial writes
-        /// (rare for named pipes but documented as possible).
+        /// Atomic OVERLAPPED write of `data`. Synchronous from the
+        /// caller's perspective -- we wait for the completion event
+        /// via `GetOverlappedResult(bWait: true)`. Send cancellation
+        /// isn't supported (writes are typically fast; cancelling a
+        /// half-written frame would leave the peer in a bad framing
+        /// state anyway).
         private func writeAll(_ data: Data) throws {
             try data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
                 guard let base = buf.baseAddress else { return }
-                var offset = 0
                 let total = data.count
+                if total == 0 { return }
+                var offset = 0
                 while offset < total {
-                    var written: DWORD = 0
+                    ResetEvent(writeCompleteEvent)
+                    var overlapped = OVERLAPPED()
+                    overlapped.hEvent = writeCompleteEvent
                     let remaining = DWORD(total - offset)
-                    let ok = WriteFile(
+                    let immediate = WriteFile(
                         handle,
                         base.advanced(by: offset),
                         remaining,
-                        &written,
-                        nil
+                        nil,
+                        &overlapped
                     )
+                    if immediate == false {
+                        let err = GetLastError()
+                        if err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA {
+                            throw TransportError.peerClosed
+                        }
+                        if err != ERROR_IO_PENDING {
+                            throw TransportError.sendFailed(
+                                reason: "WriteFile failed: GetLastError=\(err)"
+                            )
+                        }
+                    }
+                    var bytesWritten: DWORD = 0
+                    let ok = GetOverlappedResult(handle, &overlapped, &bytesWritten, true)
                     if !ok {
                         let err = GetLastError()
                         if err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA {
                             throw TransportError.peerClosed
                         }
                         throw TransportError.sendFailed(
-                            reason: "WriteFile failed: GetLastError=\(err)"
+                            reason: "GetOverlappedResult(write) failed: GetLastError=\(err)"
                         )
                     }
-                    offset += Int(written)
+                    offset += Int(bytesWritten)
                 }
             }
         }
 
-        /// Start the read loop on a GCD background queue (NOT Swift's
-        /// cooperative pool: blocking `ReadFile` would pin a pool
-        /// thread, and a few such transports could starve every other
-        /// async task in the process -- including test cleanup. GCD's
-        /// `global` queue has dynamic thread growth, so blocking I/O
-        /// stays off the cooperative scheduler entirely). The IOCP
-        /// refactor with `CreateThreadpoolIo` is the production-grade
-        /// successor that lands with the multi-client server.
+        /// Start the read loop on a GCD background queue. Uses the
+        /// `NamedPipeIO.readExactlyOverlapped` helper which waits on
+        /// `[readCompleteEvent, cancelEvent]` for each chunk, so
+        /// ``close()`` signals `cancelEvent` and the loop wakes
+        /// deterministically. Signals `readLoopExitedEvent` on exit
+        /// so ``close()`` knows it's safe to close the pipe handle.
         private func startReadLoop() {
-            let sendable = SendableHandle(raw: handle)
+            let pipe = SendableHandle(raw: handle)
+            let completeEv = SendableHandle(raw: readCompleteEvent)
+            let cancelEv = SendableHandle(raw: cancelEvent)
+            let exitedEv = SendableHandle(raw: readLoopExitedEvent)
             let continuation = inboundContinuation
             DispatchQueue.global(qos: .userInitiated).async {
+                defer {
+                    continuation.finish()
+                    SetEvent(exitedEv.raw)
+                }
                 while true {
-                    guard let header = try? Self.readExactly(handle: sendable.raw, byteCount: 4) else {
-                        continuation.finish()
-                        return
-                    }
-                    // `loadUnaligned` is required on ARM64 Windows
-                    // (a 4-byte read from an arbitrary `Data` offset
-                    // isn't guaranteed aligned). Explicit
-                    // `UInt32(littleEndian:)` states the byte-order
+                    guard let header = NamedPipeIO.readExactlyOverlapped(
+                        handle: pipe.raw,
+                        completeEvent: completeEv.raw,
+                        cancelEvent: cancelEv.raw,
+                        byteCount: 4
+                    ) else { return }
+                    // `loadUnaligned` for ARM64 Windows safety;
+                    // explicit `UInt32(littleEndian:)` for byte-order
                     // intent (Windows is LE in practice).
                     let length = header.withUnsafeBytes { raw in
                         UInt32(littleEndian: raw.loadUnaligned(as: UInt32.self))
                     }
-                    if Int(length) > Self.maxFrameSize {
-                        continuation.finish()
-                        return
-                    }
-                    guard let payload = try? Self.readExactly(
-                        handle: sendable.raw,
+                    if Int(length) > Self.maxFrameSize { return }
+                    guard let payload = NamedPipeIO.readExactlyOverlapped(
+                        handle: pipe.raw,
+                        completeEvent: completeEv.raw,
+                        cancelEvent: cancelEv.raw,
                         byteCount: Int(length)
-                    ) else {
-                        continuation.finish()
-                        return
-                    }
+                    ) else { return }
                     continuation.yield(payload)
                 }
             }
         }
-
-        /// Read exactly `byteCount` bytes from `handle`, looping over
-        /// partial reads (named pipes don't guarantee atomicity in
-        /// byte mode). Returns nil on peer-closed / cancelled.
-        private static func readExactly(handle: HANDLE, byteCount: Int) throws -> Data? {
-            if byteCount == 0 { return Data() }
-            var buffer = Data(count: byteCount)
-            let ok: Bool = buffer.withUnsafeMutableBytes { (rawBuf: UnsafeMutableRawBufferPointer) -> Bool in
-                guard let base = rawBuf.baseAddress else { return false }
-                var offset = 0
-                while offset < byteCount {
-                    var readCount: DWORD = 0
-                    let remaining = DWORD(byteCount - offset)
-                    let ok = ReadFile(
-                        handle,
-                        base.advanced(by: offset),
-                        remaining,
-                        &readCount,
-                        nil
-                    )
-                    if !ok { return false } // peer-closed / cancelled / real error
-                    if readCount == 0 { return false } // peer closed cleanly (zero-byte read)
-                    offset += Int(readCount)
-                }
-                return true
-            }
-            return ok ? buffer : nil
-        }
-
-        // MARK: - Pipe-name canonicalization
-
-        /// Convert a Sprig-internal pipe name (e.g. `sprig-agent-...`)
-        /// to the Win32 canonical form `\\.\pipe\sprig-agent-...`.
-        /// Idempotent on already-prefixed input.
-        private static func canonicalPipePath(_ name: String) -> String {
-            if name.hasPrefix(#"\\.\pipe\"#) {
-                return name
-            }
-            return #"\\.\pipe\"# + name
-        }
-
-        /// Default buffer size for `CreateNamedPipeW` -- 64 KiB
-        /// matches the OS-side message-mode cap and is well above
-        /// typical envelope sizes (a `badgeChanged` is <1 KiB).
-        /// The pipe will still accept larger frames via the
-        /// length-prefix framing; this is just the kernel buffer.
-        private static let bufferSize = 65536
     }
 #endif
