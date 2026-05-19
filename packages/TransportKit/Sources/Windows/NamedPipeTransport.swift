@@ -45,13 +45,18 @@
 //   handles. This makes close() deterministic and frees the loop's
 //   GCD thread back to the pool.
 //
+// Multi-client server: `NamedPipeServer` (this directory) wraps this
+// primitive in an accept loop and yields one `NamedPipeTransport` per
+// connected client.
+//
 // Deliberately deferred (follow-up slices):
-// - Multi-client server (the agent's accept loop wraps this primitive).
-// - DACL: per-user-SID restriction.
+// - DACL: per-user-SID restriction (M2-Win hardening; ADR 0060).
 // - Client reconnect on `ERROR_BROKEN_PIPE` (agent-side wrapper).
 // - `CreateThreadpoolIo`-based async fan-out for the multi-client
-//   server -- this single-client primitive uses one GCD thread per
-//   transport, right-sized for the agent's connection count.
+//   server -- the GCD-thread-per-server-loop variant in
+//   `NamedPipeServer` is right-sized for the agent's connection
+//   count; the threadpool refactor is a perf slice that doesn't
+//   change call-site code.
 
 #if os(Windows)
     import Foundation
