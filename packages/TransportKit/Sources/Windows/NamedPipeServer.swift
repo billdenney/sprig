@@ -41,6 +41,7 @@
 #if os(Windows)
     import Foundation
     import Synchronization
+
     // `@preconcurrency` quiets Sendable warnings on Win32 C types;
     // see `NamedPipeTransport.swift` for the same rationale.
     @preconcurrency import WinSDK
@@ -102,7 +103,9 @@
             // to avoid a half-initialized leak.
             guard let firstInstance = Self.makeInstance(name: canonicalName) else {
                 let err = GetLastError()
-                for h in events { CloseHandle(h) }
+                for h in events {
+                    CloseHandle(h)
+                }
                 throw TransportError.sendFailed(
                     reason: "CreateNamedPipeW(\(canonicalName)) failed: GetLastError=\(err)"
                 )
@@ -171,7 +174,9 @@
             for label in ["acceptComplete", "cancel", "exited"] {
                 guard let ev = CreateEventW(nil, true, false, nil) else {
                     let err = GetLastError()
-                    for h in events { CloseHandle(h) }
+                    for h in events {
+                        CloseHandle(h)
+                    }
                     throw TransportError.sendFailed(
                         reason: "CreateEventW(\(label)) failed: GetLastError=\(err)"
                     )
