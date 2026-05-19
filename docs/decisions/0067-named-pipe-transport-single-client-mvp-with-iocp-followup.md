@@ -26,16 +26,21 @@ Specific decisions baked into the MVP:
 - **`@preconcurrency import WinSDK`.** Win32 types like `OVERLAPPED`, `HANDLE`, etc. don't carry `Sendable` conformance. They're documented as thread-safe for their MSDN-defined usage; the `@preconcurrency` attribute downgrades the resulting Sendable-strictness errors to warnings, with explicit `SendableHandle` wrappers where we cross GCD boundaries to make the safety claim auditable.
 - **`close()` blocks briefly waiting for the read loop to exit.** Bounded at 5 s so a buggy loop can't deadlock the caller forever; the healthy path is microseconds. Run on a background GCD thread so the cooperative pool stays unblocked while the wait happens.
 
-Explicitly deferred to the multi-client follow-up:
+Now shipped on top of the primitive (post-MVP):
 
-- **Multi-client accept loop with `PIPE_UNLIMITED_INSTANCES`.** Single instance per `server()` call; the wrapper above this primitive will spawn one `NamedPipeTransport` per accepted client.
-- **`CreateThreadpoolIo` fan-out.** This single-client MVP uses one GCD thread per transport, which is right-sized for the agent's connection count (1–4 Explorer instances per session) but doesn't scale to dozens. The multi-client wrapper introduces threadpool-based completion handling.
-- **Per-user-SID DACL** restricting the pipe to the owning user's logon SID (per the windows-shell-apis.md "DACL: per-user-SID restriction" section). The default security descriptor grants `Everyone`; production agents will override.
+- **Multi-client accept loop with `PIPE_UNLIMITED_INSTANCES`** lives in `NamedPipeServer` (`packages/TransportKit/Sources/Windows/NamedPipeServer.swift`). It runs a single-threaded GCD accept loop that calls `NamedPipeIO.acceptClient(...)` (OVERLAPPED `ConnectNamedPipe` with cancel-event support), yields each connected `NamedPipeTransport` on a public `connections` AsyncStream, and creates the next pipe instance for the next client. `close()` is cancel-deterministic — signals the cancel event, finishes the stream, awaits the accept thread's exit-event signal off the cooperative pool. Each yielded transport's lifecycle is independent of the server's.
+
+Still deferred:
+
+- **`CreateThreadpoolIo` fan-out.** The current `NamedPipeServer` accepts clients one at a time on a single GCD thread, which is right-sized for the agent's connection count (1–4 Explorer instances per session) but has a small "next instance not yet created" window between `yield` and the next `CreateNamedPipeW` call where new client `CreateFileW` calls see `ERROR_PIPE_BUSY`. A `CreateThreadpoolIo`-based pre-armed-instances variant closes that window without changing the public API.
+- **Per-user-SID DACL** restricting the pipe to the owning user's logon SID (per the windows-shell-apis.md "DACL: per-user-SID restriction" section). The default security descriptor grants `Everyone`; production agents will override (ADR 0060 hardening slice).
 - **Client reconnect on broken pipe.** Lives in the agent-side wrapper, not the transport.
 
 ## Test coverage
 
 All 8 byte-level contract tests pass on the local Windows VM in 0.064 s when run together in one `swift-test` process: `singleFrameRoundTrip`, `multipleFramesPreserveFraming`, `emptyFrameRoundTrip`, `bidirectionalSend`, `closeFinishesStream`, `sendAfterCloseThrows`, `peerCloseSurfacesAsStreamFinish`, `oversizedFrameRejected`. The multi-test deadlock that motivated the in-PR refactor is gone. Coverage also rides on the cross-platform `InProcessTransportTests` for protocol-invariant checks that don't need a per-OS blocking-I/O surface.
+
+The multi-client `NamedPipeServer` adds four more Windows tests (`sequentialClients`, `closeBeforeAnyClient`, `closeAfterServingClients`, `serverCloseDoesNotCloseAcceptedTransports`) covering: serial accept of multiple clients on the same pipe name, cancel-deterministic close before any client arrives, close finishing the connections stream after at least one client has been served, and the lifecycle independence between the server and already-yielded per-client transports.
 
 ## Alternatives considered
 
