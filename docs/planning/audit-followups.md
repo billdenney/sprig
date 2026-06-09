@@ -6,6 +6,17 @@ The format is loosely modeled on `docs/planning/disabled-tests.md`: a single gre
 
 ## Pending
 
+### `UP-5472` — Re-pin Linux toolchain to a stable release once one ships the upstream `Process.run()` fix
+
+- **Origin:** Not an internal audit — an upstream swift-corelibs-foundation bug ([swiftlang/swift-corelibs-foundation#5472](https://github.com/swiftlang/swift-corelibs-foundation/issues/5472)) tracked here because the discipline fits: temporary pin now, durable removal trigger.
+- **Where:** `.swift-version` + `.github/workflows/ci-linux.yml` (container image pin) — Linux only; macOS CI uses Xcode's toolchain and the Windows toolchain is unaffected (the buggy `/proc/self/fd` scan is Linux-only code).
+- **Symptom (pre-pin):** On Linux, `Process.run()` scans `/proc/self/fd` via `findMaximumOpenFromProcSelfFD()` and memcpy's a fixed 256 bytes of each dirent's `d_name`, over-reading short records (crash frame: `__memmove_avx_unaligned_erms` ← `Process.run()`). When the final record lands near an unmapped page the whole test process SIGSEGVs. Grew from a 1-in-20 hosted-CI flake (the reason ci-linux.yml has its 3× retry loop) to 3-of-3 retry exhaustion as the suite's real-git spawn count grew past ~900 tests.
+- **Why a snapshot pin and not a code workaround:** Serializing all `process.run()` launches through a global lock was implemented and empirically disproven — the crash reproduced *inside* the serialized window (the over-read needs only fd-table geometry, not a concurrent scan). The fix upstream (`81eb85a`, merged 2026-05-19) is in no stable release: 6.3.2 predates it (`ahead_by: 73`) and `release/6.4.x` branched 6 commits before it (`ahead_by: 6`). Only `main` snapshots contain it.
+- **Pin shipped:** `.swift-version` → `main-snapshot-2026-05-27` (swiftly-managed local dev) and the ci-linux.yml container → the matching `swiftlang/swift:nightly-main-noble` digest. The 3× retry loop in ci-linux.yml stays as defense-in-depth until the pin is gone.
+- **Trigger to close:** Whichever lands first — (a) `release/6.4.x` absorbs the fix via the upstream automerge cadence and a 6.4.x snapshot/release ships it, or (b) a 6.3.x patch release cherry-picks it. Closing PR: move `.swift-version` + ci-linux.yml back to the stable release, then (separate follow-up after a few weeks green) consider removing the retry loop.
+- **Owner:** maintainer + me.
+- **Severity:** High while open (was failing every Linux CI run on main; with the pin, expected solid green).
+
 ### `R15-F1` — `GitCore.Runner` retries on git-side lock contention
 
 - **Origin:** `docs/planning/multi-agent-audit-2026-05.md` finding F1 (Medium severity).

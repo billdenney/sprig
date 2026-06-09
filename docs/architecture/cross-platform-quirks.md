@@ -173,6 +173,26 @@ These are cases where the same Swift source code compiles on one platform's tool
 - **Where in the repo** — `packages/WatcherKit/Sources/Windows/WatcherKitWindows.swift` (`stop()`).
 - **U:** Toolchain inconsistency between Linux + Windows of the same Swift version. Worth a `swiftlang/swift` issue.
 
+### D3. `URL(fileURLWithPath:relativeTo:)` resolution differs under swift-foundation
+
+- **Symptom** — relative paths resolved against a directory base land **one directory too high** (or, with `.path` on the still-relative URL, don't resolve at all) on swift-foundation toolchains (observed on the `main-snapshot-2026-05-27` / 6.5-dev pin; corelibs-foundation ≤6.3.x behaves the old way). In this repo: `gitdir: ../.git/modules/sub` from worktree `<super>/sub` resolved to `<tmp>/.git/modules/sub` instead of `<super>/.git/modules/sub`, so `resolveGitDir` threw `gitdirPointerTargetMissing` for every submodule-shaped pointer.
+- **Root cause** — two stacked differences. (1) swift-foundation's `.path` on a relative URL no longer resolves against `baseURL`. (2) Its relative resolution follows strict RFC 3986: a base of `file:///a/b` (no trailing slash) has its last component **stripped** before applying the relative path — corelibs treated the base as a directory regardless. Both behaviors are version-dependent, so any `relativeTo:`-built file URL is a portability hazard.
+- **Fix pattern** — don't compose directory-relative paths with `relativeTo:`. Append components explicitly and let `.standardized` collapse `..`/`.`, which is contract-stable on both implementations:
+  ```swift
+  // ❌ resolves differently across Foundation implementations
+  let url = URL(fileURLWithPath: rel, relativeTo: dir).standardized
+
+  // ✅ identical everywhere (git normalizes pointer separators to "/")
+  var url = dir
+  for component in rel.split(separator: "/") {
+      url.appendPathComponent(String(component))
+  }
+  url = url.standardized
+  ```
+  Absolute inputs: branch on `(rel as NSString).isAbsolutePath` (handles `C:\`/UNC on Windows and `/` on POSIX) and construct directly.
+- **Where in the repo** — `packages/GitCore/Sources/GitCore/GitMetadataPaths.swift` (`resolveGitDir`). That was the only `relativeTo:` call site; the SwiftLint-less guard is this catalog entry — grep for `relativeTo:` when bumping toolchains.
+- **U:** Behavior delta between corelibs-foundation and swift-foundation; check whether swift-foundation considers it intentional (FoundationEssentials migration notes) before filing.
+
 ---
 
 ## E. Filesystem semantics
@@ -258,10 +278,11 @@ These are cases where the same Swift source code compiles on one platform's tool
 
 - **Symptom** — `*** Program crashed: Bad pointer dereference ...` during Linux test execution. The crashing thread's stack always involves `Process.run()` or `Process.setup()`; the explicit `findMaximumOpenFromProcSelfFD() + 261` frame may or may not appear, depending on how deep into the spawn sequence the corruption surfaces (we've observed crashes at `Process.run() + 6428` and bare libc frames where `findMaximumOpenFromProcSelfFD` had already returned but corrupted memory bit later). The *other* threads in the dump are typically blocked in `FileHandle._readDataOfLength` waiting on child pipes — that's a red herring, not the crash site. Linux-only — Apple Foundation and Windows Foundation gate this code behind `#if !canImport(Darwin) && !os(Windows)`.
 - **Root cause** — `Sources/Foundation/Process.swift` in swift-corelibs-foundation does a 256-byte struct-copy of `dirEntPtr.pointee.d_name`. glibc's `readdir(3)` returns dirents sized to `d_reclen` (24–32 bytes for short filenames like `/proc/self/fd` integers); the bulk copy overruns into the next (potentially unmapped) page. The hit rate scales with concurrent `Process.run()` activity — observed in this repo at ~5 % per CI run, rising when long-duration test fixtures keep many child processes in flight (e.g. `sprigctl agent --duration 5.0` polling git status repeatedly).
-- **Fix pattern** — at the workflow level: up to **two automatic retries** in `.github/workflows/ci-linux.yml` (max 3 attempts total). At the source level: use the existing `_direntName` / `_direntNameLength` helpers in `ForSwiftFoundationOnly.h` (the same pattern PR #4892 applied to `FileManager+POSIX.swift`). Retry count was bumped 1 → 2 after PR #96 observed back-to-back attempt failures once the test suite grew (sprigctl + M1→M2 integration tests + AgentKit IPC end-to-end pushed concurrent Process.run() activity past the prior noise floor). For deterministic-failure runs (all three attempts fail), the only short-term mitigation is reducing test parallelism on Linux — but this remains rare in practice.
-- **Where in the repo** — `.github/workflows/ci-linux.yml` (the retry block, currently `max=3`).
+- **Fix pattern** — the upstream fix (`_direntName` / `_direntNameLength` helpers, the same pattern PR #4892 applied to `FileManager+POSIX.swift`) **merged to corelibs-foundation `main` as `81eb85a` on 2026-05-19**, originating from our fork branch. No stable toolchain contains it yet (6.3.2 predates it by 73 commits; `release/6.4.x` branched 6 commits before it), so the Linux toolchain is **pinned to a main snapshot**: `.swift-version` → `main-snapshot-2026-05-27` (swiftly-managed local dev) and the ci-linux.yml container → a pinned `swiftlang/swift:nightly-main-noble` digest. Verified locally: 3 consecutive full-suite runs green under the snapshot, where 6.3.1 crashed 3-of-3. The workflow's retry block (max 3 attempts) stays as belt-and-suspenders until the pin moves back to a stable release — tracked as `UP-5472` in `docs/planning/audit-followups.md`.
+- **What did NOT work** — serializing all `process.run()` launches behind a global lock (the "concurrent scans trigger it" theory). Implemented and disproven 2026-06-09: the crash reproduced with launches fully serialized (`__memmove_avx_unaligned_erms` under `Process.run()`, inside the lock). The over-read needs only fd-table geometry, which a ~900-test suite provides regardless of launch concurrency. Don't resurrect that approach.
+- **Where in the repo** — `.swift-version`, `.github/workflows/ci-linux.yml` (image pin + the retry block, currently `max=3`).
 - **Diagnostic check** — when triaging a Linux build-portable failure: look for `Process.run` / `Process.setup` frames in any thread's stack. If present, it's F1. The retry-script's "Likely the upstream Foundation findMaximumOpenFromProcSelfFD() flake" warning is optimistic — it fires on every first-attempt failure, not on signature match.
-- **U:** Filed as `swiftlang/swift-corelibs-foundation#5472`. Fix on a fork at `billdenney/swift-corelibs-foundation:fix/process-d_name-buffer-overrun`. Drop the workflow retry when a Swift toolchain release picks up the fix.
+- **U:** Filed as `swiftlang/swift-corelibs-foundation#5472`; fixed upstream by `81eb85a` (from `billdenney/swift-corelibs-foundation:fix/process-d_name-buffer-overrun`). Watch for a 6.3.x cherry-pick or the `release/6.4.x` automerge to absorb it, then re-pin to stable and drop the workflow retry (`UP-5472`).
 
 ### F2. `ordo-one/package-benchmark` unsupported on Windows
 

@@ -93,7 +93,27 @@ public enum GitMetadataPaths {
         // (resolved against the worktree) or absolute. We don't follow
         // a chain of pointers — git's docs say nested gitdir pointers
         // aren't supported, so the resolved target is the final dir.
-        let pointerURL = URL(fileURLWithPath: target, relativeTo: worktree).standardized
+        //
+        // Deliberately NOT `URL(fileURLWithPath:relativeTo:)`: its
+        // resolution semantics differ between corelibs-foundation
+        // (treats the base as a directory) and swift-foundation
+        // (strict RFC 3986 — strips the base's last path component
+        // when it lacks a trailing slash, resolving one level too
+        // high). Explicit component-wise append + `.standardized`
+        // (which collapses `..`/`.`) behaves identically on both.
+        // git normalizes gitdir pointer separators to `/` on every
+        // platform, so splitting on `/` is correct on Windows too.
+        // See docs/architecture/cross-platform-quirks.md D3.
+        let pointerURL: URL = {
+            if (target as NSString).isAbsolutePath {
+                return URL(fileURLWithPath: target).standardized
+            }
+            var url = worktree
+            for component in target.split(separator: "/") {
+                url.appendPathComponent(String(component))
+            }
+            return url.standardized
+        }()
 
         // Sanity: the resolved dir should exist. If it doesn't, the
         // worktree is broken (submodule-not-initialized, linked-worktree
