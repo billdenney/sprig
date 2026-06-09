@@ -36,38 +36,6 @@ import PlatformKit
 import RepoState
 import WatcherKit
 
-/// Policy for ADR 0033 snapshot housekeeping. Per the ADR amendment,
-/// the agent runs a single TTL-based prune on startup so old
-/// `refs/sprig/snapshots/...` refs don't accumulate forever. Each
-/// agent host (macOS LaunchAgent, Windows Service, sprigctl) picks a
-/// policy at construction; the default mirrors the ADR's "30 days"
-/// recommendation.
-public struct SnapshotPolicy: Equatable, Hashable, Sendable {
-    /// Whether to run a TTL prune on `RepoAgent.start()`. Tests
-    /// commonly disable this to keep snapshots they wrote in setup
-    /// from disappearing under them; production hosts should leave
-    /// it at the default.
-    public var pruneOnStartup: Bool
-
-    /// Snapshots whose timestamp is older than `now - ttl` are
-    /// candidates for the startup prune.
-    public var ttl: TimeInterval
-
-    public init(pruneOnStartup: Bool, ttl: TimeInterval) {
-        self.pruneOnStartup = pruneOnStartup
-        self.ttl = ttl
-    }
-
-    /// 30 days, matching ADR 0033's recommendation.
-    public static let defaultTTL: TimeInterval = 30 * 86400
-
-    /// Default production policy: prune on startup, 30-day TTL.
-    public static let `default` = SnapshotPolicy(pruneOnStartup: true, ttl: defaultTTL)
-
-    /// Tests / repos where the caller manages snapshots manually.
-    public static let disabled = SnapshotPolicy(pruneOnStartup: false, ttl: defaultTTL)
-}
-
 /// Long-lived agent host for one repository. Owns the watcher loop,
 /// the refresh driver, and the broadcaster wiring; emits
 /// `Envelope<AgentEvent>` to its `BadgeEventSink` on every refresh
@@ -106,6 +74,7 @@ public actor RepoAgent {
     private let sink: any BadgeEventSink
     private let tickInterval: Duration
     private let snapshotPolicy: SnapshotPolicy
+    private let autoSync: AutoSyncStartup?
 
     private var coalescer: EventCoalescer
     private var driver: RepoRefreshDriver?
@@ -114,6 +83,7 @@ public actor RepoAgent {
     private var running: Bool = false
     private var snapshotPruneCount: Int = 0
     private var snapshotPruneAt: Date?
+    private var autoSyncScheduler: AutoSyncScheduler?
 
     /// - Parameters:
     ///   - repoRoot: absolute path to the worktree root.
@@ -143,6 +113,10 @@ public actor RepoAgent {
     ///     Default prunes refs older than 30 days on startup; tests
     ///     and repos where the caller manages snapshots manually
     ///     should pass `.disabled`.
+    ///   - autoSync: ADR 0068 background-sync wiring; nil (default)
+    ///     disables it. Hosts that want the hourly fetch pass
+    ///     `AutoSyncStartup()`; `fastForwardPull: true` adds the
+    ///     opt-in fast-forward pass.
     public init(
         repoRoot: URL,
         gitDir: URL?,
@@ -152,7 +126,8 @@ public actor RepoAgent {
         registry: SubscriptionRegistry,
         sink: any BadgeEventSink,
         tickInterval: Duration = .milliseconds(100),
-        snapshotPolicy: SnapshotPolicy = .default
+        snapshotPolicy: SnapshotPolicy = .default,
+        autoSync: AutoSyncStartup? = nil
     ) {
         self.repoRoot = repoRoot
         self.gitDir = gitDir
@@ -163,6 +138,7 @@ public actor RepoAgent {
         self.sink = sink
         self.tickInterval = tickInterval
         self.snapshotPolicy = snapshotPolicy
+        self.autoSync = autoSync
         coalescer = EventCoalescer()
     }
 
@@ -224,30 +200,18 @@ public actor RepoAgent {
         let paths: [URL] = [repoRoot] + (gitDir.map { [$0] } ?? [])
         let stream = watcher.start(paths: paths)
 
-        // The watcher loop has two cooperating tasks: an ingestion
-        // task that pulls events into the coalescer, and a tick task
-        // that drains and dispatches at `tickInterval`. They share
-        // state via the actor — each `await self.…` call serializes
-        // through actor isolation, which is the right behavior.
-        let capturedTickInterval = tickInterval
-        loop = Task { [weak self] in
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { [weak self] in
-                    guard let self else { return }
-                    for await event in stream {
-                        await self.ingest(event)
-                    }
-                }
-                group.addTask { [weak self] in
-                    while !Task.isCancelled {
-                        try? await Task.sleep(for: capturedTickInterval)
-                        if Task.isCancelled { break }
-                        guard let self else { return }
-                        await self.tick()
-                    }
-                }
-                await group.waitForAll()
-            }
+        loop = makeWatcherLoop(stream: stream)
+
+        // ADR 0068 auto-sync. Started LAST so a fetch firing at start
+        // can't race agent bring-up; the watcher loop above turns any
+        // ref movement the fetch causes into badge refreshes for free.
+        // (Construction lives in RepoAgent+AutoSync.swift.)
+        if let autoSync {
+            autoSyncScheduler = await Self.startAutoSyncScheduler(
+                autoSync,
+                runner: runner,
+                gitDir: gitDir
+            )
         }
     }
 
@@ -272,6 +236,13 @@ public actor RepoAgent {
     public func stop() async {
         guard running else { return }
         running = false
+
+        // Auto-sync first: stop scheduling new fetches before tearing
+        // down the pipeline they'd feed.
+        if let autoSyncScheduler {
+            await autoSyncScheduler.stop()
+            self.autoSyncScheduler = nil
+        }
 
         // Tell every active subscriber their subscription is gone.
         // Done before cancelling the watcher loop / stopping the watcher
@@ -333,6 +304,35 @@ public actor RepoAgent {
     }
 
     // MARK: actor-internal helpers
+
+    /// The watcher loop's two cooperating tasks: an ingestion task
+    /// that pulls events into the coalescer, and a tick task that
+    /// drains and dispatches at `tickInterval`. They share state via
+    /// the actor — each `await self.…` call serializes through actor
+    /// isolation, which is the right behavior. Factored out of
+    /// `start()` for SwiftLint's function-body cap.
+    private func makeWatcherLoop(stream: AsyncStream<WatchEvent>) -> Task<Void, Never> {
+        let capturedTickInterval = tickInterval
+        return Task { [weak self] in
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { [weak self] in
+                    guard let self else { return }
+                    for await event in stream {
+                        await self.ingest(event)
+                    }
+                }
+                group.addTask { [weak self] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: capturedTickInterval)
+                        if Task.isCancelled { break }
+                        guard let self else { return }
+                        await self.tick()
+                    }
+                }
+                await group.waitForAll()
+            }
+        }
+    }
 
     /// One-shot startup TTL prune of `refs/sprig/snapshots/...`. Errors
     /// from `git for-each-ref` / `git update-ref --stdin` are

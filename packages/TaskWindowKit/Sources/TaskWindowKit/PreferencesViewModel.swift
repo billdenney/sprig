@@ -66,16 +66,57 @@ public struct AppPreferences: Sendable, Codable, Equatable {
     /// bundle).
     public var branchSortRecencyFirst: Bool
 
+    /// Background `git fetch --all --prune` per watched repo
+    /// (ADR 0068). Default **on** — fetch is read-only and the
+    /// behind/ahead badges depend on it.
+    public var autoFetchEnabled: Bool
+
+    /// Minutes between background fetches. ADR 0068 default: 60.
+    /// The Status task window's per-repo override (ADR 0064) layers
+    /// on top of this app-wide value.
+    public var autoFetchIntervalMinutes: Int
+
+    /// After each background fetch, fast-forward local branches that
+    /// are strictly behind their upstream (and the working directory
+    /// for the checked-out branch). Fail-closed: never merges,
+    /// rebases, or touches a dirty worktree. Default **off**
+    /// (ADR 0068: an unattended process mutating the working
+    /// directory is opt-in).
+    public var autoPullFastForward: Bool
+
     public init(
         schemaVersion: Int = 1,
         watchRoots: [URL] = [],
         gitIdentity: GitIdentity? = nil,
-        branchSortRecencyFirst: Bool = true
+        branchSortRecencyFirst: Bool = true,
+        autoFetchEnabled: Bool = true,
+        autoFetchIntervalMinutes: Int = 60,
+        autoPullFastForward: Bool = false
     ) {
         self.schemaVersion = schemaVersion
         self.watchRoots = watchRoots
         self.gitIdentity = gitIdentity
         self.branchSortRecencyFirst = branchSortRecencyFirst
+        self.autoFetchEnabled = autoFetchEnabled
+        self.autoFetchIntervalMinutes = autoFetchIntervalMinutes
+        self.autoPullFastForward = autoPullFastForward
+    }
+
+    /// Custom decode so preference files written before the ADR 0068
+    /// fields existed load with the documented defaults instead of
+    /// failing on the missing keys ("adding a field is additive").
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        watchRoots = try container.decode([URL].self, forKey: .watchRoots)
+        gitIdentity = try container.decodeIfPresent(GitIdentity.self, forKey: .gitIdentity)
+        branchSortRecencyFirst = try container.decode(Bool.self, forKey: .branchSortRecencyFirst)
+        autoFetchEnabled = try container
+            .decodeIfPresent(Bool.self, forKey: .autoFetchEnabled) ?? true
+        autoFetchIntervalMinutes = try container
+            .decodeIfPresent(Int.self, forKey: .autoFetchIntervalMinutes) ?? 60
+        autoPullFastForward = try container
+            .decodeIfPresent(Bool.self, forKey: .autoPullFastForward) ?? false
     }
 }
 

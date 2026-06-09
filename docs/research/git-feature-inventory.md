@@ -23,6 +23,16 @@ Each gets its own section in the master plan §10. Brief recap:
 
 The right-click menu surfaces these; each maps to a sequence of git primitives. Authoritative list in master plan §10. Highlights: **Sync** (fetch + rebase/merge + push), **Commit & Push**, **Pull & Rebase**, **Switch with dirty tree** (auto-stash), **Resolve Conflicts**, **Reword Last Commit**, **Squash Commits**, **Revert Changes**, **Recover Lost Work**, **Rebase Stack of Branches** (ADR 0051).
 
+### Background auto-sync (ADR 0068) — engine invocations
+
+`GitCore.SyncOps` drives these; `AgentKit.AutoSyncScheduler` sequences them hourly (default); `sprigctl sync` is the one-shot CLI face.
+
+- `git fetch --all --prune --no-write-fetch-head --quiet` — the hourly auto-fetch.
+- `git for-each-ref --format='%(refname:short)…%(upstream)…%(upstream:track)…%(HEAD)' refs/heads/` — one-pass upstream relationship snapshot (`SyncOps.branchSyncStates`).
+- `git merge --ff-only [--autostash] <upstream>` — fast-forward of the checked-out branch (opt-in auto-pull; autostash is a further opt-in).
+- `git fetch . <upstream-ref>:refs/heads/<branch> --quiet` — ref-only fast-forward of non-checked-out branches; git itself refuses non-FF updates and worktree-checked-out branches.
+- `git status --porcelain -z` — tracked-modification (dirty) gate before touching the checked-out branch.
+
 ## Newer-git features Sprig explicitly takes advantage of
 
 Master plan §10 has a per-version (2.40 → 2.46) breakdown. Highlights:

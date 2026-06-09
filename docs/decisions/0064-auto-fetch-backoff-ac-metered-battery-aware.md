@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (default cadence amended by ADR 0068, 2026-06-09)
 date: 2026-05-02
 deciders: maintainer
 consulted: —
@@ -7,6 +7,16 @@ informed: —
 ---
 
 # 0064. Auto-fetch — AC / metered / battery-aware backoff
+
+> **Amendment (ADR 0068, 2026-06-09).** The *default* schedule below
+> (the adaptive 5/15/30-minute ladder) is superseded: the app-wide
+> default cadence is now **hourly** (±10 % jitter), shippable in the
+> portable engine without the platform signal adapters. The adaptive
+> ladder becomes the per-repo **"Frequent (adaptive)"** override once
+> those adapters exist. Everything else in this ADR stands — the
+> pause conditions, the unreachable-remote backoff, the Status
+> task-window surface, and the per-repo override list (which gains
+> "Frequent (adaptive)" and keeps "Hourly" as the default row).
 
 ## Context and problem statement
 
