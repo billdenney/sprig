@@ -55,7 +55,12 @@ struct SyncStateParsingTests {
     }
 }
 
-@Suite("SyncOps — fetch + fast-forward against real git")
+// `.serialized`: each test builds a bare-origin + two-clone fixture
+// and runs pushes — parallel execution multiplies peak git-spawn +
+// filesystem churn, which on the Windows VM starves *other* suites'
+// atomic writes into sharing-violation retry storms (see
+// cross-platform-quirks E1/E2). Serial keeps this suite's load flat.
+@Suite("SyncOps — fetch + fast-forward against real git", .serialized)
 struct SyncOpsRealGitTests {
     /// Bare origin + publisher/subscriber clones, fully configured.
     private struct Fixture {

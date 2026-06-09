@@ -14,7 +14,9 @@ import RepoState
 import Testing
 import WatcherKit
 
-@Suite("RepoAgent — ADR 0068 auto-sync wiring")
+// `.serialized`: three-repo fixtures + live agent loops per test;
+// see SyncOpsRealGitTests for the Windows-VM load rationale.
+@Suite("RepoAgent — ADR 0068 auto-sync wiring", .serialized)
 struct RepoAgentAutoSyncTests {
     /// Bare origin + publisher + subscriber (the agent's repo), with
     /// one commit published and a second one waiting un-fetched.

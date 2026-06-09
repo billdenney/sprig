@@ -7,7 +7,15 @@ import Foundation
 @testable import TaskWindowKit
 import Testing
 
-@Suite("PreferencesViewModel — Codable round-trip + load/save semantics")
+// `.serialized`: each save() is an atomic temp-write + rename, which
+// Windows Defender on the local VM (no exclusions, per security
+// policy) scans aggressively. With the suite's tests running in
+// parallel under full-suite git churn, concurrent saves stack
+// sharing-violation retry ladders until AtomicWriteWithRetry's ~64 s
+// ceiling blows (observed repeatedly on the Server 2022 VM; hosted
+// runners ship Defender exclusions and don't hit this). Serial keeps
+// each save's violation window short.
+@Suite("PreferencesViewModel — Codable round-trip + load/save semantics", .serialized)
 struct PreferencesViewModelTests {
     // MARK: - Fixture helpers
 

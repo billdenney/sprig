@@ -8,7 +8,9 @@
 import Foundation
 import Testing
 
-@Suite("sprigctl sync")
+// `.serialized`: three-repo fixtures + sprigctl binary spawns per
+// test; see SyncOpsRealGitTests for the Windows-VM load rationale.
+@Suite("sprigctl sync", .serialized)
 struct SprigctlSyncTests {
     /// Bare origin + publisher + subscriber; one commit pushed and a
     /// second waiting un-fetched. Returns root for cleanup +
