@@ -2,6 +2,8 @@
 
 What a self-hosted runner fleet would look like, and what it unlocks. **No self-hosted runners are currently operated** — every job runs on GitHub-hosted runners today. As a consequence, the E2E suite (XCUITest), the perf-gate benchmark workflow, and the release pipeline are all parked: no `tests/e2e/`, no nightly benchmark comparison, no signed/notarized builds from CI.
 
+> **Benchmarks nightly cron is commented out** in `.github/workflows/benchmarks.yml` until a runner exists — with no machine matching `[self-hosted, macOS, arm64]`, each nightly queued for ~24 h and was cancelled by the next, accumulating weeks of zombie runs in the Actions history. `workflow_dispatch` remains for manual runs. **The PR that registers the runner re-enables the cron in the same diff.**
+
 This document describes the future provisioning plan. It activates when the maintainer has the budget for hosting + cert maintenance, or when a sponsor steps in. **Authoritative content lands before M9** (1.0 release pipeline). Until then this is a sketch.
 
 ADR cross-references: 0021 (perf budgets), 0046 (release cadence), 0054 (Windows shell at 1.0).
