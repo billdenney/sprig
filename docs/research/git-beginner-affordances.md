@@ -63,14 +63,14 @@ oops insurance, restorable from the Recover window. Cheap with `git stash create
 plumbing (`git commit-tree` of a temp index — no working-tree side effects, no hooks).
 Needs an ADR: interval, TTL, size guards, LFS interaction.
 
-### 2.3 Pre-flight warnings ("you're about to step on a rake") — `proposed`, effort S each
-Cheap porcelain-driven nudges at verb time, not background nags:
-- Committing to a branch named `main`/`master` that tracks a protected remote → "Most
-  teams use a branch — create one now?" (one-click branch + carry changes along).
-- Detached HEAD → banner in every task window: "You're not on a branch — work here can be
-  lost. Create a branch to keep it." (one-click fix).
-- About to push a file >50 MB without LFS → offer ADR 0029's LFS flow.
-- `git switch` away from a branch with unpushed commits → informational, not blocking.
+### 2.3 Pre-flight warnings ("you're about to step on a rake") — commit-time set `ratified + shipped` (ADR 0070)
+Cheap porcelain-driven nudges at verb time, not background nags. **Shipped:**
+`TaskWindowKit.PreflightChecks` + `CommitComposerViewModel.preflightWarnings` — committing to
+`main`/`master` with an upstream ("most teams use a branch"), detached HEAD ("work here can be
+lost"), staged file >50 MiB without LFS (offers ADR 0029's flow). Warnings never block;
+banners carry one-click remedies. **Still proposed:** `git switch` away from a branch with
+unpushed commits (informational; BranchSwitcher has the ahead/behind data via `SyncOps` when
+its UI wants it) and push-time rails.
 
 ### 2.4 Branch-hygiene automation — `proposed`, effort S
 After fetch notices an upstream branch was deleted (typical post-merge), offer "This
