@@ -57,6 +57,28 @@ Sprig surfaces snapshot refs through three coordinated UIs:
 - Snapshot listing on huge repos (`for-each-ref refs/sprig/snapshots/`) needs to be paginated; the Recover window shows the most recent 100 by default with a "Show older" affordance.
 - Restoration's "snapshot HEAD before restoring" rule doubles snapshot ref count for users who use Recover heavily; pruning compensates.
 
+## Amendment 2026-06-11 — Recover VM shipped; restores never eat uncommitted work
+
+The portable half of the 2026-05-02 surface is implemented: **`TaskWindowKit.RecoverViewModel`**
+presents ONE newest-first list (`RecoveryPoint`) merging this ADR's snapshots with ADR 0075's
+backups — for the user, "Sprig's safety copies" is one concept regardless of which engine
+minted the ref. Two fail-closed restore verbs:
+
+- `restoreBackup` — `WorktreeBackup.restore`'s additive worktree write (ADR 0075 semantics).
+- `restoreSnapshot` — `reset --hard`, with **two insurance refs taken first**: the dirty
+  working tree (tracked + untracked) goes into an ADR 0075 backup — the original CLI flow
+  protected committed state only and would eat uncommitted work — and pre-restore HEAD gets
+  its own snapshot (`SnapshotRefName.opRestore`, now a shared constant), keeping restores
+  self-reversible. `sprigctl recover --restore` gains the same uncommitted insurance.
+
+Hardening found by the round-trip test: two restores inside one second mint the **same**
+`<ts>/restore` before-snapshot name, so an immediate undo would have its target overwritten
+by its own before-snapshot before the reset read it. Both surfaces now pin the restore
+target to its resolved SHA before minting any refs — the same collision class ADR 0075
+fixed for backup refs. Non-Sprig refs are rejected before any git runs (`reset --hard
+<arbitrary-ref>` is a different, more dangerous verb than Recover). The Tier-3 windows and
+the per-window header strip remain M3 work.
+
 ## Links
 
 - Master plan §3 (original 0033) and §13.3-A (amendment).

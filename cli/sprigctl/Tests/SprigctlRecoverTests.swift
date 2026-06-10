@@ -235,6 +235,47 @@ struct SprigctlRecoverTests {
         }
     }
 
+    @Test("restore on a dirty tree saves uncommitted work into a backup ref first")
+    func restoreSavesUncommittedWork() async throws {
+        let repo = try Sprigctl.mkRepo("recover-dirty-restore")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await seed(repo: repo)
+        try await writeSnapshot(
+            at: utcDate(year: 2026, month: 1, day: 1),
+            op: SnapshotRefName.opMerge,
+            in: repo
+        )
+        // Dirty the tree AFTER the snapshot: a tracked edit the hard
+        // reset would otherwise eat.
+        try Sprigctl.write("precious uncommitted\n", to: repo.appendingPathComponent("a.txt"))
+
+        let out = try await Sprigctl.run([
+            "recover",
+            "--restore", "refs/sprig/snapshots/20260101T000000Z/merge",
+            repo.path
+        ])
+        #expect(out.exitCode == 0)
+        #expect(out.stdout.contains("Uncommitted work saved: refs/sprig/backup/"))
+
+        // The advertised backup ref really contains the dirty content.
+        let backupRef = try #require(
+            out.stdout.split(whereSeparator: \.isNewline)
+                .first { $0.hasPrefix("Uncommitted work saved: ") }?
+                .replacingOccurrences(of: "Uncommitted work saved: ", with: "")
+        )
+        let shown = try await Sprigctl.run([
+            "backup", "--list", "--json", repo.path
+        ])
+        // Parse rather than substring-match: JSONEncoder escapes "/"
+        // in string values.
+        let object = try JSONSerialization.jsonObject(with: Data(shown.stdout.utf8))
+        let array = try #require(object as? [[String: Any]])
+        #expect(
+            array.contains { ($0["ref"] as? String) == backupRef },
+            "backup ref must be listed"
+        )
+    }
+
     // MARK: - Helpers
 
     /// Create a one-commit repo so HEAD resolves and snapshots can

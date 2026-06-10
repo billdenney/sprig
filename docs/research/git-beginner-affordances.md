@@ -44,12 +44,16 @@ action — user-initiated rebase → plain push, never a force, medium-tier snap
 (`SyncViewModel.rebaseDivergedThenPush()`, `sprigctl sync --push --rebase-diverged`); a
 conflicted rebase is left in place for the resolver or one-tap abort.
 
-### 1.5 "Put back" / undo surface on every destructive verb — partially `shipped`, effort M
-SafetyKit already snapshots before destructive ops (ADR 0033, `refs/sprig/snapshots/*`,
-`sprigctl recover`). The beginner-facing half is naming: surface it as **"Undo last
-operation"** and **"Sprig keeps a safety copy — restore it"** in the same menu as the verb
-that caused it, not as a separate "Recover" power-tool. The Recover task window (ADR 0033
-amendment) should lead with plain language ("Before your reset 10 minutes ago").
+### 1.5 "Put back" / undo surface on every destructive verb — engine `shipped` (ADR 0033 amendments)
+SafetyKit snapshots before destructive ops (`refs/sprig/snapshots/*`, `sprigctl recover`).
+**Shipped (2026-06-11):** `TaskWindowKit.RecoverViewModel` — one newest-first list merging
+snapshots AND ADR 0075 backups ("Sprig's safety copies" is one concept for the user), with
+fail-closed restores: a backup restore is additive; a snapshot restore backs up uncommitted
+work first (it would otherwise be eaten — the CLI gained the same insurance) and snapshots
+pre-restore HEAD so it's self-reversible (restore targets SHA-pinned against same-second
+ref reuse). **Remaining (M3 shells):** the window itself plus the beginner naming — "Undo
+last operation" / "Sprig keeps a safety copy — restore it" in the same menu as the verb
+that caused it, leading with plain language ("Before your reset 10 minutes ago").
 
 ## Tier 2 — high value, more design care needed
 
