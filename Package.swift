@@ -66,7 +66,9 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // ADR 0073's `BranchHygieneViewModel` adds `SafetyKit`: deleting
     // a branch with unpushed commits is ADR 0033 medium tier, so the
     // VM wraps the force-delete in `SnapshotWriter.withSnapshot`.
-    "TaskWindowKit": ["GitCore", "ConflictKit", "LFSKit", "SafetyKit"],
+    // RepoState: the Recover VM (ADR 0033 amendment) lists snapshot
+    // refs via `SnapshotIndex` alongside SafetyKit's backups.
+    "TaskWindowKit": ["GitCore", "ConflictKit", "LFSKit", "SafetyKit", "RepoState"],
     // ADR 0072's `StatusVocabulary` formats GitCore outcome types
     // (FastForwardOutcome, PushOutcome, BranchSyncState) and
     // TaskWindowKit's (PreflightWarning, SetAsideOutcome) into

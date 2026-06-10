@@ -123,9 +123,9 @@ struct RecoverCommand: AsyncParsableCommand {
     /// Op tag used for the before-restore snapshot. Distinguishes
     /// "I restored the repo at this time" from the destructive-op
     /// snapshots (`merge`, `rebase`, `reset-hard`, …) that the user
-    /// might be restoring to. Lowercase ASCII per
-    /// ``SafetyKit/SnapshotRefName/isValidOp(_:)``.
-    static let beforeRestoreOp = "restore"
+    /// might be restoring to. Now a shared SafetyKit constant — the
+    /// Recover VM mints the same tag.
+    static let beforeRestoreOp = SnapshotRefName.opRestore
 
     private func runRestore(ref: String) async throws {
         // Reject anything that doesn't parse as a snapshot ref before
@@ -149,6 +149,20 @@ struct RecoverCommand: AsyncParsableCommand {
         guard revParse.exitCode == 0 else {
             throw ValidationError("snapshot ref does not exist in this repo: \(ref)")
         }
+        // Pin the target to its SHA: two restores in the same second
+        // mint the SAME `<ts>/restore` before-snapshot name, so an
+        // immediate undo (`--restore <before-ref>`) would otherwise
+        // have its target overwritten by its own before-snapshot
+        // before the reset reads it (caught by the Recover VM's
+        // round-trip test).
+        let targetSHA = revParse.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Uncommitted-work insurance (ADR 0033 amendment): the hard
+        // reset below would eat dirty tracked changes AND untracked
+        // files would survive confusingly half-restored — capture the
+        // whole working tree into an ADR 0075 backup ref first. Nil
+        // when the tree is clean.
+        let uncommittedBackup = try await WorktreeBackup(runner: runner).createBackupIfDirty()
 
         // Take a snapshot of the current HEAD so the restore is
         // itself reversible — re-running `recover --restore` against
@@ -158,13 +172,20 @@ struct RecoverCommand: AsyncParsableCommand {
         let beforeSnapshot = try await writer.createSnapshot(op: RecoverCommand.beforeRestoreOp)
 
         // Now reset the worktree to the snapshot. `git reset --hard`
-        // moves HEAD, index, and worktree to the target ref's commit
-        // — destructive of *uncommitted* changes (committed state is
-        // captured in `beforeSnapshot`).
-        _ = try await runner.run(["reset", "--hard", ref])
+        // moves HEAD, index, and worktree to the target's commit;
+        // committed state is captured in `beforeSnapshot`, uncommitted
+        // state in `uncommittedBackup`.
+        _ = try await runner.run(["reset", "--hard", targetSHA])
 
         var out = StdoutStream()
         print("Restored worktree to \(ref)", to: &out)
+        if let uncommittedBackup {
+            print("Uncommitted work saved: \(uncommittedBackup.refName)", to: &out)
+            print(
+                "Run `sprigctl backup --restore \(uncommittedBackup.refName)` to bring it back.",
+                to: &out
+            )
+        }
         print("Before-restore snapshot: \(beforeSnapshot.refName)", to: &out)
         print("Run `sprigctl recover --restore \(beforeSnapshot.refName)` to undo.", to: &out)
     }

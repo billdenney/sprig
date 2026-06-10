@@ -107,6 +107,10 @@ public struct SnapshotRefName: Equatable, Hashable, Sendable {
     /// Switching branches with dirty working-tree changes that would
     /// otherwise be left behind.
     public static let opCheckoutDirty = "checkout-dirty"
+    /// The pre-restore safety snapshot the Recover surface takes of
+    /// HEAD before `reset --hard`-ing to another snapshot — a restore
+    /// is itself reversible (ADR 0033 amendment).
+    public static let opRestore = "restore"
 
     // MARK: - Format internals (exposed for tests)
 

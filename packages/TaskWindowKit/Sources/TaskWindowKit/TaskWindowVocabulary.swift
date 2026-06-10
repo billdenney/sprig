@@ -95,6 +95,20 @@ public enum TaskWindowVocabulary {
         "\(name) is checked out; switch away first."
     }
 
+    // MARK: - Recover (ADR 0033 amendment)
+
+    public static func notASnapshotRef(_ ref: String) -> String {
+        "Not a Sprig safety copy: '\(ref)'."
+    }
+
+    public static func notABackupRef(_ ref: String) -> String {
+        "Not a Sprig backup: '\(ref)'."
+    }
+
+    public static func recoveryRefMissing(_ ref: String) -> String {
+        "That safety copy no longer exists: '\(ref)'. Refresh the list."
+    }
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the
