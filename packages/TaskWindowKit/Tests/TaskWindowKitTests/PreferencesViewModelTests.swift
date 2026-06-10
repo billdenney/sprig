@@ -93,7 +93,8 @@ struct PreferencesViewModelTests {
             branchSortRecencyFirst: false,
             autoFetchEnabled: false,
             autoFetchIntervalMinutes: 15,
-            autoPullFastForward: true
+            autoPullFastForward: true,
+            suppressedGuardRails: ["committing-to-default-branch"]
         )
 
         let encoder = JSONEncoder()
@@ -124,6 +125,7 @@ struct PreferencesViewModelTests {
         #expect(decoded.autoBackupEnabled == true)
         #expect(decoded.autoBackupIntervalMinutes == 30)
         #expect(decoded.autoBackupTTLDays == 7)
+        #expect(decoded.suppressedGuardRails == [])
         #expect(decoded.gitIdentity == GitIdentity(name: "Anne", email: "anne@example.com"))
     }
 

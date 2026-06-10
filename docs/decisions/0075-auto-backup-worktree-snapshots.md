@@ -73,9 +73,31 @@ refs make the commits unreachable; normal `git gc` reclaims the objects. Prefere
 - `refs/sprig/backup/*` joins `refs/sprig/snapshots/*` in the "never delete without
   respecting TTL" covenant (CLAUDE.md).
 
+## Amendment — backup deny-list (maintainer-ratified 2026-06-11)
+
+Backups now **exclude likely secrets and tool temporaries** at staging time. An auto-backup
+default-on engine that quietly persists an unignored `.env` into git objects every 30 minutes
+converts "file on disk" into "blob recoverable for the whole TTL window" — a meaningful
+escalation for credential material; for Office `~$` lock files and editor swap files it's
+pure noise. The maintainer ratified the deny-list as the standard secret set **plus**
+typical temporary files.
+
+Mechanics: the rules live in `GitCore.JunkFilePatterns` (one curated list, two projections);
+`WorktreeBackup` appends `:(exclude,glob)**/<pattern>` pathspecs to the throwaway-index
+`add -A`. A tree dirty *only* with excluded files produces **no backup** (the staged tree
+equals HEAD's tree — same dedup logic as the identical-state case, so junk-only repos don't
+mint a ref every tick). The list is injectable (`excludedPatterns:`) for the future
+Preferences-driven override.
+
+Known trade-off (documented in code): name-based rules (`*credentials*`, `*secret*`) can
+match legitimate work files, which are then silently not backed up. Accepted — a leaked
+secret is worse than a narrower insurance net — and mitigated by the ADR 0070 amendment's
+`.gitignore` suggestion, which surfaces exactly these files to the user with a durable fix.
+
 ## Links
 
 - Implements `docs/research/git-beginner-affordances.md` item 2.2 — the final backlog item;
   with this, every 1.x and 2.x affordance is engine-shipped.
 - ADR 0033 (snapshot refs sibling + ref-namespace covenant), 0064/0068 (scheduler + policy
-  seam reuse), 0065 (stash safety relative), 0023 (defer-to-git plumbing).
+  seam reuse), 0065 (stash safety relative), 0023 (defer-to-git plumbing), 0070 amendment
+  (the `.gitignore` suggestion pairing).

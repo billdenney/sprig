@@ -108,12 +108,22 @@ public struct WorktreeBackup: Sendable {
     /// `SnapshotWriter.defaultClock`).
     public let clock: @Sendable () -> Date
 
+    /// `:(exclude,glob)` pathspecs withheld from every backup —
+    /// likely secrets (an unignored `.env` must NOT get persisted
+    /// into git objects every 30 minutes) and tool temporaries
+    /// (ADR 0075 amendment). Defaults to the curated
+    /// `JunkFilePatterns` set; injectable for tests and the future
+    /// Preferences-driven user extension.
+    public let excludedPatterns: [String]
+
     public init(
         runner: Runner,
-        clock: @Sendable @escaping () -> Date = SnapshotWriter.defaultClock
+        clock: @Sendable @escaping () -> Date = SnapshotWriter.defaultClock,
+        excludedPatterns: [String] = JunkFilePatterns.backupExcludePathspecs
     ) {
         self.runner = runner
         self.clock = clock
+        self.excludedPatterns = excludedPatterns
     }
 
     // MARK: - Create
@@ -128,6 +138,14 @@ public struct WorktreeBackup: Sendable {
 
         let branch = try await currentBranchLabel()
         let tree = try await stageEverythingToThrowawayIndex()
+
+        // Junk-only-dirty guard: if everything dirty was excluded by
+        // the deny patterns, the backup tree equals HEAD's tree (or
+        // the empty tree on an unborn branch) and there is nothing
+        // worth preserving — minting a ref would be pure churn.
+        if try await tree == baselineTreeSHA() {
+            return nil
+        }
 
         if let newest = try await newestBackup(for: branch) {
             let newestTree = try await treeSHA(of: newest.ref.refName)
@@ -279,8 +297,21 @@ public struct WorktreeBackup: Sendable {
         } else {
             _ = try await scratch.run(["read-tree", "--empty"])
         }
-        _ = try await scratch.run(["add", "-A"])
+        var addArgs = ["add", "-A", "--", "."]
+        addArgs.append(contentsOf: excludedPatterns.map { ":(exclude,glob)\($0)" })
+        _ = try await scratch.run(addArgs)
         return try await scratch.run(["write-tree"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// HEAD's tree, or the canonical git empty-tree object on an
+    /// unborn branch (a universal constant — `git hash-object -t
+    /// tree /dev/null` on any repo).
+    private func baselineTreeSHA() async throws -> String {
+        guard try await headSHAIfAny() != nil else {
+            return "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+        }
+        return try await runner.run(["rev-parse", "HEAD^{tree}"]).stdoutString
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

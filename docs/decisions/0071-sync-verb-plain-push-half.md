@@ -72,6 +72,19 @@ auto-sync agent job, `sprigctl sync`, and this verb all use it now.
 - A rejected push leaves the user one tap from the resolution flow rather than silently
   failing or dangerously succeeding.
 
+## Amendment — explicit "rebase then push" follow-up (maintainer-ratified 2026-06-11)
+
+The diverged-branch outcome stays a *report* inside Sync (option 2's rejection stands), but
+the report now gets a ratified second act: the UI offers an **explicit follow-up action** —
+"replay my commits on top of the server's, then push" (`git rebase <upstream>` → plain
+push). Key properties: it is a separate, user-initiated verb on the report line (never an
+automatic escalation inside Sync); the push after a successful rebase is **plain** — a
+post-rebase upload of replayed commits is fast-forward for a remote that hasn't moved again,
+so the never-force covenant holds (a re-rejection re-reports); a conflicted rebase routes to
+the ADR 0034 conflict surface or one-tap `rebase --abort`. Implementation rides a later
+slice; ADR 0033 tiering applies (rebase on divergent history = medium tier, auto-snapshot
+under ADR 0033 before executing).
+
 ## Links
 
 - Implements `docs/research/git-beginner-affordances.md` item 1.4.
