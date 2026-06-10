@@ -39,6 +39,16 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git push --quiet -u <remote> <branch>` — publish-and-track when no upstream exists.
 - `git remote` — remote enumeration for the publish path.
 
+### Auto-backup (ADR 0075) — engine invocations
+
+`SafetyKit.WorktreeBackup` (+ agent tick via `AutoBackupStartup`; CLI `sprigctl backup`):
+
+- `git status --porcelain -z` — dirty gate (untracked counts).
+- Throwaway index (`GIT_INDEX_FILE` env): `git read-tree HEAD|--empty` → `git add -A` → `git write-tree` — the real index never changes.
+- `git commit-tree <tree> [-p HEAD] -m …` — no hooks run.
+- `git update-ref refs/sprig/backup/<ts>/<branch> <sha>` (collision-avoiding mint) / `update-ref -d` for TTL prune; `for-each-ref` to list.
+- `git restore --source=<sha> --worktree -- :/` — additive fail-closed restore (pre-restore state backed up first).
+
 ### Branch hygiene (ADR 0073) — engine invocations
 
 `GitCore.BranchHygiene` + `BranchHygieneViewModel` (detection rides ADR 0068's `branchSyncStates`):

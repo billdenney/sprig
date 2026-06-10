@@ -93,4 +93,28 @@ struct MockFileWatcherTests {
         #expect(byPath[url("/a")] == .removed)
         #expect(byPath[url("/b")] == .created)
     }
+
+    @Test("stop racing the start-attach hop still terminates the stream (regression)")
+    func stopBeforeAttachStillFinishes() async {
+        // Regression for the stop-before-attach race: `start(paths:)`
+        // attaches its continuation via an unstructured Task, so a
+        // fast emit+stop can win the actor first. Pre-fix, the
+        // nil-continuation finish was LOST and the consumer's
+        // `for await` hung forever (the intermittent WatcherKitTests
+        // full-suite hang). 500 iterations make the scheduling race
+        // bite within the run if it ever regresses; each iteration
+        // must both terminate AND deliver the pre-stop event.
+        for _ in 0 ..< 500 {
+            let mock = MockFileWatcher()
+            let stream = mock.start(paths: [url("/")])
+            await mock.emit(WatchEvent(path: url("/a"), kind: .created))
+            await mock.stop()
+
+            var received = 0
+            for await _ in stream {
+                received += 1
+            }
+            #expect(received == 1)
+        }
+    }
 }

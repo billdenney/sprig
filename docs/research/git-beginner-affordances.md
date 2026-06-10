@@ -58,13 +58,14 @@ format; ADR 0019's reveal level picks the register in the shells. **Remaining:**
 the plain register across badge tooltips + the other task windows as each shell surface
 lands (M2/M3). No AI required: string tables keyed off porcelain fields we already parse.
 
-### 2.2 Auto-backup snapshots of uncommitted work — `proposed`, effort M
-Time-Machine-style: every N minutes (default 30?) with a dirty worktree, write a snapshot
-commit of the working tree to `refs/sprig/backup/<branch>` (never on the branch itself; ref
-TTL-pruned like ADR 0033 snapshots). The beginner who has never committed still has crash/
-oops insurance, restorable from the Recover window. Cheap with `git stash create`-style
-plumbing (`git commit-tree` of a temp index — no working-tree side effects, no hooks).
-Needs an ADR: interval, TTL, size guards, LFS interaction.
+### 2.2 Auto-backup snapshots of uncommitted work — `ratified + shipped` (ADR 0075)
+Time-Machine-style. **Shipped:** `SafetyKit.WorktreeBackup` — throwaway-index
+(`GIT_INDEX_FILE`) backup commits under `refs/sprig/backup/<ts>/<branch>` capturing tracked +
+untracked work with zero HEAD/index/worktree/hook side effects; identical-tree dedup;
+collision-avoiding ref minting; fail-closed additive restore (pre-restore state backed up
+first, source pinned by SHA). Agent tick (default 30 min, `AutoBackupStartup` reusing the
+generic scheduler) + 7-day TTL prune; `sprigctl backup --list/--now/--restore`; Preferences
+toggles (default on). Size guard noted in the ADR as a future refinement.
 
 ### 2.3 Pre-flight warnings ("you're about to step on a rake") — commit-time set `ratified + shipped` (ADR 0070)
 Cheap porcelain-driven nudges at verb time, not background nags. **Shipped:**

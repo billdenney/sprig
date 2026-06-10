@@ -84,6 +84,19 @@ public struct AppPreferences: Sendable, Codable, Equatable {
     /// directory is opt-in).
     public var autoPullFastForward: Bool
 
+    /// Periodically snapshot a dirty working tree into
+    /// `refs/sprig/backup/…` (ADR 0075) — crash/oops insurance for
+    /// work that was never committed. Default **on**: it's pure-local,
+    /// touches nothing the user sees, and is TTL-bounded.
+    public var autoBackupEnabled: Bool
+
+    /// Minutes between backup ticks. ADR 0075 default: 30.
+    public var autoBackupIntervalMinutes: Int
+
+    /// Days a backup survives before the per-tick prune removes it.
+    /// ADR 0075 default: 7.
+    public var autoBackupTTLDays: Int
+
     public init(
         schemaVersion: Int = 1,
         watchRoots: [URL] = [],
@@ -91,7 +104,10 @@ public struct AppPreferences: Sendable, Codable, Equatable {
         branchSortRecencyFirst: Bool = true,
         autoFetchEnabled: Bool = true,
         autoFetchIntervalMinutes: Int = 60,
-        autoPullFastForward: Bool = false
+        autoPullFastForward: Bool = false,
+        autoBackupEnabled: Bool = true,
+        autoBackupIntervalMinutes: Int = 30,
+        autoBackupTTLDays: Int = 7
     ) {
         self.schemaVersion = schemaVersion
         self.watchRoots = watchRoots
@@ -100,11 +116,15 @@ public struct AppPreferences: Sendable, Codable, Equatable {
         self.autoFetchEnabled = autoFetchEnabled
         self.autoFetchIntervalMinutes = autoFetchIntervalMinutes
         self.autoPullFastForward = autoPullFastForward
+        self.autoBackupEnabled = autoBackupEnabled
+        self.autoBackupIntervalMinutes = autoBackupIntervalMinutes
+        self.autoBackupTTLDays = autoBackupTTLDays
     }
 
-    /// Custom decode so preference files written before the ADR 0068
-    /// fields existed load with the documented defaults instead of
-    /// failing on the missing keys ("adding a field is additive").
+    /// Custom decode so preference files written before the ADR 0068 /
+    /// ADR 0075 fields existed load with the documented defaults
+    /// instead of failing on the missing keys ("adding a field is
+    /// additive").
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
@@ -117,6 +137,12 @@ public struct AppPreferences: Sendable, Codable, Equatable {
             .decodeIfPresent(Int.self, forKey: .autoFetchIntervalMinutes) ?? 60
         autoPullFastForward = try container
             .decodeIfPresent(Bool.self, forKey: .autoPullFastForward) ?? false
+        autoBackupEnabled = try container
+            .decodeIfPresent(Bool.self, forKey: .autoBackupEnabled) ?? true
+        autoBackupIntervalMinutes = try container
+            .decodeIfPresent(Int.self, forKey: .autoBackupIntervalMinutes) ?? 30
+        autoBackupTTLDays = try container
+            .decodeIfPresent(Int.self, forKey: .autoBackupTTLDays) ?? 7
     }
 }
 

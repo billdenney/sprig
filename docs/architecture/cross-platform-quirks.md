@@ -299,6 +299,36 @@ These are cases where the same Swift source code compiles on one platform's tool
 - **Where in the repo** — `Package.swift` (top of the file, after `tier2Targets`).
 - **U:** Tracked upstream. Re-include benchmark target on Windows when ordo-one/package-benchmark#308 lands.
 
+### F3. Async-test hang from a lost AsyncStream finish (exposed by main-snapshot scheduling)
+
+- **Symptom** — `swift test` stalls indefinitely: one async test never completes (observed:
+  WatcherKit's "stream yields emitted events in order"), its runner never exits, the
+  remaining test products never run, and the orphaned runner holds the `.build` lock —
+  stalling later `swift build` in the same checkout. Intermittent (~1 in 5 full local runs
+  on the UP-5472 snapshot pin); effectively never on 6.3.x, whose scheduler rarely hit the
+  window.
+- **Diagnostic trap** — the hung runner shows main in `sigsuspend` + one idle `ep_poll`
+  worker (`/proc/<pid>/task/*/wchan`, no ptrace needed). That is NOT proof the tests
+  finished: a parked async test awaiting a never-resumed continuation occupies **no thread**
+  and looks identical. Diff `◇ started` vs `✔ passed` test names in the log to find the
+  actual unfinished test before blaming the exit path (we mis-attributed this first).
+- **Root cause** — an in-repo race, not the toolchain: `MockFileWatcher.start(paths:)`
+  attached its continuation via an unstructured Task (async actor hop); a fast `stop()`
+  could win the actor first, the nil-continuation `finish()` was lost, and the late attach
+  installed a continuation nobody would ever finish → consumer `for await` hangs forever.
+  The newer toolchain's scheduling merely widened the window.
+- **Fix pattern** — latch the finish: `finish()` sets a flag; `attach` replays pending
+  events and immediately finishes when the latch is set. Any "create stream → attach
+  continuation asynchronously" shape needs this. Regression-tested with a 500-iteration
+  race hammer (`stopBeforeAttachStillFinishes`).
+- **Where in the repo** — `packages/WatcherKit/Sources/WatcherKit/MockFileWatcher.swift`;
+  ci-linux.yml carries `timeout-minutes: 30` as a general anti-hang failsafe. After any
+  timed-out local run: `pkill -f test-runner; pkill -f swift-test` (orphans hold the
+  package lock) — and mind that a careless `pkill -f` pattern can match your own wrapper
+  shell.
+- **U:** None — in-repo bug, fixed. The lesson generalizes: audit other lazily-attached
+  AsyncStream continuations for lost-finish races when toolchain bumps shift scheduling.
+
 ---
 
 ## G. CI / tooling gaps

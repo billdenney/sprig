@@ -7,6 +7,11 @@ on:
 jobs:
   build-portable:
     runs-on: ubuntu-24.04
+    # Failsafe against the main-snapshot toolchain's post-completion
+    # runner hang (quirk F3: all tests finish, the test-runner process
+    # parks in dispatchMain and never exits — would otherwise eat the
+    # 6 h Actions default). Healthy runs are well under 15 min.
+    timeout-minutes: 30
     container:
       # PINNED TO A MAIN-SNAPSHOT DIGEST, not a stable release (UP-5472):
       # the fix for the F1 Process.run() SIGSEGV (cross-platform-quirks.md)
