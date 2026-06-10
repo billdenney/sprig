@@ -49,13 +49,14 @@ amendment) should lead with plain language ("Before your reset 10 minutes ago").
 
 ## Tier 2 — high value, more design care needed
 
-### 2.1 Plain-language status vocabulary with progressive disclosure — `proposed`, effort M
-Badge tooltips and task-window strings in two registers, toggled by the ADR 0019 reveal
-level: beginner register ("3 files changed since your last save point", "your copy is 2
-updates behind the server") with the git term in parentheses the first few times
-("…behind (git: `behind origin/main`)"). Teaches vocabulary instead of hiding it — the
-beginner eventually *graduates*. No AI required: it's string tables keyed off porcelain
-fields we already parse.
+### 2.1 Plain-language status vocabulary with progressive disclosure — infrastructure `ratified + shipped` (ADR 0072)
+**Shipped:** `UIKitShared.StatusVocabulary` — one formatter, two registers (`.plain` teaches
+the git term in parentheses; `.git` is the terse power-user/CLI register, byte-identical to
+sprigctl's pinned output — `sprigctl sync` now consumes it). Covers every typed outcome so
+far: branch relationships, fast-forward, push, pre-flight warnings, set-aside. VMs never
+format; ADR 0019's reveal level picks the register in the shells. **Remaining:** applying
+the plain register across badge tooltips + the other task windows as each shell surface
+lands (M2/M3). No AI required: string tables keyed off porcelain fields we already parse.
 
 ### 2.2 Auto-backup snapshots of uncommitted work — `proposed`, effort M
 Time-Machine-style: every N minutes (default 30?) with a dirty worktree, write a snapshot
