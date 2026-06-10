@@ -23,6 +23,14 @@ Each gets its own section in the master plan §10. Brief recap:
 
 The right-click menu surfaces these; each maps to a sequence of git primitives. Authoritative list in master plan §10. Highlights: **Sync** (fetch + rebase/merge + push), **Commit & Push**, **Pull & Rebase**, **Switch with dirty tree** (auto-stash), **Resolve Conflicts**, **Reword Last Commit**, **Squash Commits**, **Revert Changes**, **Recover Lost Work**, **Rebase Stack of Branches** (ADR 0051).
 
+### "Set aside changes" switch (ADR 0069) — engine invocations
+
+`GitCore.StashOps` + `BranchSwitcherViewModel.switchBranch(settingAsideChanges:)`:
+
+- `git stash push --include-untracked -m <message>` — outcome detected via `refs/stash` movement (`git rev-parse --quiet --verify refs/stash` before/after), not message text.
+- `git switch <branch>` — on failure after a stash was created, the stash is popped back (fail-closed restore).
+- `git stash pop` — conflicted pops are detected by non-zero exit **plus** `refs/stash` still resolving (git keeps the entry), surfaced as "kept in stash".
+
 ### Background auto-sync (ADR 0068) — engine invocations
 
 `GitCore.SyncOps` drives these; `AgentKit.AutoSyncScheduler` sequences them hourly (default); `sprigctl sync` is the one-shot CLI face.

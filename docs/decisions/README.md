@@ -78,6 +78,7 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0066 | Stale `index.lock` recovery flow (60s threshold + one-click clear)         | accepted |
 | 0067 | Named-pipe transport — OVERLAPPED single-client MVP, multi-client + `CreateThreadpoolIo` follow-up | accepted |
 | 0068 | Auto-sync — hourly fetch-all default, opt-in fast-forward auto-pull        | accepted |
+| 0069 | "Set aside changes" — auto-stash around branch switch                      | accepted |
 
 ADRs 0001–0053 were ratified simultaneously in the initial scaffolding, based on the planning dialogue captured in the master plan file. Subsequent ADRs (0054+) follow the normal one-per-PR cadence.
 

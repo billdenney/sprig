@@ -23,12 +23,14 @@ only, clean tree, not mid-operation). Every skip is reported, not swallowed — 
 your attention (diverged)" is itself a teaching surface. Default off; onboarding (ADR 0039)
 can offer it to beginner-profile users.
 
-### 1.3 Auto-stash around pull/switch — `proposed`, effort S
-The #1 beginner wall: "cannot pull/switch: you have uncommitted changes." Git already has
-the mechanism (`--autostash`, `git stash push` + pop); Sprig's pull/switch verbs should
-offer "Set aside changes and continue?" with the stash auto-reapplied after. Failure to
-reapply cleanly surfaces as a conflict in the same resolver UI as merges (M4). Pairs with
-ADR 0065 (stash safety: export before destructive ops).
+### 1.3 Auto-stash around pull/switch — switch half `ratified + shipped` (ADR 0069), pull half partially native
+The #1 beginner wall: "cannot pull/switch: you have uncommitted changes." **Switch:** shipped —
+`BranchSwitcherViewModel.switchBranch(settingAsideChanges:)` + `GitCore.StashOps`, offered via
+`canOfferSetAside` exactly when git refuses; fail-closed table in ADR 0069. **Pull:** the
+checked-out-branch fast-forward already supports git-native `--autostash`
+(`FastForwardOptions.autostash`, ADR 0068); a beginner-facing "set aside and pull" offer in the
+pull verb reuses `StashOps` when that verb's task window lands. Pairs with ADR 0065 (stash
+safety: export before destructive ops).
 
 ### 1.4 One "Sync" verb — `proposed`, effort M
 TortoiseGit's most-loved button. One Finder context-menu verb that does: fetch → FF-pull
