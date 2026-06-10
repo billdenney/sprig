@@ -61,6 +61,12 @@ Implementation shape (`UnixSocketTransport` + `UnixSocketServer` in
 
 - The Linux production host (systemd user unit running AgentKit) has its transport; the
   TransportKit stub count drops to one (Mac XPC).
+- **First consumer (same date): `sprigctl agent --socket PATH`** — the host accept loop wires
+  each client into its own `ClientRequestDispatcher` (shared `SubscriptionRegistry` +
+  `SubscriptionTransportRoutes`), with the agent emitting through a `TeeBadgeEventSink`
+  (stdout diagnostics + the `RoutedBadgeEventSink`). The full protocol — connect → subscribe
+  → ack → file change → `badgeChanged` envelope — is pinned by a genuinely two-process
+  end-to-end test (the agent process serving, the test process as the UDS client).
 - Peer authentication rides filesystem permissions for now; `SO_PEERCRED` validation (the
   named-pipe transport's peer-SID analogue) is a follow-up noted for the Linux host slice.
 - The macOS CI matrix now compiles + tests this code, catching Darwin/Glibc drift on every

@@ -2,13 +2,18 @@ import Foundation
 import GitCore
 import IPCSchema
 import Testing
+import TransportKit
 
 // `sprigctl agent` end-to-end CLI tests. Lives in its own file (split
 // from `SprigctlTests.swift`) so neither file trips SwiftLint's
 // `file_length` cap as the agent surface grows. Test helpers (the
 // `Sprigctl` namespace enum) are still in `SprigctlSupport.swift`.
 
-@Suite("sprigctl agent")
+// `.serialized`: every test spawns a whole agent process (some with
+// sockets + background jobs); running them concurrently couples their
+// timing budgets under load — same rationale as the git-churn-heavy
+// suites.
+@Suite("sprigctl agent", .serialized)
 struct SprigctlAgentTests {
     @Test("agent --help shows usage")
     func help() async throws {
@@ -279,6 +284,76 @@ struct SprigctlAgentTests {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(trackedTip == originTip, "the fire-on-start fetch must land before --duration")
     }
+
+    #if os(Linux) || os(macOS)
+        @Test("agent --socket serves AgentEvent envelopes to a second process end-to-end")
+        func socketServesSubscriber() async throws {
+            // The M2 milestone moment: the agent in ONE process, this
+            // test as the IPC client in another, talking the real
+            // protocol — connect → subscribe → ack → file change →
+            // badgeChanged envelope.
+            let repo = try Sprigctl.mkRepo("agent-socket")
+            defer { try? FileManager.default.removeItem(at: repo) }
+            try await Sprigctl.initRepo(at: repo)
+            try Sprigctl.write("seed\n", to: repo.appendingPathComponent("a.txt"))
+            try await Sprigctl.spawnGit(["add", "a.txt"], cwd: repo)
+            try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
+            let socketPath = "/tmp/sprig-agent-e2e-\(UUID().uuidString.prefix(8)).sock"
+
+            // Agent process runs concurrently; generous duration so the
+            // whole handshake fits, but it exits on its own regardless.
+            let agentRun = Task {
+                try await Sprigctl.run([
+                    "agent",
+                    "--polling", "--polling-interval", "0.2",
+                    "--duration", "8",
+                    "--socket", socketPath,
+                    repo.path
+                ])
+            }
+
+            // Connect with retry while the agent boots.
+            let client = try await connectWithRetry(path: socketPath)
+
+            // Subscribe to the repo root and await the ack.
+            let request = Envelope(message: ClientRequest.subscribe(
+                SubscribePayload(roots: [repo.path])
+            ))
+            try await client.send(EnvelopeCodec.encode(request))
+            var inbox = client.messages().makeAsyncIterator()
+            let ackData = try #require(await inbox.next(), "expected a subscribe ack")
+            let ack = try EnvelopeCodec.decode(AgentResponse.self, from: ackData)
+            guard case .subscribeAck = ack.message else {
+                Issue.record("expected subscribeAck, got \(ack.message)")
+                return
+            }
+
+            // Dirty the repo; the polling watcher turns it into a
+            // badgeChanged envelope routed to OUR subscription.
+            try Sprigctl.write("changed\n", to: repo.appendingPathComponent("a.txt"))
+            let eventData = try #require(await inbox.next(), "expected a badge event")
+            let event = try EnvelopeCodec.decode(AgentEvent.self, from: eventData)
+            guard case .badgeChanged = event.message else {
+                Issue.record("expected badgeChanged, got \(event.message)")
+                return
+            }
+
+            await client.close()
+            let out = try await agentRun.value
+            #expect(out.exitCode == 0)
+            #expect(out.stderr.contains("# agent: serving at \(socketPath)"))
+        }
+
+        private func connectWithRetry(path: String) async throws -> UnixSocketTransport {
+            for _ in 0 ..< 50 {
+                if let transport = try? UnixSocketTransport.connect(path: path) {
+                    return transport
+                }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            throw TransportError.sendFailed(reason: "agent socket never came up at \(path)")
+        }
+    #endif
 
     @Test("agent --preferences with a malformed file errors instead of silently defaulting")
     func malformedPreferencesError() async throws {

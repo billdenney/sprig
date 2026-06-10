@@ -17,6 +17,7 @@ import IPCSchema
 import PlatformKit
 import RepoState
 import TaskWindowKit
+import TransportKit
 import WatcherKit
 
 /// `sprigctl agent <path> [--polling] [--polling-interval SECS] [--duration SECS]`
@@ -60,6 +61,19 @@ struct AgentCommand: AsyncParsableCommand {
     @Option(
         name: .long,
         help: ArgumentHelp(
+            "Serve the agent over a Unix-domain socket at PATH (Linux/macOS — ADR 0076).",
+            discussion: "The M2 IPC host: clients connect, send a `subscribe` "
+                + "ClientRequest envelope, and receive AgentEvent envelopes for "
+                + "their roots over the same framed wire format the Windows "
+                + "named-pipe transport uses. stdout still streams every "
+                + "envelope (the diagnostic tee)."
+        )
+    )
+    var socket: String?
+
+    @Option(
+        name: .long,
+        help: ArgumentHelp(
             "Read AppPreferences JSON from PATH and run the background jobs it enables (ADR 0068 auto-fetch, ADR 0075 auto-backup).",
             discussion: "The M2 host wiring: the platform hosts (macOS "
                 + "LaunchAgent, Windows Service) always pass their "
@@ -72,18 +86,34 @@ struct AgentCommand: AsyncParsableCommand {
     )
     var preferences: String?
 
-    func run() async throws {
+    /// Repo-derived inputs the host resolves once up front.
+    private struct HostContext {
+        let rootURL: URL
+        let gitDir: URL?
+        let runner: Runner
+        let gitVersion: GitVersion?
+    }
+
+    /// Resolve the gitDir up front so the agent knows what's a
+    /// ".git/-internal lock-or-temp" event when filtering. ADR 0056
+    /// says nil-on-failure is acceptable; the driver's filter is
+    /// conservative without it.
+    private func makeHostContext() async -> HostContext {
         let rootURL = URL(fileURLWithPath: path ?? FileManager.default.currentDirectoryPath)
             .standardized
-
-        // Resolve the gitDir up front so the agent knows what's a
-        // ".git/-internal lock-or-temp" event when filtering. ADR 0056
-        // says nil-on-failure is acceptable; the driver's filter is
-        // conservative without it.
-        let gitDir: URL? = try? GitMetadataPaths.resolveGitDir(forWorktree: rootURL)
-
         let runner = Runner(defaultWorkingDirectory: rootURL)
-        let gitVersion: GitVersion? = try? await runner.version()
+        return await HostContext(
+            rootURL: rootURL,
+            gitDir: try? GitMetadataPaths.resolveGitDir(forWorktree: rootURL),
+            runner: runner,
+            gitVersion: try? runner.version()
+        )
+    }
+
+    func run() async throws {
+        let context = await makeHostContext()
+        let rootURL = context.rootURL
+        let runner = context.runner
 
         let watcher: any FileWatcher = makeWatcher()
         let registry = SubscriptionRegistry()
@@ -91,14 +121,25 @@ struct AgentCommand: AsyncParsableCommand {
 
         let (autoSync, autoBackup) = try makeBackgroundJobs()
 
+        // M2 IPC serving (ADR 0076): with --socket, tee the stdout
+        // sink with a routed sink fed by per-client dispatchers.
+        #if os(Linux) || os(macOS)
+            let serving = try makeServing(registry: registry)
+            let agentSink: any BadgeEventSink = serving
+                .map { TeeBadgeEventSink([sink, $0.routedSink]) } ?? sink
+        #else
+            try rejectSocketFlag()
+            let agentSink: any BadgeEventSink = sink
+        #endif
+
         let agent = RepoAgent(
             repoRoot: rootURL,
-            gitDir: gitDir,
-            gitVersion: gitVersion,
+            gitDir: context.gitDir,
+            gitVersion: context.gitVersion,
             runner: runner,
             watcher: watcher,
             registry: registry,
-            sink: sink,
+            sink: agentSink,
             autoSync: autoSync,
             autoBackup: autoBackup
         )
@@ -109,14 +150,7 @@ struct AgentCommand: AsyncParsableCommand {
         // IPC client; here it's a single self-subscription.
         _ = await registry.subscribe(roots: [rootURL])
 
-        // Optional auto-stop. Mirrors `sprigctl watch`'s --duration.
-        let stopTask: Task<Void, Never>? = duration.map { secs in
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(secs * 1_000_000_000))
-                await agent.stop()
-                sink.finish()
-            }
-        }
+        let stopTask = makeStopTask(agent: agent, sink: sink)
         defer { stopTask?.cancel() }
 
         var err = StderrStream()
@@ -124,6 +158,12 @@ struct AgentCommand: AsyncParsableCommand {
         if preferences != nil {
             print(jobsLabel(autoSync: autoSync, autoBackup: autoBackup), to: &err)
         }
+        #if os(Linux) || os(macOS)
+            if let socket, serving != nil {
+                print("# agent: serving at \(socket)", to: &err)
+            }
+            defer { serving?.shutdown() }
+        #endif
 
         try await agent.start()
 
@@ -142,13 +182,48 @@ struct AgentCommand: AsyncParsableCommand {
         )
         defer { statsTask?.cancel() }
 
-        // Drain the sink's stream; one JSON envelope per line.
-        // Writes go through `StdoutStream` rather than the default
-        // `print()` path so the line terminator is LF on every
-        // platform — Swift's default stdout writer applies text-mode
-        // FILE * translation on Windows, turning "\n" into "\r\n",
-        // which is unconventional for streaming-JSON tooling and
-        // surprises downstream consumers that split on "\n".
+        try await drainEnvelopes(from: sink)
+    }
+}
+
+// MARK: - Host helpers
+
+extension AgentCommand {
+    #if !os(Linux) && !os(macOS)
+        /// `--socket` requires the ADR 0076 UDS transport; the Windows
+        /// host serves over named pipes in a later slice.
+        private func rejectSocketFlag() throws {
+            guard socket == nil else {
+                throw ValidationError(
+                    "--socket is not supported on this platform yet "
+                        + "(the Windows host serves over named pipes in a later slice)"
+                )
+            }
+        }
+    #endif
+
+    /// Optional auto-stop. Mirrors `sprigctl watch`'s --duration.
+    private func makeStopTask(
+        agent: RepoAgent,
+        sink: InMemoryBadgeEventSink
+    ) -> Task<Void, Never>? {
+        duration.map { secs in
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(secs * 1_000_000_000))
+                await agent.stop()
+                sink.finish()
+            }
+        }
+    }
+
+    /// Drain the sink's stream; one JSON envelope per line.
+    /// Writes go through `StdoutStream` rather than the default
+    /// `print()` path so the line terminator is LF on every
+    /// platform — Swift's default stdout writer applies text-mode
+    /// FILE * translation on Windows, turning "\n" into "\r\n",
+    /// which is unconventional for streaming-JSON tooling and
+    /// surprises downstream consumers that split on "\n".
+    private func drainEnvelopes(from sink: InMemoryBadgeEventSink) async throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
