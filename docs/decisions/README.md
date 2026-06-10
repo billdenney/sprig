@@ -73,10 +73,11 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0061 | Sub-hunk / region staging in CommitComposer                                | accepted |
 | 0062 | Stacked-PR UI — right-click verbs + Stack Manager task window              | accepted |
 | 0063 | Forge integration — task-window verbs (no "PRs" tab)                       | accepted |
-| 0064 | Auto-fetch — AC / metered / battery-aware backoff                          | accepted |
+| 0064 | Auto-fetch — AC / metered / battery-aware backoff                          | accepted (default cadence amended by 0068) |
 | 0065 | Stash safety — export `refs/stash` as patches before repo removal          | accepted |
 | 0066 | Stale `index.lock` recovery flow (60s threshold + one-click clear)         | accepted |
 | 0067 | Named-pipe transport — OVERLAPPED single-client MVP, multi-client + `CreateThreadpoolIo` follow-up | accepted |
+| 0068 | Auto-sync — hourly fetch-all default, opt-in fast-forward auto-pull        | accepted |
 
 ADRs 0001–0053 were ratified simultaneously in the initial scaffolding, based on the planning dialogue captured in the master plan file. Subsequent ADRs (0054+) follow the normal one-per-PR cadence.
 

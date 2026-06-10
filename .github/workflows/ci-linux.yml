@@ -8,13 +8,22 @@ jobs:
   build-portable:
     runs-on: ubuntu-24.04
     container:
-      image: swift:6.3.1-noble   # pinned; matches .swift-version
+      # PINNED TO A MAIN-SNAPSHOT DIGEST, not a stable release (UP-5472):
+      # the fix for the F1 Process.run() SIGSEGV (cross-platform-quirks.md)
+      # merged to swift-corelibs-foundation main on 2026-05-19 (81eb85a)
+      # but is in NO stable toolchain — 6.3.2 predates it and
+      # release/6.4.x branched just before it. This digest is
+      # swiftlang/swift:nightly-main-noble resolved on 2026-06-09;
+      # .swift-version pins local swiftly dev to main-snapshot-2026-05-27
+      # (both post-fix). Re-pin to the next stable release containing
+      # 81eb85a — tracked in docs/planning/audit-followups.md (UP-5472).
+      image: swiftlang/swift@sha256:f94c1fb1c41bef0d0bf3f0987f69c9432aba3148d73099d5594ae0b56225bb49
     steps:
       - uses: actions/checkout@v6
       - name: Install git + libjemalloc-dev
         # `git` — GitCore tests shell out to the system git for version
         #   probes, init/status round-trips, and merge-conflict fixtures.
-        #   The swift:6.3.1-noble image doesn't ship git.
+        #   The Swift Linux images don't ship git.
         # `libjemalloc-dev` — package-benchmark links jemalloc on Linux
         #   for accurate malloc-tracking metrics. Bundled on macOS, missing
         #   on Linux without this. See docs/architecture/performance.md.
@@ -46,9 +55,14 @@ jobs:
         # regressions (a deterministic test bug fails all three
         # attempts back-to-back).
         #
-        # Drop this retry once a Swift toolchain release picks up
-        # PR #5472. The other CI legs (`ci-macos`, `ci-windows`)
-        # don't carry a retry — they don't hit this bug because
+        # UPDATE 2026-06-09: the container image above is pinned to a
+        # main-snapshot digest that CONTAINS the #5472 fix, so this
+        # retry should no longer fire for F1. It stays as
+        # belt-and-suspenders until the pin moves back to a stable
+        # release (UP-5472 in docs/planning/audit-followups.md); the
+        # follow-up that re-pins also evaluates dropping the retry.
+        # The other CI legs (`ci-macos`, `ci-windows`) don't carry a
+        # retry — they never hit this bug because
         # `findMaximumOpenFromProcSelfFD()` is gated by
         # `#if !canImport(Darwin) && !os(Windows)`.
         run: |

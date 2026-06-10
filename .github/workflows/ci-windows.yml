@@ -29,10 +29,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: compnerd/gha-setup-swift@main
+      # Action pinned to a SHA (was @main — three weeks of unreviewed
+      # action drift between runs); toolchain bumped 6.3 → 6.3.1 to
+      # match the local Server 2022 validation VM, so "passes on the
+      # VM" keeps meaning "passes on CI".
+      - uses: compnerd/gha-setup-swift@eeda069c5bc95ac8a9ac5cea7d4f588ae5420ca5
         with:
-          branch: swift-6.3-release
-          tag: 6.3-RELEASE
+          branch: swift-6.3.1-release
+          tag: 6.3.1-RELEASE
 
       - name: Verify git is on PATH
         # The windows-2022 image ships Git for Windows pre-installed at

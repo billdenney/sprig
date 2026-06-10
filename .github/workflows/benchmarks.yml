@@ -1,7 +1,14 @@
 name: Benchmarks (nightly)
 on:
-  schedule:
-    - cron: "17 7 * * *"   # 07:17 UTC
+  # Cron schedule DISABLED until the self-hosted macOS-arm64 runner is
+  # provisioned (docs/ci/self-hosted.md): with no runner matching the
+  # labels below, each nightly queued for ~24 h and was cancelled by
+  # the next one — three weeks of zombie runs cluttering the Actions
+  # history without a single execution. Re-enable the schedule in the
+  # same PR that registers the runner.
+  #
+  # schedule:
+  #   - cron: "17 7 * * *"   # 07:17 UTC
   workflow_dispatch:
 
 jobs:

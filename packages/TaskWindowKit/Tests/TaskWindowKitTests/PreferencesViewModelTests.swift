@@ -7,7 +7,15 @@ import Foundation
 @testable import TaskWindowKit
 import Testing
 
-@Suite("PreferencesViewModel — Codable round-trip + load/save semantics")
+// `.serialized`: each save() is an atomic temp-write + rename, which
+// Windows Defender on the local VM (no exclusions, per security
+// policy) scans aggressively. With the suite's tests running in
+// parallel under full-suite git churn, concurrent saves stack
+// sharing-violation retry ladders until AtomicWriteWithRetry's ~64 s
+// ceiling blows (observed repeatedly on the Server 2022 VM; hosted
+// runners ship Defender exclusions and don't hit this). Serial keeps
+// each save's violation window short.
+@Suite("PreferencesViewModel — Codable round-trip + load/save semantics", .serialized)
 struct PreferencesViewModelTests {
     // MARK: - Fixture helpers
 
@@ -28,6 +36,22 @@ struct PreferencesViewModelTests {
         return { date }
     }()
 
+    // Per-platform visibility budget for ``waitForFile(at:timeout:pollInterval:)``.
+    //
+    // Windows gets 30 s, not the documented ~2 s `FindFirstFile` lag
+    // ceiling: under FULL-suite load (~950 tests, most spawning real
+    // git against the same disk), `save()`'s `AtomicWriteWithRetry`
+    // has been observed taking ~55 s of retries before the file
+    // lands, blowing through a 5 s post-save budget (seen twice on
+    // the local Server 2022 VM; same pattern as the PR #110
+    // polling-watcher budgets). macOS/Linux see the file on the
+    // first poll, so their budget is only a failure backstop.
+    #if os(Windows)
+        private static let fileVisibilityBudget: TimeInterval = 30.0
+    #else
+        private static let fileVisibilityBudget: TimeInterval = 5.0
+    #endif
+
     /// Poll `FileManager.fileExists(atPath:)` until it returns true or
     /// the deadline elapses, sleeping `pollInterval` between attempts.
     ///
@@ -44,7 +68,7 @@ struct PreferencesViewModelTests {
     /// budget, false on timeout).
     private func waitForFile(
         at path: String,
-        timeout: TimeInterval = 5.0,
+        timeout: TimeInterval = fileVisibilityBudget,
         pollInterval: TimeInterval = 0.05
     ) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
@@ -66,7 +90,10 @@ struct PreferencesViewModelTests {
                 URL(fileURLWithPath: "/Users/x/Projects")
             ],
             gitIdentity: GitIdentity(name: "Anne", email: "anne@example.com"),
-            branchSortRecencyFirst: false
+            branchSortRecencyFirst: false,
+            autoFetchEnabled: false,
+            autoFetchIntervalMinutes: 15,
+            autoPullFastForward: true
         )
 
         let encoder = JSONEncoder()
@@ -75,6 +102,26 @@ struct PreferencesViewModelTests {
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: data)
 
         #expect(decoded == original)
+    }
+
+    @Test("pre-ADR-0068 preference JSON (no auto-sync keys) decodes with the documented defaults")
+    func legacyJSONDecodesWithAutoSyncDefaults() throws {
+        // Byte-shape of a prefs file written before the ADR 0068
+        // fields existed — exactly the four original keys.
+        let legacy = Data("""
+        {
+          "branchSortRecencyFirst" : true,
+          "gitIdentity" : { "email" : "anne@example.com", "name" : "Anne" },
+          "schemaVersion" : 1,
+          "watchRoots" : []
+        }
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: legacy)
+        #expect(decoded.autoFetchEnabled == true)
+        #expect(decoded.autoFetchIntervalMinutes == 60)
+        #expect(decoded.autoPullFastForward == false)
+        #expect(decoded.gitIdentity == GitIdentity(name: "Anne", email: "anne@example.com"))
     }
 
     @Test("AppPreferences default initializer is empty + recency-first")
