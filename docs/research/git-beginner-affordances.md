@@ -83,11 +83,13 @@ ancestor proof, and a medium-tier `cleanUpKeepingSafetyCopy` that snapshots the 
 `refs/sprig/snapshots/…/branch-delete` before `-D` (ADR 0033 pairing via `DestructiveOpTier`),
 surfacing the ref for the undo banner. Banner copy in `StatusVocabulary` (both registers).
 
-### 2.5 Template-based commit messages (no AI) — `proposed`, effort S
-A non-AI default for the "what do I write here" freeze: pre-fill from a deterministic
-template — `Update <area>: <file list summary>` derived from staged paths, plus the
-repo's `commit.template` if set. The AI drafting path (ADR 0035) remains the opt-in
-upgrade; the template gives the never-enable-AI user a working default.
+### 2.5 Template-based commit messages (no AI) — `ratified + shipped` (ADR 0074)
+A non-AI default for the "what do I write here" freeze. **Shipped:**
+`CommitMessageSuggestion` — the repo's `commit.template` wins (loaded + comment-stripped the
+way `git commit` does); otherwise a humble synthesized subject from the staged paths
+("Add notes.md", "Update src/app (3 files)"), Add-vs-Update from the porcelain index codes.
+`CommitComposerViewModel.suggestMessage()` fills only an empty draft — never clobbers user
+input. The AI drafting path (ADR 0035) remains the opt-in upgrade.
 
 ## Tier 3 — worth keeping on the radar
 
