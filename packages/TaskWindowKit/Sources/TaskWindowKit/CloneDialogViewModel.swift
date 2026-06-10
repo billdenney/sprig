@@ -69,13 +69,13 @@ public struct CloneRequest: Sendable, Equatable {
     /// highest-priority feedback.
     public var validationError: String? {
         let url = sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if url.isEmpty { return "Enter a repository URL." }
+        if url.isEmpty { return TaskWindowVocabulary.enterRepositoryURL }
 
         let target = targetDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-        if target.isEmpty { return "Choose a target directory." }
+        if target.isEmpty { return TaskWindowVocabulary.chooseTargetDirectory }
 
         if let depth, depth <= 0 {
-            return "Shallow-clone depth must be a positive integer."
+            return TaskWindowVocabulary.shallowDepthMustBePositive
         }
         return nil
     }
@@ -177,7 +177,7 @@ public actor CloneDialogViewModel {
                 let absolute = URL(fileURLWithPath: target).standardized
                 await self?.recordSuccess(absolute)
             } catch is CancellationError {
-                await self?.recordFailure(.init(description: "Clone cancelled."))
+                await self?.recordFailure(.init(description: TaskWindowVocabulary.cancelled("Clone")))
             } catch {
                 await self?.recordFailure(.init(from: error))
             }

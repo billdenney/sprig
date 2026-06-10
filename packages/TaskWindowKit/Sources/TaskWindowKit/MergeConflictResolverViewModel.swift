@@ -143,11 +143,11 @@ public actor MergeConflictResolverViewModel {
     /// - the chosen stage SHA is missing for any reason
     public func applyOne(path: String) async {
         guard let conflict = conflicts.first(where: { $0.entry.path == path }) else {
-            state = .failure(.init(description: "No conflict at path '\(path)'."))
+            state = .failure(.init(description: TaskWindowVocabulary.noConflictAtPath(path)))
             return
         }
         guard let choice = choices[path], choice.isResolved else {
-            state = .failure(.init(description: "Pick a side for '\(path)' first."))
+            state = .failure(.init(description: TaskWindowVocabulary.pickASideFirst(path)))
             return
         }
         await runApply([(conflict, choice)])
@@ -163,7 +163,7 @@ public actor MergeConflictResolverViewModel {
             batch.append((conflict, choice))
         }
         if batch.isEmpty {
-            state = .failure(.init(description: "No paths have a resolution to apply."))
+            state = .failure(.init(description: TaskWindowVocabulary.nothingToApply))
             return
         }
         await runApply(batch)
@@ -186,19 +186,17 @@ public actor MergeConflictResolverViewModel {
     public func finalize() async {
         if case .busy = state { return }
         guard !conflicts.isEmpty else {
-            state = .failure(.init(description: "No conflicts to finalize."))
+            state = .failure(.init(description: TaskWindowVocabulary.noConflictsToFinalize))
             return
         }
         guard isFullyResolved else {
             state = .failure(.init(
-                description: "\(unresolvedCount) path(s) still unresolved."
+                description: TaskWindowVocabulary.stillUnresolved(count: unresolvedCount)
             ))
             return
         }
         guard let argv = operation.continueArguments else {
-            state = .failure(.init(
-                description: "No active midstream operation to finalize. Call refresh() first."
-            ))
+            state = .failure(.init(description: TaskWindowVocabulary.noMidstreamToFinalize))
             return
         }
         await runGit(argv)
@@ -222,9 +220,7 @@ public actor MergeConflictResolverViewModel {
     public func abort() async {
         if case .busy = state { return }
         guard let argv = operation.abortArguments else {
-            state = .failure(.init(
-                description: "No active midstream operation to abort. Call refresh() first."
-            ))
+            state = .failure(.init(description: TaskWindowVocabulary.noMidstreamToAbort))
             return
         }
         await runGit(argv)
@@ -274,7 +270,7 @@ public actor MergeConflictResolverViewModel {
                 }
                 await self?.recordApplySuccess()
             } catch is CancellationError {
-                await self?.recordFailure(.init(description: "Apply cancelled."))
+                await self?.recordFailure(.init(description: TaskWindowVocabulary.cancelled("Apply")))
             } catch {
                 await self?.recordFailure(.init(from: error))
             }
@@ -297,7 +293,7 @@ public actor MergeConflictResolverViewModel {
                 _ = try await runner.run(argv)
                 await self?.recordSuccessAfterGit()
             } catch is CancellationError {
-                await self?.recordFailure(.init(description: "Cancelled."))
+                await self?.recordFailure(.init(description: TaskWindowVocabulary.cancelled()))
             } catch {
                 await self?.recordFailure(.init(from: error))
             }

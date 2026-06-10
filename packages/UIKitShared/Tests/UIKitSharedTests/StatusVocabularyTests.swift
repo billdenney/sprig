@@ -2,9 +2,12 @@
 //
 // ADR 0072 — exhaustive case × register coverage, pure and fast (no
 // git). The `.git` register's strings double as sprigctl's output
-// contract (SprigctlSyncTests pins them end-to-end); the `.plain`
-// register must teach the git term in parentheses wherever a term
-// exists (the affordances 2.1 progressive-disclosure rule).
+// contract (SprigctlSyncTests pins them end-to-end). The `.plain`
+// register is tight everyday language; per the 2026-06-11 ratified
+// policy, `(git: …)` teaching parentheticals appear ONLY at the
+// high-value decision points — diverged, detached HEAD, and the
+// never-forces push rejection — and the policy test below counts
+// them so a stray parenthetical can't creep back in.
 
 import Foundation
 import GitCore
@@ -60,19 +63,119 @@ struct VocabularyRelationshipTests {
         )
     }
 
-    @Test("plain register teaches the git term in parentheses")
-    func plainRegisterTeaches() {
+    @Test("plain register is tight; only diverged keeps its teaching parenthetical")
+    func plainRegisterPhrases() {
         let behind = StatusVocabulary.describeRelationship(of: state(behind: 3), register: .plain)
-        #expect(behind == "your copy is 3 update(s) behind origin/main (git: behind by 3)")
+        #expect(behind == "3 update(s) to get from origin/main")
         let ahead = StatusVocabulary.describeRelationship(of: state(ahead: 2), register: .plain)
-        #expect(ahead.contains("(git: ahead by 2)"))
+        #expect(ahead == "2 commit(s) to send to origin/main")
         let diverged = StatusVocabulary.describeRelationship(
             of: state(ahead: 1, behind: 2),
             register: .plain
         )
-        #expect(diverged.contains("(git: diverged — ahead 1, behind 2)"))
+        #expect(diverged == "you and origin/main both have new work (git: diverged — ahead 1, behind 2)")
         let none = StatusVocabulary.describeRelationship(of: state(upstream: nil), register: .plain)
-        #expect(none.contains("(git: no upstream)"))
+        #expect(none == "not linked to a branch on the server")
+        let gone = StatusVocabulary.describeRelationship(of: state(gone: true), register: .plain)
+        #expect(gone == "origin/main was deleted on the server")
+    }
+}
+
+@Suite("StatusVocabulary — parenthetical policy (ratified 2026-06-11)")
+struct VocabularyParentheticalPolicyTests {
+    private let sha = String(repeating: "a", count: 40)
+
+    private func relationship(ahead: Int, behind: Int, upstream: String?, gone: Bool) -> String {
+        StatusVocabulary.describeRelationship(
+            of: BranchSyncState(
+                name: "main",
+                sha: sha,
+                upstreamFullRef: upstream.map { "refs/remotes/\($0)" },
+                upstreamShort: upstream,
+                ahead: ahead,
+                behind: behind,
+                upstreamGone: gone,
+                isCurrent: true
+            ),
+            register: .plain
+        )
+    }
+
+    private var relationshipStrings: [String] {
+        [
+            relationship(ahead: 0, behind: 0, upstream: "origin/main", gone: false),
+            relationship(ahead: 2, behind: 0, upstream: "origin/main", gone: false),
+            relationship(ahead: 0, behind: 3, upstream: "origin/main", gone: false),
+            relationship(ahead: 1, behind: 2, upstream: "origin/main", gone: false), // diverged ✓
+            relationship(ahead: 0, behind: 0, upstream: nil, gone: false),
+            relationship(ahead: 0, behind: 0, upstream: "origin/main", gone: true)
+        ]
+    }
+
+    private var outcomeStrings: [String] {
+        let ffOutcomes: [FastForwardOutcome] = [
+            .fastForwarded(from: sha, to: String(repeating: "b", count: 40)),
+            .upToDate, .aheadOnly(ahead: 2),
+            .diverged(ahead: 1, behind: 2), // ✓
+            .noUpstream, .upstreamGone, .skippedDirtyWorktree,
+            .skippedCheckedOutElsewhere, .failed(reason: "boom")
+        ]
+        let pushOutcomes: [PushOutcome] = [
+            .pushed(branch: "main", upstream: "origin/main", commits: 2),
+            .nothingToPush(branch: "main"),
+            .publishedNewUpstream(branch: "feature/x", remote: "origin"),
+            .rejectedNonFastForward(branch: "main"), // ✓ never-forces
+            .noRemotes(branch: "main"),
+            .detachedHEAD, // ✓ detached
+            .failed(reason: "boom")
+        ]
+        return ffOutcomes.map { StatusVocabulary.describe($0, register: .plain) }
+            + pushOutcomes.map { StatusVocabulary.describe($0, register: .plain) }
+    }
+
+    private var warningAndStaleStrings: [String] {
+        let warnings: [PreflightWarning] = [
+            .committingToDefaultBranch(branch: "main", upstream: "origin/main"),
+            .detachedHEAD(oid: sha), // ✓ detached
+            .largeStagedFileWithoutLFS(path: "big.bin", sizeBytes: 60_000_000, thresholdBytes: 52_428_800)
+        ]
+        let stales = [
+            StaleBranch(
+                name: "merged", sha: sha, formerUpstream: "origin/merged",
+                isCurrent: false, safeToDelete: true, unpushedCommitCount: 0
+            ),
+            StaleBranch(
+                name: "current", sha: sha, formerUpstream: "origin/current",
+                isCurrent: true, safeToDelete: false, unpushedCommitCount: 0
+            ),
+            StaleBranch(
+                name: "unmerged", sha: sha, formerUpstream: "origin/unmerged",
+                isCurrent: false, safeToDelete: false, unpushedCommitCount: 2
+            )
+        ]
+        return warnings.map { StatusVocabulary.describe($0, register: .plain) }
+            + stales.map { StatusVocabulary.describe($0, register: .plain) }
+            + [
+                StatusVocabulary.describe(SetAsideOutcome.reapplied, register: .plain),
+                StatusVocabulary.describe(SetAsideOutcome.keptInStash(detail: "x"), register: .plain)
+            ]
+    }
+
+    /// Every plain-register string in the vocabulary, exercised with
+    /// representative values. The (git:) teaching device is reserved
+    /// for diverged, detached HEAD, and the never-forces rejection —
+    /// exactly five strings. Anything new that wants a parenthetical
+    /// must update this census deliberately.
+    @Test("only the five ratified strings carry a (git:) parenthetical")
+    func parentheticalCensus() {
+        let all = relationshipStrings + outcomeStrings + warningAndStaleStrings
+
+        let withParenthetical = all.filter { $0.contains("(git:") }
+        #expect(withParenthetical.count == 5, "got: \(withParenthetical)")
+        #expect(withParenthetical.allSatisfy { string in
+            string.contains("diverged") || string.contains("detached HEAD")
+                || string.contains("never forces")
+        }, "a (git:) parenthetical outside the ratified set: \(withParenthetical)")
     }
 }
 
@@ -180,7 +283,7 @@ struct VocabularyWarningTests {
         )
         #expect(
             StatusVocabulary.describe(SetAsideOutcome.reapplied, register: .plain)
-                .contains("(git: stash reapplied)")
+                == "your changes came along to the new branch"
         )
         let kept = StatusVocabulary.describe(
             SetAsideOutcome.keptInStash(detail: "CONFLICT (content): a.txt"),
@@ -191,7 +294,7 @@ struct VocabularyWarningTests {
             SetAsideOutcome.keptInStash(detail: "CONFLICT (content): a.txt"),
             register: .plain
         )
-        #expect(keptPlain.contains("saved"))
+        #expect(keptPlain.contains("set aside"))
         #expect(!keptPlain.contains("CONFLICT"), "plain register spares the raw git detail")
     }
 

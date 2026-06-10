@@ -248,7 +248,9 @@ public actor PreferencesViewModel {
                 let decoded = try JSONDecoder().decode(AppPreferences.self, from: data)
                 await self?.recordLoaded(decoded, at: timestamp)
             } catch is CancellationError {
-                await self?.recordFailure(.init(description: "Preferences load cancelled."))
+                await self?.recordFailure(.init(
+                    description: TaskWindowVocabulary.cancelled("Preferences load")
+                ))
             } catch {
                 await self?.recordFailure(.init(from: error))
             }
@@ -285,7 +287,9 @@ public actor PreferencesViewModel {
                 try await AtomicWriteWithRetry.run(data, to: url)
                 await self?.recordSuccess(at: timestamp)
             } catch is CancellationError {
-                await self?.recordFailure(.init(description: "Preferences save cancelled."))
+                await self?.recordFailure(.init(
+                    description: TaskWindowVocabulary.cancelled("Preferences save")
+                ))
             } catch {
                 await self?.recordFailure(.init(from: error))
             }

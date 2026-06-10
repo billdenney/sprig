@@ -52,13 +52,18 @@ amendment) should lead with plain language ("Before your reset 10 minutes ago").
 ## Tier 2 — high value, more design care needed
 
 ### 2.1 Plain-language status vocabulary with progressive disclosure — infrastructure `ratified + shipped` (ADR 0072)
-**Shipped:** `UIKitShared.StatusVocabulary` — one formatter, two registers (`.plain` teaches
-the git term in parentheses; `.git` is the terse power-user/CLI register, byte-identical to
-sprigctl's pinned output — `sprigctl sync` now consumes it). Covers every typed outcome so
-far: branch relationships, fast-forward, push, pre-flight warnings, set-aside. VMs never
-format; ADR 0019's reveal level picks the register in the shells. **Remaining:** applying
-the plain register across badge tooltips + the other task windows as each shell surface
-lands (M2/M3). No AI required: string tables keyed off porcelain fields we already parse.
+**Shipped:** `UIKitShared.StatusVocabulary` — one formatter, two registers (`.plain` for
+beginners; `.git` is the terse power-user/CLI register, byte-identical to sprigctl's pinned
+output — `sprigctl sync` now consumes it). Covers every typed outcome so far: branch
+relationships, fast-forward, push, pre-flight warnings, set-aside. VMs never format;
+ADR 0019's reveal level picks the register in the shells. **Amendment (shipped, ratified
+2026-06-11):** all `.plain` strings tightened; `(git: …)` teaching parentheticals reduced
+to the three decision points (diverged, detached HEAD, never-forces) with a census test
+pinning the count; the VMs' inline failure/validation strings moved into
+`TaskWindowKit.TaskWindowVocabulary` (one reviewed table, register-neutral imperatives).
+**Remaining:** applying the plain register across badge tooltips + the other task windows
+as each shell surface lands (M2/M3). No AI required: string tables keyed off porcelain
+fields we already parse.
 
 ### 2.2 Auto-backup snapshots of uncommitted work — `ratified + shipped` (ADR 0075)
 Time-Machine-style. **Shipped:** `SafetyKit.WorktreeBackup` — throwaway-index

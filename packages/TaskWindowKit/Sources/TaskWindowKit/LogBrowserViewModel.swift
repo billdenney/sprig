@@ -159,7 +159,7 @@ public actor LogBrowserViewModel {
                 let page = try LogParser.parse(output.stdout)
                 await self?.recordPage(page)
             } catch is CancellationError {
-                await self?.recordFailure(.init(description: "Log load cancelled."))
+                await self?.recordFailure(.init(description: TaskWindowVocabulary.cancelled("Log load")))
             } catch {
                 await self?.recordFailure(.init(from: error))
             }

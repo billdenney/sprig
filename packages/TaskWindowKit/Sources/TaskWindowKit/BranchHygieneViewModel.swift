@@ -81,14 +81,14 @@ public actor BranchHygieneViewModel {
     /// hasn't pulled that merge yet.
     public func cleanUp(_ name: String) async {
         guard let candidate = stale.first(where: { $0.name == name }) else {
-            state = .failure(.init(description: "\(name) is not in the stale-branch list; refresh first."))
+            state = .failure(.init(description: TaskWindowVocabulary.notInStaleList(name)))
             return
         }
         guard candidate.safeToDelete else {
-            state = .failure(.init(
-                description: "\(name) has \(candidate.unpushedCommitCount) unpushed commit(s); "
-                    + "use the keep-a-safety-copy cleanup instead."
-            ))
+            state = .failure(.init(description: TaskWindowVocabulary.useSafetyCopyCleanup(
+                name,
+                unpushed: candidate.unpushedCommitCount
+            )))
             return
         }
         do {
@@ -105,11 +105,11 @@ public actor BranchHygieneViewModel {
     /// banner ("restore" = create the branch back at that ref).
     public func cleanUpKeepingSafetyCopy(_ name: String) async {
         guard let candidate = stale.first(where: { $0.name == name }) else {
-            state = .failure(.init(description: "\(name) is not in the stale-branch list; refresh first."))
+            state = .failure(.init(description: TaskWindowVocabulary.notInStaleList(name)))
             return
         }
         if candidate.isCurrent {
-            state = .failure(.init(description: "Switch away from \(name) before cleaning it up."))
+            state = .failure(.init(description: TaskWindowVocabulary.switchAwayBeforeCleanup(name)))
             return
         }
         let tier = DestructiveOpTier.tier(for: SnapshotRefName.opBranchDelete)
@@ -147,12 +147,9 @@ public actor BranchHygieneViewModel {
             stale.removeAll { $0.name == name }
             state = .success(name)
         case .refusedNotMerged:
-            state = .failure(.init(
-                description: "git refused: \(name) is not fully merged. "
-                    + "Use the keep-a-safety-copy cleanup."
-            ))
+            state = .failure(.init(description: TaskWindowVocabulary.refusedNotFullyMerged(name)))
         case .refusedCheckedOut:
-            state = .failure(.init(description: "\(name) is checked out; switch away first."))
+            state = .failure(.init(description: TaskWindowVocabulary.checkedOutSwitchAway(name)))
         case let .failed(reason):
             state = .failure(.init(description: reason))
         }

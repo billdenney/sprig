@@ -4,9 +4,12 @@
 // become user-facing copy, in two registers:
 //
 //   * `.plain` — the beginner register (affordances item 2.1):
-//     everyday words first, with the git term taught in parentheses
-//     so users *graduate into* the vocabulary instead of being
-//     protected from it.
+//     everyday words, tight. `(git: …)` teaching parentheticals are
+//     reserved for the decision points where knowing the git term
+//     genuinely helps (maintainer-ratified 2026-06-11): DIVERGED,
+//     DETACHED HEAD, and the never-forces push rejection. Everywhere
+//     else the plain words stand alone — users graduate into the
+//     vocabulary at the moments that teach, not on every line.
 //   * `.git` — the terse register: sprigctl's existing output,
 //     byte-for-byte (its tests pin these strings), and the shells'
 //     power-user reveal level (ADR 0019).
@@ -70,20 +73,20 @@ public enum StatusVocabulary {
 
     private static func plainRelationship(of state: BranchSyncState) -> String {
         guard let upstream = state.upstreamShort else {
-            return "not connected to a branch on the server (git: no upstream)"
+            return "not linked to a branch on the server"
         }
         if state.upstreamGone {
-            return "the server branch \(upstream) was deleted (git: upstream gone)"
+            return "\(upstream) was deleted on the server"
         }
         switch (state.ahead, state.behind) {
         case (0, 0):
             return "up to date with \(upstream)"
         case let (a, 0):
-            return "you have \(a) commit(s) not yet on \(upstream) (git: ahead by \(a))"
+            return "\(a) commit(s) to send to \(upstream)"
         case let (0, b):
-            return "your copy is \(b) update(s) behind \(upstream) (git: behind by \(b))"
+            return "\(b) update(s) to get from \(upstream)"
         case let (a, b):
-            return "you and \(upstream) each have new work (git: diverged — ahead \(a), behind \(b))"
+            return "you and \(upstream) both have new work (git: diverged — ahead \(a), behind \(b))"
         }
     }
 
@@ -124,22 +127,23 @@ public enum StatusVocabulary {
 
     private static func plainDescription(of outcome: FastForwardOutcome) -> String {
         switch outcome {
-        case let .fastForwarded(from, to):
-            "updated your copy (git: fast-forwarded \(String(from.prefix(8)))..\(String(to.prefix(8))))"
+        case .fastForwarded:
+            "updated your copy to match the server"
         case .upToDate:
             "already up to date"
         case let .aheadOnly(ahead):
-            "nothing to get; you have \(ahead) commit(s) to send (git: ahead by \(ahead))"
+            "nothing to get — \(ahead) commit(s) to send"
         case let .diverged(ahead, behind):
-            "needs your attention: both sides have new work (git: diverged — ahead \(ahead), behind \(behind))"
+            "needs your attention — you and the server both have new work "
+                + "(git: diverged — ahead \(ahead), behind \(behind))"
         case .noUpstream:
-            "skipped — not connected to a branch on the server (git: no upstream)"
+            "skipped — not linked to a branch on the server"
         case .upstreamGone:
-            "skipped — the server branch was deleted (git: upstream gone)"
+            "skipped — its branch on the server was deleted"
         case .skippedDirtyWorktree:
-            "skipped — you have unsaved changes; set them aside to continue (git: dirty worktree)"
+            "skipped — you have unsaved changes; set them aside first"
         case .skippedCheckedOutElsewhere:
-            "skipped — this branch is open in another folder (git: worktree)"
+            "skipped — this branch is open in another folder"
         case let .failed(reason):
             "failed: \(reason)"
         }
@@ -179,15 +183,15 @@ public enum StatusVocabulary {
     private static func plainDescription(of outcome: PushOutcome) -> String {
         switch outcome {
         case let .pushed(_, upstream, commits):
-            "sent \(commits) commit(s) to \(upstream) (git: pushed)"
+            "sent \(commits) commit(s) to \(upstream)"
         case .nothingToPush:
             "nothing to send — the server already has everything"
         case let .publishedNewUpstream(branch, remote):
-            "published \(branch) to \(remote); it will stay connected (git: push -u)"
+            "published \(branch) to \(remote); they're now linked"
         case .rejectedNonFastForward:
             "couldn't send — the server has new work; get the latest first (git: non-fast-forward; Sprig never forces)"
         case .noRemotes:
-            "no server is set up for this project (git: no remotes)"
+            "no server is set up for this project"
         case .detachedHEAD:
             "skipped — you're not on a branch (git: detached HEAD)"
         case let .failed(reason):
@@ -221,14 +225,14 @@ public enum StatusVocabulary {
     private static func plainDescription(of warning: PreflightWarning) -> String {
         switch warning {
         case let .committingToDefaultBranch(branch, upstream):
-            "you're about to commit to \(branch), which is shared on \(upstream) — "
-                + "most teams work on a separate branch"
+            "this commit goes straight to \(branch), which is shared on \(upstream) — "
+                + "most teams use a separate branch"
         case let .detachedHEAD(oid):
             "you're not on a branch — work here can be lost; create a branch to keep it"
                 + (oid.map { " (git: detached HEAD at \(String($0.prefix(8))))" } ?? " (git: detached HEAD)")
         case let .largeStagedFileWithoutLFS(path, size, threshold):
-            "\(path) is \(Self.byteSize(size)) — large files slow every clone; "
-                + "track it with LFS (git: exceeds the \(Self.byteSize(threshold)) threshold, no lfs filter)"
+            "\(path) is \(Self.byteSize(size)) — over the \(Self.byteSize(threshold)) limit; "
+                + "track it with LFS so clones stay fast"
         }
     }
 
@@ -240,11 +244,11 @@ public enum StatusVocabulary {
     ) -> String {
         switch (outcome, register) {
         case (.reapplied, .plain):
-            "your changes came along to the new branch (git: stash reapplied)"
+            "your changes came along to the new branch"
         case (.reapplied, .git):
             "stash reapplied"
         case (.keptInStash, .plain):
-            "your changes are saved (git: stash@{0}) — re-apply them when ready"
+            "your changes are safely set aside — bring them back when ready"
         case let (.keptInStash(detail), .git):
             "kept in stash: \(detail)"
         }
@@ -276,16 +280,15 @@ public enum StatusVocabulary {
 
     private static func plainDescription(of stale: StaleBranch) -> String {
         if stale.safeToDelete {
-            return "\(stale.name) was merged on the server and its branch there was removed — "
-                + "you can clean it up here (git: upstream gone, fully merged)"
+            return "\(stale.name) was merged on the server — safe to clean up here"
         }
         if stale.isCurrent {
-            return "\(stale.name)'s branch on the server was removed; you're on it now — "
-                + "switch away before cleaning up (git: upstream gone)"
+            return "\(stale.name)'s server branch was removed, but you're on it — "
+                + "switch away before cleaning up"
         }
-        return "\(stale.name)'s branch on the server was removed, but it still has "
+        return "\(stale.name)'s server branch was removed, but it has "
             + "\(stale.unpushedCommitCount) commit(s) that exist nowhere else — "
-            + "cleaning up will keep a safety copy first (git: upstream gone, unmerged)"
+            + "cleanup keeps a safety copy first"
     }
 
     // MARK: - Deterministic byte formatting

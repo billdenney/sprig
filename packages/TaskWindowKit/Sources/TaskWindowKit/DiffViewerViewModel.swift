@@ -149,7 +149,7 @@ public actor DiffViewerViewModel {
                 let loaded = DiffPayload(rawDiff: output.stdout, filesChanged: filesChanged)
                 await self?.recordSuccess(loaded)
             } catch is CancellationError {
-                await self?.recordFailure(.init(description: "Diff load cancelled."))
+                await self?.recordFailure(.init(description: TaskWindowVocabulary.cancelled("Diff load")))
             } catch {
                 await self?.recordFailure(.init(from: error))
             }

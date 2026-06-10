@@ -71,6 +71,32 @@ layer, consumed by shells and sprigctl.
   task windows — rides with each shell surface as it lands (M2/M3); the infrastructure and
   precedent are set.
 
+## Amendment — copy tightening + the task-window string table (maintainer-ratified 2026-06-11)
+
+The maintainer reviewed all 29 shipped `.plain` strings and ratified two changes:
+
+**Globally tighter copy, parentheticals reduced to the decision points.** The original rule
+("teach the git term in parentheses wherever a term exists") put a `(git: …)` on ~20 of 29
+strings — heavier than it is helpful. The ratified policy reserves the teaching device for
+the three moments where knowing the git term changes what the user does next: **diverged**
+(the resolve-it moment), **detached HEAD** (the why-is-my-work-gone moment), and the
+**never-forces** push rejection (the trust moment). Everything else says it in plain words
+alone, tightened ("you have 3 commit(s) not yet on origin/main (git: ahead by 3)" → "3
+commit(s) to send to origin/main"). A census test pins the count: exactly five plain strings
+carry a parenthetical; adding one is a deliberate policy edit, not a drive-by.
+
+**`TaskWindowVocabulary` — the task-window half of the table.** The view models' inline
+failure/validation/cancellation strings ("Pick a branch to switch to first.", "Nothing to
+commit — …", "No active midstream operation to finalize. Call refresh() first.") moved out
+of the call sites into one reviewed table, `TaskWindowKit.TaskWindowVocabulary`, with the
+developer-speak rewritten ("No merge or rebase in progress to finalize — refresh first.").
+It lives in TaskWindowKit, not UIKitShared, because `Failure.description` is built where
+failures are constructed — inside the VMs — and the dependency arrow points
+`UIKitShared → TaskWindowKit`. These strings are deliberately register-neutral (plain
+imperatives that read the same to both audiences); if a register split ever becomes
+necessary, the typed accessors are the seam. House style (trailing period, no flags, no
+parentheticals) is test-enforced.
+
 ## Links
 
 - Implements `docs/research/git-beginner-affordances.md` item 2.1 (infrastructure + first
