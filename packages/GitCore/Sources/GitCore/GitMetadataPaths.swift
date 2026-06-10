@@ -241,6 +241,26 @@ public enum GitMetadataPaths {
         return false
     }
 
+    /// The "don't mutate this repo right now" guard for background +
+    /// composite operations (ADR 0068 auto-pull, ADR 0071 Sync verb).
+    ///
+    /// Two distinct conditions, either of which makes mutation unsafe
+    /// or unkind:
+    ///
+    /// 1. **Transient lock files** (``gitOperationInFlight(in:gitVersion:)``)
+    ///    — another git process is actively writing *right now*;
+    ///    typical duration <100 ms.
+    /// 2. **Parked midstream state** (`MERGE_HEAD`, `rebase-merge/`,
+    ///    `CHERRY_PICK_HEAD`, …) — a merge/rebase/cherry-pick/revert/am
+    ///    is sitting half-done, possibly with conflicts the user is
+    ///    resolving. No locks exist (the git process exited), so the
+    ///    lock check alone misses this — the state can persist for
+    ///    hours.
+    public static func repoIsMidOperation(gitDir: URL) -> Bool {
+        if gitOperationInFlight(in: gitDir) { return true }
+        return MidstreamOperation.detectFromMarkers(gitDirURL: gitDir) != .none
+    }
+
     /// Enumerate **linked worktrees** (`git worktree add`) of the repo
     /// at `gitDir`, returning each linked worktree's root URL.
     ///

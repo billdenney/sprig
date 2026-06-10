@@ -32,11 +32,13 @@ checked-out-branch fast-forward already supports git-native `--autostash`
 pull verb reuses `StashOps` when that verb's task window lands. Pairs with ADR 0065 (stash
 safety: export before destructive ops).
 
-### 1.4 One "Sync" verb — `proposed`, effort M
-TortoiseGit's most-loved button. One Finder context-menu verb that does: fetch → FF-pull
-(per 1.2 rules) → push your unpushed commits (with `--force-with-lease` never implied —
-plain push only). The beginner mental model becomes "Sync = make my copy and the server
-match." Needs ADR for the push half (when to refuse: diverged → open the resolver instead).
+### 1.4 One "Sync" verb — `ratified + shipped` (ADR 0071)
+TortoiseGit's most-loved button: fetch → FF-pull (per 1.2 rules) → **plain** push of the
+current branch (publishing with `-u` when no upstream; force never implied — a rejected push
+is a typed "needs your attention: diverged" report routing to the resolver).
+`TaskWindowKit.SyncViewModel` (staged progress + per-leg `SyncReport`),
+`SyncOps.pushCurrentBranch`, `sprigctl sync --push`. The beginner mental model: "Sync = make
+my copy and the server match."
 
 ### 1.5 "Put back" / undo surface on every destructive verb — partially `shipped`, effort M
 SafetyKit already snapshots before destructive ops (ADR 0033, `refs/sprig/snapshots/*`,
