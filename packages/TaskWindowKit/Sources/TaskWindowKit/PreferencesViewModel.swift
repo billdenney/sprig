@@ -97,6 +97,12 @@ public struct AppPreferences: Sendable, Codable, Equatable {
     /// ADR 0075 default: 7.
     public var autoBackupTTLDays: Int
 
+    /// Guard-rail IDs the user opted out of via the warning banner's
+    /// "never show this again" checkbox (ADR 0070 amendment). Values
+    /// are `PreflightWarning.railID` strings; shells pass this into
+    /// `PreflightChecks(suppressedRails:)`. Empty by default.
+    public var suppressedGuardRails: [String]
+
     public init(
         schemaVersion: Int = 1,
         watchRoots: [URL] = [],
@@ -107,7 +113,8 @@ public struct AppPreferences: Sendable, Codable, Equatable {
         autoPullFastForward: Bool = false,
         autoBackupEnabled: Bool = true,
         autoBackupIntervalMinutes: Int = 30,
-        autoBackupTTLDays: Int = 7
+        autoBackupTTLDays: Int = 7,
+        suppressedGuardRails: [String] = []
     ) {
         self.schemaVersion = schemaVersion
         self.watchRoots = watchRoots
@@ -119,6 +126,7 @@ public struct AppPreferences: Sendable, Codable, Equatable {
         self.autoBackupEnabled = autoBackupEnabled
         self.autoBackupIntervalMinutes = autoBackupIntervalMinutes
         self.autoBackupTTLDays = autoBackupTTLDays
+        self.suppressedGuardRails = suppressedGuardRails
     }
 
     /// Custom decode so preference files written before the ADR 0068 /
@@ -143,6 +151,8 @@ public struct AppPreferences: Sendable, Codable, Equatable {
             .decodeIfPresent(Int.self, forKey: .autoBackupIntervalMinutes) ?? 30
         autoBackupTTLDays = try container
             .decodeIfPresent(Int.self, forKey: .autoBackupTTLDays) ?? 7
+        suppressedGuardRails = try container
+            .decodeIfPresent([String].self, forKey: .suppressedGuardRails) ?? []
     }
 }
 

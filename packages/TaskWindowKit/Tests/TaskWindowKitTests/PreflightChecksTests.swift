@@ -60,6 +60,44 @@ struct PreflightBranchChecksTests {
         #expect(custom.branchWarnings(from: trunk).count == 1)
         #expect(custom.branchWarnings(from: main).isEmpty)
     }
+
+    @Test("railIDs are stable wire values — renaming one is a prefs migration")
+    func railIDStability() {
+        let defaultBranch = PreflightWarning.committingToDefaultBranch(
+            branch: "main", upstream: "origin/main"
+        )
+        let detached = PreflightWarning.detachedHEAD(oid: "abc")
+        let large = PreflightWarning.largeStagedFileWithoutLFS(
+            path: "big.bin", sizeBytes: 1, thresholdBytes: 1
+        )
+        #expect(defaultBranch.railID == "committing-to-default-branch")
+        #expect(detached.railID == "detached-head")
+        #expect(large.railID == "large-staged-file-without-lfs")
+    }
+
+    @Test("a suppressed rail no longer fires; the others still do")
+    func suppressionFiltersPerRail() {
+        let suppressed = PreflightChecks(suppressedRails: ["committing-to-default-branch"])
+        let main = BranchInfo(oid: "abc", head: "main", upstream: "origin/main")
+        let detached = BranchInfo(oid: "abc", head: nil, upstream: nil)
+        #expect(
+            suppressed.branchWarnings(from: main).isEmpty,
+            "opted-out rail must stay quiet"
+        )
+        #expect(
+            suppressed.branchWarnings(from: detached) == [.detachedHEAD(oid: "abc")],
+            "other rails are unaffected"
+        )
+    }
+
+    @Test("suppressing detached-head silences only that rail")
+    func detachedSuppression() {
+        let suppressed = PreflightChecks(suppressedRails: ["detached-head"])
+        let detached = BranchInfo(oid: "abc", head: nil, upstream: nil)
+        let main = BranchInfo(oid: "abc", head: "main", upstream: "origin/main")
+        #expect(suppressed.branchWarnings(from: detached).isEmpty)
+        #expect(suppressed.branchWarnings(from: main).count == 1)
+    }
 }
 
 @Suite("PreflightChecks — large-file + CommitComposer wiring (real git)")
@@ -122,6 +160,25 @@ struct PreflightIntegrationTests {
             runner: runner
         )
 
+        #expect(warnings.isEmpty)
+    }
+
+    @Test("suppressing the LFS rail skips the whole check — no warning for an oversize file")
+    func suppressedLFSRailSkips() async throws {
+        let (dir, runner) = try await makeRepo("suppressed")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data(repeating: 0x42, count: 200).write(to: dir.appendingPathComponent("big.bin"))
+        _ = try await runner.run(["add", "big.bin"])
+
+        let suppressed = PreflightChecks(
+            largeFileThresholdBytes: 64,
+            suppressedRails: ["large-staged-file-without-lfs"]
+        )
+        let warnings = await suppressed.largeStagedFileWarnings(
+            stagedPaths: ["big.bin"],
+            repoURL: dir,
+            runner: runner
+        )
         #expect(warnings.isEmpty)
     }
 

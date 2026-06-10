@@ -42,6 +42,19 @@ public enum PreflightWarning: Sendable, Equatable {
     /// A staged file exceeds `thresholdBytes` and is not LFS-tracked.
     /// One-click remedy: ADR 0029's "track with LFS" flow.
     case largeStagedFileWithoutLFS(path: String, sizeBytes: Int64, thresholdBytes: Int64)
+
+    /// Stable per-rail identifier — the value the shells' "never
+    /// show this again" checkbox writes into
+    /// `AppPreferences.suppressedGuardRails` (ADR 0070 amendment)
+    /// and ``PreflightChecks/suppressedRails`` filters on. Wire-ish:
+    /// persisted in preference files, so renaming is a migration.
+    public var railID: String {
+        switch self {
+        case .committingToDefaultBranch: "committing-to-default-branch"
+        case .detachedHEAD: "detached-head"
+        case .largeStagedFileWithoutLFS: "large-staged-file-without-lfs"
+        }
+    }
 }
 
 /// Stateless evaluator for the ADR 0070 commit-time guard rails.
@@ -58,12 +71,22 @@ public struct PreflightChecks: Sendable {
     public var largeFileThresholdBytes: Int64
     public var defaultBranchNames: Set<String>
 
+    /// Rail IDs the user opted out of via the banner's "never show
+    /// this again" checkbox (persisted in
+    /// `AppPreferences.suppressedGuardRails`; shells pass the value
+    /// through here). Suppressed rails are filtered out of every
+    /// result — the checks may not even run (the LFS rail skips its
+    /// stat pass entirely when suppressed).
+    public var suppressedRails: Set<String>
+
     public init(
         largeFileThresholdBytes: Int64 = PreflightChecks.defaultLargeFileThresholdBytes,
-        defaultBranchNames: Set<String> = PreflightChecks.defaultBranchNames
+        defaultBranchNames: Set<String> = PreflightChecks.defaultBranchNames,
+        suppressedRails: Set<String> = []
     ) {
         self.largeFileThresholdBytes = largeFileThresholdBytes
         self.defaultBranchNames = defaultBranchNames
+        self.suppressedRails = suppressedRails
     }
 
     /// Branch-state checks, computed purely from an already-parsed
@@ -76,12 +99,17 @@ public struct PreflightChecks: Sendable {
     public func branchWarnings(from branch: BranchInfo?) -> [PreflightWarning] {
         guard let branch else { return [] }
         guard let head = branch.head else {
-            return [.detachedHEAD(oid: branch.oid)]
+            return [.detachedHEAD(oid: branch.oid)].filter(notSuppressed)
         }
         if let upstream = branch.upstream, defaultBranchNames.contains(head) {
             return [.committingToDefaultBranch(branch: head, upstream: upstream)]
+                .filter(notSuppressed)
         }
         return []
+    }
+
+    private func notSuppressed(_ warning: PreflightWarning) -> Bool {
+        !suppressedRails.contains(warning.railID)
     }
 
     /// Large-staged-file check: stat each staged path on disk, then
@@ -98,6 +126,7 @@ public struct PreflightChecks: Sendable {
         repoURL: URL,
         runner: Runner
     ) async -> [PreflightWarning] {
+        guard !suppressedRails.contains("large-staged-file-without-lfs") else { return [] }
         let oversize: [(path: String, size: Int64)] = stagedPaths.compactMap { path in
             let url = repoURL.appendingPathComponent(path)
             guard

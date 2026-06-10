@@ -38,7 +38,9 @@ current branch (publishing with `-u` when no upstream; force never implied — a
 is a typed "needs your attention: diverged" report routing to the resolver).
 `TaskWindowKit.SyncViewModel` (staged progress + per-leg `SyncReport`),
 `SyncOps.pushCurrentBranch`, `sprigctl sync --push`. The beginner mental model: "Sync = make
-my copy and the server match."
+my copy and the server match." **Ratified follow-up (ADR 0071 amendment, not yet shipped):**
+the diverged report offers an explicit "replay my commits on top of the server's, then push"
+action — user-initiated rebase → plain push, never a force, medium-tier snapshot first.
 
 ### 1.5 "Put back" / undo surface on every destructive verb — partially `shipped`, effort M
 SafetyKit already snapshots before destructive ops (ADR 0033, `refs/sprig/snapshots/*`,
@@ -65,16 +67,24 @@ untracked work with zero HEAD/index/worktree/hook side effects; identical-tree d
 collision-avoiding ref minting; fail-closed additive restore (pre-restore state backed up
 first, source pinned by SHA). Agent tick (default 30 min, `AutoBackupStartup` reusing the
 generic scheduler) + 7-day TTL prune; `sprigctl backup --list/--now/--restore`; Preferences
-toggles (default on). Size guard noted in the ADR as a future refinement.
+toggles (default on). Size guard noted in the ADR as a future refinement. **Amendment
+(shipped):** backups exclude likely secrets + tool temporaries (`GitCore.JunkFilePatterns`
+deny-list via exclude pathspecs); a junk-only-dirty tree backs up nothing; the skip is
+surfaced to the user by 2.3's `.gitignore` suggestion.
 
 ### 2.3 Pre-flight warnings ("you're about to step on a rake") — commit-time set `ratified + shipped` (ADR 0070)
 Cheap porcelain-driven nudges at verb time, not background nags. **Shipped:**
 `TaskWindowKit.PreflightChecks` + `CommitComposerViewModel.preflightWarnings` — committing to
 `main`/`master` with an upstream ("most teams use a branch"), detached HEAD ("work here can be
 lost"), staged file >50 MiB without LFS (offers ADR 0029's flow). Warnings never block;
-banners carry one-click remedies. **Still proposed:** `git switch` away from a branch with
-unpushed commits (informational; BranchSwitcher has the ahead/behind data via `SyncOps` when
-its UI wants it) and push-time rails.
+banners carry one-click remedies. **Amendment (shipped):** every rail carries a stable
+`railID` and the banner offers "never show this again" →
+`AppPreferences.suppressedGuardRails` → `PreflightChecks(suppressedRails:)`; plus the
+suggest-only `.gitignore` affordance (`GitignoreSuggestion` detect/append — consent-gated,
+header-once, dedup, never rewrites) for untracked files matching the junk rules. **Still
+proposed:** `git switch` away from a branch with unpushed commits (informational;
+BranchSwitcher has the ahead/behind data via `SyncOps` when its UI wants it) and push-time
+rails.
 
 ### 2.4 Branch-hygiene automation — `ratified + shipped` (ADR 0073)
 After fetch prunes a deleted upstream, offer "This branch was merged on the server — clean

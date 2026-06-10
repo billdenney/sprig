@@ -44,7 +44,7 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 `SafetyKit.WorktreeBackup` (+ agent tick via `AutoBackupStartup`; CLI `sprigctl backup`):
 
 - `git status --porcelain -z` — dirty gate (untracked counts).
-- Throwaway index (`GIT_INDEX_FILE` env): `git read-tree HEAD|--empty` → `git add -A` → `git write-tree` — the real index never changes.
+- Throwaway index (`GIT_INDEX_FILE` env): `git read-tree HEAD|--empty` → `git add -A -- . :(exclude,glob)**/<junk>` → `git write-tree` — the real index never changes; the exclude pathspecs are the ADR 0075-amendment deny-list (`GitCore.JunkFilePatterns`: likely secrets + tool temporaries). A staged tree equal to HEAD's tree (junk-only dirt) skips the backup.
 - `git commit-tree <tree> [-p HEAD] -m …` — no hooks run.
 - `git update-ref refs/sprig/backup/<ts>/<branch> <sha>` (collision-avoiding mint) / `update-ref -d` for TTL prune; `for-each-ref` to list.
 - `git restore --source=<sha> --worktree -- :/` — additive fail-closed restore (pre-restore state backed up first).

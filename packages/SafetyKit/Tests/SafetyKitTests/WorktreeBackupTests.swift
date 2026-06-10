@@ -200,6 +200,75 @@ struct WorktreeBackupTests {
         #expect(restored == "precious\n")
     }
 
+    @Test("junk files (secrets + temporaries) are excluded from the backup tree at any depth")
+    func junkFilesExcluded() async throws {
+        let (dir, runner) = try await makeRepo("denylist")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (backup, _) = makeBackup(runner)
+
+        // Legit dirty state…
+        try Data("edited\n".utf8).write(to: dir.appendingPathComponent("a.txt"))
+        try Data("keep me\n".utf8).write(to: dir.appendingPathComponent("notes.txt"))
+        // …plus junk that must NOT persist into git objects: secrets
+        // at the root and nested, and tool temporaries.
+        try Data("AWS_KEY=x\n".utf8).write(to: dir.appendingPathComponent("prod.env"))
+        let nested = dir.appendingPathComponent("config")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try Data("token\n".utf8).write(to: nested.appendingPathComponent("service.pem"))
+        try Data("lock\n".utf8).write(to: dir.appendingPathComponent("~$Budget.xlsx"))
+        try Data("scratch\n".utf8).write(to: dir.appendingPathComponent("x.tmp"))
+
+        let ref = try #require(try await backup.createBackupIfDirty())
+        let lsTree = try await runner.run(["ls-tree", "-r", "--name-only", ref.refName])
+        let paths = Set(lsTree.stdoutString.split(whereSeparator: \.isNewline).map(String.init))
+
+        #expect(paths.contains("a.txt"))
+        #expect(paths.contains("notes.txt"))
+        #expect(!paths.contains("prod.env"), "secrets must not enter backup objects")
+        #expect(!paths.contains("config/service.pem"), "exclusion must reach nested dirs")
+        #expect(!paths.contains("~$Budget.xlsx"))
+        #expect(!paths.contains("x.tmp"))
+    }
+
+    @Test("a tree dirty ONLY with junk files backs up nothing")
+    func junkOnlyDirtyIsClean() async throws {
+        let (dir, runner) = try await makeRepo("junk-only")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (backup, _) = makeBackup(runner)
+
+        try Data("AWS_KEY=x\n".utf8).write(to: dir.appendingPathComponent(".env.local"))
+        try Data("lock\n".utf8).write(to: dir.appendingPathComponent("~$Doc.docx"))
+
+        #expect(
+            try await backup.createBackupIfDirty() == nil,
+            "status is dirty, but the excluded tree equals HEAD — no ref"
+        )
+        #expect(try await backup.backups().isEmpty)
+    }
+
+    @Test("custom excludedPatterns replace the defaults")
+    func customExcludePatterns() async throws {
+        let (dir, runner) = try await makeRepo("custom-excl")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Narrow deny-list: only *.scratch. The default junk rules
+        // are replaced, so a .env DOES get captured here.
+        let clock = TickingClock()
+        let backup = WorktreeBackup(
+            runner: runner,
+            clock: { clock.next() },
+            excludedPatterns: ["**/*.scratch"]
+        )
+
+        try Data("keep\n".utf8).write(to: dir.appendingPathComponent("prod.env"))
+        try Data("drop\n".utf8).write(to: dir.appendingPathComponent("work.scratch"))
+
+        let ref = try #require(try await backup.createBackupIfDirty())
+        let lsTree = try await runner.run(["ls-tree", "-r", "--name-only", ref.refName])
+        let paths = Set(lsTree.stdoutString.split(whereSeparator: \.isNewline).map(String.init))
+        #expect(paths.contains("prod.env"))
+        #expect(!paths.contains("work.scratch"))
+    }
+
     @Test("BackupRefName: sanitization, round-trip parse, foreign-ref rejection")
     func refNameContract() {
         let ts = Date(timeIntervalSince1970: 1_760_000_000)

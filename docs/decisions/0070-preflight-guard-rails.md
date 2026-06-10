@@ -74,9 +74,32 @@ and Preferences toggles for individual rails (ADR 0019's reveal level is the lik
 - The worktree size is a proxy for the staged blob's size; the rare stage-then-truncate
   divergence costs a spurious/missed warning, not correctness.
 
+## Amendment — per-rail opt-out + .gitignore suggestion (maintainer-ratified 2026-06-11)
+
+**Per-rail "never show this again."** The maintainer ratified keeping the default-branch
+rail's simple heuristic *with a user opt-out as part of the warning banner itself*. Each
+`PreflightWarning` now carries a stable `railID` string (`committing-to-default-branch`,
+`detached-head`, `large-staged-file-without-lfs`); the banner's checkbox writes the ID into
+`AppPreferences.suppressedGuardRails`, and shells pass that into
+`PreflightChecks(suppressedRails:)`, which filters the rail out (the LFS rail skips its stat
+pass entirely when suppressed). The IDs are wire values persisted in preference files —
+renaming one is a migration. Re-enabling lives in Preferences (clear the list); the banner
+checkbox is deliberately one-way so a mis-click can't silently disarm a rail forever without
+a visible settings entry.
+
+**`.gitignore` suggestion (suggest-only, never automatic).** When untracked files match the
+curated junk rules (`GitCore.JunkFilePatterns` — likely secrets, tool temporaries),
+`GitignoreSuggestion.detect` produces banner-ready suggestions with the matched paths as
+evidence; `append` (the consent action behind the button) adds the patterns to the repo-root
+`.gitignore` — creating it if missing, appending under a one-time `# Added by Sprig` header,
+never rewriting existing content, deduplicating lines already present. Works for new and
+existing repos alike. This pairs with the ADR 0075 backup deny-list: a file the backup engine
+deliberately skips is exactly a file the user should hear about once, with a one-click
+durable fix.
+
 ## Links
 
 - Implements `docs/research/git-beginner-affordances.md` item 2.3 (commit-time set).
 - ADR 0019 (reveal levels), 0029 (LFS install/track flow), 0040 (keyboard-first), 0050 (hook
   trust — why rails aren't hooks), 0063 (forge default-branch refinement), 0069 (sibling
-  affordance; same directive).
+  affordance; same directive), 0075 amendment (backup deny-list pairing).
