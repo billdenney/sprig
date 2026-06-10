@@ -107,6 +107,20 @@ The Status task window (right-click → Sprig ▶ → Status…) gains an "Auto-
 - The detection accuracy on Linux (post-1.0) is poorer for some signals (no Low Power Mode equivalent); document in `docs/architecture/cross-platform.md`.
 - "Paused" state can confuse users who don't see expected fetch activity; the Status task window's panel is the answer, but they have to open it.
 
+## Amendment 2026-06-11 — Status surface VM shipped
+
+The portable half of the Status task window: **`TaskWindowKit.StatusViewModel`** builds the
+per-repo dashboard in one `refresh()` — working-tree counts (via the shared
+`WorkingTreeClassifier`, extracted from the CommitComposer so the two surfaces can never
+disagree about what counts as staged/unstaged/untracked/conflicted), every branch's upstream
+relationship (`SyncOps.branchSyncStates`), parked-operation detection (`MidstreamOperation`),
+and the safety net's size (ADR 0033 snapshot + ADR 0075 backup counts with the newest
+timestamp). **`fetchNow()`** is this ADR's manual-fetch affordance: one
+`fetch --all --prune`, then a full re-summary so behind/ahead counts reflect the fresh
+remote-tracking refs — proven by a bare-origin test where the behind-count appears only
+after the call. The pause/backoff *panel* data (this ADR's platform signals) joins when the
+Tier-2 signal adapters land; the Tier-3 window is M3 shell work.
+
 ## Links
 
 - Master plan §13.3-G.

@@ -295,36 +295,9 @@ public actor CommitComposerViewModel {
         }
     }
 
-    /// Per-entry classification produced by ``classify(_:)`` —
-    /// extracted so the partitioning loop stays simple (and below
-    /// the cyclomatic-complexity lint).
-    private struct EntryBuckets {
-        var staged: String?
-        var unstaged: String?
-        var untracked: String?
-        var conflicted: String?
-    }
-
-    private static func classify(_ entry: Entry) -> EntryBuckets {
-        var buckets = EntryBuckets()
-        switch entry {
-        case let .ordinary(ord):
-            if ord.xy.index != .unmodified { buckets.staged = ord.path }
-            if ord.xy.worktree != .unmodified { buckets.unstaged = ord.path }
-        case let .renamed(ren):
-            if ren.xy.index != .unmodified { buckets.staged = ren.path }
-            if ren.xy.worktree != .unmodified { buckets.unstaged = ren.path }
-        case let .unmerged(unm):
-            buckets.conflicted = unm.path
-        case let .untracked(path):
-            buckets.untracked = path
-        case .ignored:
-            // Intentionally not surfaced — staging an ignored file
-            // is `git add -f` territory, a separate verb.
-            break
-        }
-        return buckets
-    }
+    // Entry classification lives in the shared
+    // `WorkingTreeClassifier` so the Status window's counts can never
+    // disagree with this composer's partition.
 
     private func applyPartition(_ status: PorcelainV2Status) {
         var staged: [String] = []
@@ -333,7 +306,7 @@ public actor CommitComposerViewModel {
         var conflicted: [String] = []
         var added: Set<String> = []
         for entry in status.entries {
-            let buckets = Self.classify(entry)
+            let buckets = WorkingTreeClassifier.classify(entry)
             if let path = buckets.staged { staged.append(path) }
             if let path = buckets.unstaged { unstaged.append(path) }
             if let path = buckets.untracked { untracked.append(path) }
