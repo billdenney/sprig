@@ -65,6 +65,19 @@ Mid-operation guard: if `GitMetadataPaths.gitOperationInFlight` reports a merge/
 
 **Negative / trade-offs** — hourly is less fresh than 0064's focused-5-min default (mitigated by per-repo override + "Fetch now"); background fetch can contend with user-initiated git on slow filesystems (mitigated: fetch is read-mostly, and the in-flight-operation guard defers); auto-pull moving the working tree underneath a running build/editor can surprise — documented in Preferences copy, off by default, and skipped when the tree is dirty.
 
+## Amendment — host wiring (2026-06-11)
+
+The M2 agent-host substrate: **`AgentKit.AgentPreferencesWiring`** is the one mapping from
+`AppPreferences` to this ADR's `AutoSyncStartup` (and ADR 0075's `AutoBackupStartup`) — every
+host calls it instead of re-deriving intervals/TTLs from raw preference fields, so a
+preferences file means the same thing under every host. First consumer: **`sprigctl agent
+--preferences PATH`** — opt-in per invocation (omitted = the watch-only diagnostic behavior;
+the platform hosts always pass their preferences path). A missing file means a
+not-yet-written store and uses the documented defaults; a malformed file is an error, not a
+silent reset. Knobs the preferences don't express keep this ADR's defaults: fetch fires once
+at host start, backup does not. End-to-end pinned by a CLI test proving the fire-on-start
+fetch advances the remote-tracking ref within the run window.
+
 ## Links
 
 - Supersedes the *default-cadence* portion of ADR 0064 (amended in place; signals/backoff/Status-window surfaces unchanged).

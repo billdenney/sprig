@@ -16,6 +16,7 @@ import GitCore
 import IPCSchema
 import PlatformKit
 import RepoState
+import TaskWindowKit
 import WatcherKit
 
 /// `sprigctl agent <path> [--polling] [--polling-interval SECS] [--duration SECS]`
@@ -56,6 +57,21 @@ struct AgentCommand: AsyncParsableCommand {
     )
     var statsInterval: Double = 0
 
+    @Option(
+        name: .long,
+        help: ArgumentHelp(
+            "Read AppPreferences JSON from PATH and run the background jobs it enables (ADR 0068 auto-fetch, ADR 0075 auto-backup).",
+            discussion: "The M2 host wiring: the platform hosts (macOS "
+                + "LaunchAgent, Windows Service) always pass their "
+                + "preferences path; omitted, the agent is watch-only "
+                + "(no background mutation — the diagnostic behavior). "
+                + "A missing file at PATH means a not-yet-written "
+                + "preferences store and uses the documented defaults; "
+                + "a malformed file is an error."
+        )
+    )
+    var preferences: String?
+
     func run() async throws {
         let rootURL = URL(fileURLWithPath: path ?? FileManager.default.currentDirectoryPath)
             .standardized
@@ -73,6 +89,8 @@ struct AgentCommand: AsyncParsableCommand {
         let registry = SubscriptionRegistry()
         let sink = InMemoryBadgeEventSink()
 
+        let (autoSync, autoBackup) = try makeBackgroundJobs()
+
         let agent = RepoAgent(
             repoRoot: rootURL,
             gitDir: gitDir,
@@ -80,7 +98,9 @@ struct AgentCommand: AsyncParsableCommand {
             runner: runner,
             watcher: watcher,
             registry: registry,
-            sink: sink
+            sink: sink,
+            autoSync: autoSync,
+            autoBackup: autoBackup
         )
 
         // Subscribe the CLI's own consumer to the worktree root so the
@@ -101,6 +121,9 @@ struct AgentCommand: AsyncParsableCommand {
 
         var err = StderrStream()
         print("# agent: watching \(rootURL.path)", to: &err)
+        if preferences != nil {
+            print(jobsLabel(autoSync: autoSync, autoBackup: autoBackup), to: &err)
+        }
 
         try await agent.start()
 
@@ -136,6 +159,47 @@ struct AgentCommand: AsyncParsableCommand {
                 print(line, to: &out)
             }
         }
+    }
+
+    /// M2 host wiring: map the `--preferences` file (when given) to
+    /// the ADR 0068 / 0075 background-job startups via the shared
+    /// `AgentPreferencesWiring`, so the CLI host and the platform
+    /// hosts read a preferences file identically. Omitted flag →
+    /// `(nil, nil)`: watch-only, the diagnostic behavior.
+    private func makeBackgroundJobs() throws -> (AutoSyncStartup?, AutoBackupStartup?) {
+        guard let preferences else { return (nil, nil) }
+        let prefs = try loadPreferences(at: preferences)
+        return (
+            AgentPreferencesWiring.autoSyncStartup(from: prefs),
+            AgentPreferencesWiring.autoBackupStartup(from: prefs)
+        )
+    }
+
+    /// One stderr line saying which background jobs this run starts.
+    private func jobsLabel(
+        autoSync: AutoSyncStartup?,
+        autoBackup: AutoBackupStartup?
+    ) -> String {
+        let fetchLabel = autoSync.map { startup in
+            "auto-fetch on" + (startup.fastForwardPull ? " (+ff-pull)" : "")
+        } ?? "auto-fetch off"
+        let backupLabel = autoBackup != nil ? "auto-backup on" : "auto-backup off"
+        return "# agent: preferences — \(fetchLabel), \(backupLabel)"
+    }
+
+    /// Load `AppPreferences` from `path`. A missing file is a
+    /// not-yet-written preferences store and yields the documented
+    /// defaults (the same semantic as `PreferencesViewModel.load()`);
+    /// a present-but-malformed file throws — silently defaulting over
+    /// a corrupt store would disguise real breakage as "settings
+    /// reverted".
+    private func loadPreferences(at path: String) throws -> AppPreferences {
+        let url = URL(fileURLWithPath: path).standardized
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return AppPreferences()
+        }
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(AppPreferences.self, from: data)
     }
 
     /// Spawn a periodic stats printer if `interval > 0`. Returns nil

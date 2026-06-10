@@ -182,7 +182,13 @@ let package = Package(
             case "AgentKit":
                 // SafetyKit: ADR 0075's auto-backup job
                 // (`WorktreeBackup`) runs inside the agent.
-                ["GitCore", "RepoState", "IPCSchema", "WatcherKit", "TransportKit", "SafetyKit"]
+                // TaskWindowKit: `AppPreferences` — the agent host maps
+                // the user's preferences to its background-job startups
+                // (`AgentPreferencesWiring`, ADR 0068/0075 host wiring).
+                [
+                    "GitCore", "RepoState", "IPCSchema", "WatcherKit",
+                    "TransportKit", "SafetyKit", "TaskWindowKit"
+                ]
             default:
                 []
             }
@@ -201,8 +207,12 @@ let package = Package(
                 // in the production deps plus their helpers. SafetyKit is
                 // a test-only addition for `RepoAgent`'s snapshot-prune
                 // tests, which write `refs/sprig/snapshots/...` refs via
-                // `SnapshotRefName` to set up fixtures.
-                ["GitCore", "RepoState", "IPCSchema", "WatcherKit", "TransportKit", "SafetyKit"]
+                // `SnapshotRefName` to set up fixtures. TaskWindowKit:
+                // `AppPreferences` fixtures for the wiring tests.
+                [
+                    "GitCore", "RepoState", "IPCSchema", "WatcherKit",
+                    "TransportKit", "SafetyKit", "TaskWindowKit"
+                ]
             default:
                 []
             }
@@ -237,6 +247,7 @@ let package = Package(
                     "SubmoduleKit",
                     "DiagKit",
                     "UIKitShared",
+                    "TaskWindowKit",
                     .product(name: "ArgumentParser", package: "swift-argument-parser")
                 ],
                 path: "cli/sprigctl/Sources"
