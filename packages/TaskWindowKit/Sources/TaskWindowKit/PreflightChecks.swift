@@ -1,0 +1,126 @@
+// PreflightChecks.swift
+//
+// ADR 0070 "pre-flight guard rails": cheap, porcelain-driven nudges
+// surfaced at verb time — never blocking, never background nags
+// (git-beginner-affordances.md item 2.3). The checks shipped here are
+// the commit-time set:
+//
+//   * committing to a default branch (main/master) that tracks a
+//     remote — most teams want a feature branch;
+//   * detached HEAD — work here can be lost without a branch;
+//   * a staged file over the size threshold that isn't LFS-tracked —
+//     offer ADR 0029's LFS flow before the push gets painful.
+//
+// Design constraints:
+//   - **Warnings, not errors.** Nothing here blocks `commit()`; the
+//     UI renders banners with one-click remedies. Power users ignore
+//     them (or disable per the reveal level, ADR 0019).
+//   - **No extra spawns in the common case.** Branch checks read the
+//     `PorcelainV2Status` the view model already parsed; the LFS
+//     check stats staged files first and only invokes
+//     `git check-attr` for the over-threshold subset (usually empty).
+//   - **Best-effort.** A failing probe drops its check rather than
+//     failing the refresh — a broken repo will surface real errors
+//     through the verbs themselves.
+
+import Foundation
+import GitCore
+import LFSKit
+
+/// One pre-flight nudge for the UI to render as a banner with a
+/// one-click remedy. Cases carry the data the remedy needs.
+public enum PreflightWarning: Sendable, Equatable {
+    /// HEAD is a default branch (main/master) with an upstream —
+    /// suggest creating a feature branch (one-click: New Branch…
+    /// carrying staged changes along).
+    case committingToDefaultBranch(branch: String, upstream: String)
+
+    /// HEAD is detached — commits made here are easy to lose.
+    /// One-click remedy: create a branch at `oid`.
+    case detachedHEAD(oid: String?)
+
+    /// A staged file exceeds `thresholdBytes` and is not LFS-tracked.
+    /// One-click remedy: ADR 0029's "track with LFS" flow.
+    case largeStagedFileWithoutLFS(path: String, sizeBytes: Int64, thresholdBytes: Int64)
+}
+
+/// Stateless evaluator for the ADR 0070 commit-time guard rails.
+public struct PreflightChecks: Sendable {
+    /// 50 MiB — under GitHub's hard 100 MB push limit with margin,
+    /// and the point where clone/fetch pain becomes noticeable.
+    public static let defaultLargeFileThresholdBytes: Int64 = 50 * 1024 * 1024
+
+    /// Branch names treated as "the default branch". Heuristic, not
+    /// forge-derived: ADR 0063's forge integration can refine this
+    /// with the repo's actual default/protected branch later.
+    public static let defaultBranchNames: Set<String> = ["main", "master"]
+
+    public var largeFileThresholdBytes: Int64
+    public var defaultBranchNames: Set<String>
+
+    public init(
+        largeFileThresholdBytes: Int64 = PreflightChecks.defaultLargeFileThresholdBytes,
+        defaultBranchNames: Set<String> = PreflightChecks.defaultBranchNames
+    ) {
+        self.largeFileThresholdBytes = largeFileThresholdBytes
+        self.defaultBranchNames = defaultBranchNames
+    }
+
+    /// Branch-state checks, computed purely from an already-parsed
+    /// porcelain-v2 status — no git invocation.
+    ///
+    /// `branch.head == nil` is the parser's detached-HEAD encoding
+    /// (`# branch.head (detached)`). The default-branch warning fires
+    /// only when an upstream is configured: a local-only repo where
+    /// `main` is the only branch shouldn't nag.
+    public func branchWarnings(from branch: BranchInfo?) -> [PreflightWarning] {
+        guard let branch else { return [] }
+        guard let head = branch.head else {
+            return [.detachedHEAD(oid: branch.oid)]
+        }
+        if let upstream = branch.upstream, defaultBranchNames.contains(head) {
+            return [.committingToDefaultBranch(branch: head, upstream: upstream)]
+        }
+        return []
+    }
+
+    /// Large-staged-file check: stat each staged path on disk, then
+    /// ask `git check-attr` (via ``LFSKit/LFSAttributeChecker``)
+    /// whether the over-threshold subset is LFS-tracked. Paths that
+    /// don't exist on disk (staged deletes/renames) and probe
+    /// failures are skipped — best-effort by design.
+    ///
+    /// Worktree size is used as a proxy for the staged blob's size;
+    /// the rare stage-then-truncate divergence costs a spurious (or
+    /// missed) warning, not correctness.
+    public func largeStagedFileWarnings(
+        stagedPaths: [String],
+        repoURL: URL,
+        runner: Runner
+    ) async -> [PreflightWarning] {
+        let oversize: [(path: String, size: Int64)] = stagedPaths.compactMap { path in
+            let url = repoURL.appendingPathComponent(path)
+            guard
+                let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                let size = (attrs[.size] as? NSNumber)?.int64Value,
+                size > largeFileThresholdBytes
+            else { return nil }
+            return (path, size)
+        }
+        guard !oversize.isEmpty else { return [] }
+
+        guard let results = try? await LFSAttributeChecker.check(
+            paths: oversize.map(\.path),
+            runner: runner
+        ) else { return [] }
+        let lfsTracked = Set(results.filter(\.isLFS).map(\.path))
+
+        return oversize
+            .filter { !lfsTracked.contains($0.path) }
+            .map { .largeStagedFileWithoutLFS(
+                path: $0.path,
+                sizeBytes: $0.size,
+                thresholdBytes: largeFileThresholdBytes
+            ) }
+    }
+}

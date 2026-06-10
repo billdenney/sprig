@@ -37,74 +37,6 @@
 import Foundation
 import GitCore
 
-/// The commit message the user is composing.
-///
-/// Two-field shape mirrors the natural commit-message split: subject
-/// (first line, ~50 chars by Conventional Commits guidance) plus an
-/// optional body. The VM joins them with a blank line when invoking
-/// `git commit`.
-public struct CommitMessage: Sendable, Equatable {
-    /// First-line subject. Required for ``isReady``.
-    public var subject: String
-
-    /// Optional body — anything that goes after the blank line. Can
-    /// be empty for one-line commits.
-    public var body: String
-
-    public init(subject: String = "", body: String = "") {
-        self.subject = subject
-        self.body = body
-    }
-
-    /// User-presentable validation message, or `nil` if the message
-    /// is submittable. Subject must be non-empty after trimming.
-    public var validationError: String? {
-        if subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Enter a commit subject."
-        }
-        return nil
-    }
-
-    /// Convenience inverse of ``validationError``.
-    public var isReady: Bool {
-        validationError == nil
-    }
-}
-
-/// Boolean toggles the UI exposes on the commit dialog.
-public struct CommitOptions: Sendable, Equatable {
-    /// `--amend` — replace the previous commit instead of creating a
-    /// new one. The UI typically warns when the previous commit has
-    /// been pushed (master plan §11.6); that warning is the shell's
-    /// responsibility, not this VM's.
-    public var amend: Bool
-
-    /// `-s` / `--signoff` — append a `Signed-off-by:` trailer (DCO).
-    public var signOff: Bool
-
-    /// `-S` / `--gpg-sign` — sign the commit via the configured key
-    /// (ADR 0044: SSH signing by default when keys are present).
-    public var sign: Bool
-
-    /// `--allow-empty` — permit a commit with no staged changes.
-    /// Only useful for `--amend`-only message edits or empty merges;
-    /// off by default so accidental no-op commits are rejected by
-    /// git.
-    public var allowEmpty: Bool
-
-    public init(
-        amend: Bool = false,
-        signOff: Bool = false,
-        sign: Bool = false,
-        allowEmpty: Bool = false
-    ) {
-        self.amend = amend
-        self.signOff = signOff
-        self.sign = sign
-        self.allowEmpty = allowEmpty
-    }
-}
-
 /// View model for the Commit task window. Holds the working partition
 /// of changes, the in-progress message, the option toggles, and the
 /// lifecycle state of the latest stage / unstage / commit call.
@@ -151,8 +83,18 @@ public actor CommitComposerViewModel {
     /// SHA `HEAD` already pointed at, so the UI has a stable handle.
     public private(set) var state: TaskWindowState<String> = .idle
 
+    /// ADR 0070 guard rails, repopulated by every ``refresh()``:
+    /// committing-to-default-branch, detached HEAD, large staged file
+    /// without LFS. Warnings only — ``commit()`` never blocks on
+    /// them; the UI renders banners with one-click remedies.
+    public private(set) var preflightWarnings: [PreflightWarning] = []
+
     /// `Runner` configured against ``repoURL``. Injected for tests.
     private let runner: Runner
+
+    /// Guard-rail evaluator. Injected so tests can shrink the
+    /// large-file threshold instead of staging 50 MiB fixtures.
+    private let preflight: PreflightChecks
 
     /// In-flight Task, retained so ``cancel`` can interrupt it.
     private var runningTask: Task<Void, Never>?
@@ -161,12 +103,14 @@ public actor CommitComposerViewModel {
         repoURL: URL,
         runner: Runner,
         message: CommitMessage = CommitMessage(),
-        options: CommitOptions = CommitOptions()
+        options: CommitOptions = CommitOptions(),
+        preflight: PreflightChecks = PreflightChecks()
     ) {
         self.repoURL = repoURL
         self.runner = runner
         self.message = message
         self.options = options
+        self.preflight = preflight
     }
 
     // MARK: - Form updates
@@ -192,15 +136,29 @@ public actor CommitComposerViewModel {
                 "status",
                 "--porcelain=v2",
                 "-z",
+                "--branch", // headers feed the ADR 0070 branch rails
                 "--untracked-files=all"
             ])
             let parsed = try PorcelainV2Parser.parse(output.stdout)
             applyPartition(parsed)
+
+            // ADR 0070 guard rails. Branch checks are pure reads of
+            // the status we just parsed; the large-file check stats
+            // the staged paths and only spawns `git check-attr` for
+            // the over-threshold subset (usually none).
+            var warnings = preflight.branchWarnings(from: parsed.branch)
+            warnings += await preflight.largeStagedFileWarnings(
+                stagedPaths: staged,
+                repoURL: repoURL,
+                runner: runner
+            )
+            preflightWarnings = warnings
         } catch {
             staged = []
             unstaged = []
             untracked = []
             conflicted = []
+            preflightWarnings = []
             state = .failure(.init(from: error))
         }
     }

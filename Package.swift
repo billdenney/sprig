@@ -60,7 +60,10 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // M4's `MergeConflictResolverViewModel` additionally pulls in
     // `ConflictKit` for `ClassifiedConflict` / `ConflictedPathChoice`
     // — both Tier-1 cross-deps so no platform coupling.
-    "TaskWindowKit": ["GitCore", "ConflictKit"],
+    // ADR 0070's `PreflightChecks` adds `LFSKit` for the
+    // large-staged-file-without-LFS guard rail
+    // (`LFSAttributeChecker`, the `git check-attr` wrapper).
+    "TaskWindowKit": ["GitCore", "ConflictKit", "LFSKit"],
     // ConflictKit re-exports `GitCore.UnmergedEntry` /
     // `UnmergedStage` / `GitFileMode` via classification helpers
     // (`ConflictKind.classify(_:)`) so M4 MergeConflictResolver can

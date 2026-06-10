@@ -20,9 +20,13 @@
 //     Branch…) with its own dialog and VM.
 //   - Branch DELETION — separate verb, plus tier-2 confirmation
 //     (ADR 0033 medium-tier when the branch has unpushed commits).
-//   - Dirty-tree auto-stash — for the MVP cut, this VM rejects the
-//     switch and surfaces a hint pointing the user at Stash; a future
-//     iteration can offer "stash, switch, pop" as one combined verb.
+//
+// Dirty-tree handling (ADR 0069 "Set aside changes"): a plain
+// ``switchBranch()`` against a conflicting dirty tree fails with
+// git's error AND sets ``canOfferSetAside`` so the UI can offer the
+// one-click retry: ``switchBranch(settingAsideChanges: true)`` runs
+// the stash-push → switch → stash-pop composite. Fail-closed at every
+// step — see that method's doc for the exact guarantees.
 
 import Foundation
 import GitCore
@@ -54,6 +58,21 @@ public actor BranchSwitcherViewModel {
     /// State of the in-flight `git switch` operation. ``Success`` is
     /// the short name of the now-current branch.
     public private(set) var state: TaskWindowState<String> = .idle
+
+    /// True after a plain ``switchBranch()`` failed because the dirty
+    /// worktree conflicts with the target branch — the signal for the
+    /// UI to offer "Set aside changes and switch" (ADR 0069). Cleared
+    /// on the next switch attempt, ``reset()``, and selection changes.
+    public private(set) var canOfferSetAside: Bool = false
+
+    /// Outcome of the set-aside leg of the most recent
+    /// ``switchBranch(settingAsideChanges:)`` run, or nil when the
+    /// last switch didn't set changes aside. Read alongside ``state``:
+    /// a `.success` with ``SetAsideOutcome/keptInStash(detail:)``
+    /// means the SWITCH succeeded but the changes stayed in
+    /// `stash@{0}` because re-applying conflicted — the UI surfaces
+    /// that banner instead of silently "succeeding".
+    public private(set) var setAsideOutcome: SetAsideOutcome?
 
     /// `Runner` configured against ``repoURL``. Injected for tests.
     private let runner: Runner
@@ -100,11 +119,13 @@ public actor BranchSwitcherViewModel {
     public func select(_ shortName: String) {
         guard inventory.contains(where: { $0.shortName == shortName }) else { return }
         selection = shortName
+        canOfferSetAside = false
     }
 
     /// Drop the current selection back to nil.
     public func clearSelection() {
         selection = nil
+        canOfferSetAside = false
     }
 
     // MARK: - Operation
@@ -113,8 +134,28 @@ public actor BranchSwitcherViewModel {
     /// current state is ``TaskWindowState/busy``, or if the user picked
     /// the branch HEAD already points at (the latter is a soft
     /// "nothing to do" rather than an error).
-    public func switchBranch() async {
+    ///
+    /// **Set-aside mode (ADR 0069).** With
+    /// `settingAsideChanges: true`, runs the composite
+    /// `stash push --include-untracked` → `switch` → `stash pop`,
+    /// fail-closed at every step:
+    ///
+    /// - Nothing to stash → behaves exactly like a plain switch.
+    /// - Stash created, switch **fails** → the stash is popped right
+    ///   back on the original branch (best effort), so the user's
+    ///   tree is exactly as before; the switch failure surfaces.
+    /// - Switch succeeds, pop applies cleanly →
+    ///   ``setAsideOutcome`` = ``SetAsideOutcome/reapplied`` and the
+    ///   changes travel to the new branch.
+    /// - Switch succeeds, pop **conflicts** → git keeps the entry;
+    ///   ``state`` is still `.success` (the switch DID happen) and
+    ///   ``setAsideOutcome`` = ``SetAsideOutcome/keptInStash(detail:)``
+    ///   so the UI shows "your changes are saved in the stash —
+    ///   re-apply when ready" instead of pretending all is well.
+    public func switchBranch(settingAsideChanges: Bool = false) async {
         if case .busy = state { return }
+        canOfferSetAside = false
+        setAsideOutcome = nil
         guard let chosen = selection else {
             state = .failure(.init(description: "Pick a branch to switch to first."))
             return
@@ -130,17 +171,87 @@ public actor BranchSwitcherViewModel {
         let runner = self.runner
 
         runningTask = Task { [weak self] in
-            do {
-                _ = try await runner.run(["switch", chosen])
-                await self?.recordSuccess(chosen)
-            } catch is CancellationError {
-                await self?.recordFailure(.init(description: "Switch cancelled."))
-            } catch {
-                await self?.recordFailure(.init(from: error))
+            if settingAsideChanges {
+                await self?.runSetAsideSwitch(to: chosen, runner: runner)
+            } else {
+                await self?.runPlainSwitch(to: chosen, runner: runner)
             }
         }
 
         await runningTask?.value
+    }
+
+    /// The pre-ADR-0069 path: one `git switch`, with dirty-tree
+    /// failures additionally flagging ``canOfferSetAside``.
+    private func runPlainSwitch(to chosen: String, runner: Runner) async {
+        do {
+            _ = try await runner.run(["switch", chosen])
+            recordSuccess(chosen)
+        } catch is CancellationError {
+            recordFailure(.init(description: "Switch cancelled."))
+        } catch {
+            if Self.isDirtyTreeRefusal(error) {
+                canOfferSetAside = true
+            }
+            recordFailure(.init(from: error))
+        }
+    }
+
+    /// The ADR 0069 composite. See ``switchBranch(settingAsideChanges:)``
+    /// for the step-by-step guarantees.
+    private func runSetAsideSwitch(to chosen: String, runner: Runner) async {
+        let stash = StashOps(runner: runner)
+        let pushed: StashPushOutcome
+        do {
+            pushed = try await stash.push(
+                message: "Sprig: set aside before switching to \(chosen)"
+            )
+        } catch {
+            recordFailure(.init(from: error))
+            return
+        }
+
+        do {
+            _ = try await runner.run(["switch", chosen])
+        } catch {
+            // Switch refused even with a clean tree (unborn branch,
+            // ignored-file collision, …). Put the user's changes back
+            // where they were before surfacing the failure.
+            if case .created = pushed {
+                _ = try? await stash.pop()
+            }
+            recordFailure(.init(from: error))
+            return
+        }
+
+        guard case .created = pushed else {
+            // Tree was clean all along; nothing to re-apply.
+            recordSuccess(chosen)
+            return
+        }
+        do {
+            switch try await stash.pop() {
+            case .applied:
+                setAsideOutcome = .reapplied
+            case let .keptDueToConflict(detail):
+                setAsideOutcome = .keptInStash(detail: detail)
+            }
+            recordSuccess(chosen)
+        } catch {
+            // Pop failed in a way that did NOT keep the stash — never
+            // observed (StashOps verifies); fail loudly rather than
+            // pretend.
+            recordFailure(.init(from: error))
+        }
+    }
+
+    /// Does this `git switch` stderr describe a dirty-worktree
+    /// refusal? Matches the two stable phrasings git uses
+    /// ("would be overwritten by checkout" for tracked changes,
+    /// "would be overwritten" for untracked collisions).
+    static func isDirtyTreeRefusal(_ error: any Error) -> Bool {
+        guard case let GitError.nonZeroExit(_, _, stderr, _) = error else { return false }
+        return stderr.contains("would be overwritten")
     }
 
     /// Cancel the in-flight switch, if any.
@@ -154,6 +265,8 @@ public actor BranchSwitcherViewModel {
         runningTask?.cancel()
         runningTask = nil
         state = .idle
+        canOfferSetAside = false
+        setAsideOutcome = nil
     }
 
     // MARK: - Private transitions
@@ -167,4 +280,16 @@ public actor BranchSwitcherViewModel {
         runningTask = nil
         state = .failure(failure)
     }
+}
+
+/// What happened to the user's set-aside changes during a successful
+/// ``BranchSwitcherViewModel/switchBranch(settingAsideChanges:)``.
+public enum SetAsideOutcome: Sendable, Equatable {
+    /// The stash re-applied cleanly on the new branch and was dropped;
+    /// the user's in-progress work traveled with them.
+    case reapplied
+    /// Re-applying conflicted, so git kept the entry (`stash@{0}`).
+    /// Nothing is lost — the UI surfaces "your changes are saved;
+    /// re-apply when ready" with git's `detail`.
+    case keptInStash(detail: String)
 }

@@ -171,6 +171,127 @@ struct BranchSwitcherViewModelTests {
         }
         let onDisk = try await currentBranchName(runner)
         #expect(onDisk == "main", "we must still be on main after a rejected switch")
+
+        // ADR 0069: the dirty-tree refusal is exactly the moment the
+        // UI offers "Set aside changes and switch".
+        #expect(await vm.canOfferSetAside)
+    }
+
+    // MARK: - ADR 0069 "Set aside changes" composite
+
+    /// Divergent-`a.txt` fixture (same shape as
+    /// ``switchFailsOnConflictingDirtyTree``): feature/x commits a
+    /// different a.txt, we're on main. Optionally dirties a file.
+    private func makeDivergentFixture() async throws -> (URL, Runner) {
+        let (dir, runner) = try await makeRepoWithBranches()
+        _ = try await runner.run(["switch", "feature/x"])
+        try Data("on-feature-x\n".utf8).write(to: dir.appendingPathComponent("a.txt"))
+        _ = try await runner.run(["commit", "-am", "feature edit"])
+        _ = try await runner.run(["switch", "main"])
+        return (dir, runner)
+    }
+
+    @Test("set-aside switch carries non-conflicting changes to the new branch (reapplied)")
+    func setAsideCarriesChangesAcross() async throws {
+        let (dir, runner) = try await makeDivergentFixture()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // Dirty a file that's IDENTICAL on both branches (b.txt is
+        // new + untracked) — the stash re-applies cleanly after the
+        // switch, so the work travels with the user.
+        let scratch = dir.appendingPathComponent("b.txt")
+        try Data("in-progress work\n".utf8).write(to: scratch)
+
+        let vm = BranchSwitcherViewModel(repoURL: dir, runner: runner)
+        await vm.refresh()
+        await vm.select("feature/x")
+        await vm.switchBranch(settingAsideChanges: true)
+
+        #expect(await vm.state == .success("feature/x"))
+        #expect(await vm.setAsideOutcome == .reapplied)
+        #expect(try await currentBranchName(runner) == "feature/x")
+        // Normalize CRLF: Git for Windows defaults to core.autocrlf=true,
+        // so the stash-pop checkout rewrites text files with \r\n there
+        // (CLAUDE.md test rule: no POSIX-only assumptions).
+        let carried = try String(contentsOf: scratch, encoding: .utf8)
+            .replacingOccurrences(of: "\r\n", with: "\n")
+        #expect(carried == "in-progress work\n")
+        // Entry consumed: applied + dropped.
+        let stashRef = try await runner.run(
+            ["rev-parse", "--quiet", "--verify", "refs/stash"],
+            throwOnNonZero: false
+        )
+        #expect(stashRef.exitCode != 0)
+    }
+
+    @Test("set-aside switch with conflicting changes succeeds and keeps them in the stash")
+    func setAsideKeepsConflictingChangesInStash() async throws {
+        let (dir, runner) = try await makeDivergentFixture()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // The dirty edit collides with feature/x's committed a.txt —
+        // re-applying after the switch conflicts, so the entry must
+        // be KEPT and the outcome surfaced.
+        try Data("uncommitted-on-main\n".utf8).write(to: dir.appendingPathComponent("a.txt"))
+
+        let vm = BranchSwitcherViewModel(repoURL: dir, runner: runner)
+        await vm.refresh()
+        await vm.select("feature/x")
+        await vm.switchBranch(settingAsideChanges: true)
+
+        #expect(await vm.state == .success("feature/x"), "the switch itself succeeded")
+        guard case .keptInStash = await vm.setAsideOutcome else {
+            await Issue.record("expected .keptInStash, got \(String(describing: vm.setAsideOutcome))")
+            return
+        }
+        #expect(try await currentBranchName(runner) == "feature/x")
+        // Nothing lost: the entry survived for later re-apply.
+        let stashRef = try await runner.run(
+            ["rev-parse", "--quiet", "--verify", "refs/stash"],
+            throwOnNonZero: false
+        )
+        #expect(stashRef.exitCode == 0)
+    }
+
+    @Test("set-aside switch on a clean tree degrades to a plain switch")
+    func setAsideOnCleanTree() async throws {
+        let (dir, runner) = try await makeRepoWithBranches()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let vm = BranchSwitcherViewModel(repoURL: dir, runner: runner)
+        await vm.refresh()
+        await vm.select("other")
+        await vm.switchBranch(settingAsideChanges: true)
+
+        #expect(await vm.state == .success("other"))
+        #expect(await vm.setAsideOutcome == nil, "nothing was set aside on a clean tree")
+        let stashRef = try await runner.run(
+            ["rev-parse", "--quiet", "--verify", "refs/stash"],
+            throwOnNonZero: false
+        )
+        #expect(stashRef.exitCode != 0, "no stash entry should be created for a clean tree")
+    }
+
+    @Test("canOfferSetAside clears on selection change and reset()")
+    func canOfferSetAsideClears() async throws {
+        let (dir, runner) = try await makeDivergentFixture()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data("uncommitted-on-main\n".utf8).write(to: dir.appendingPathComponent("a.txt"))
+
+        let vm = BranchSwitcherViewModel(repoURL: dir, runner: runner)
+        await vm.refresh()
+        await vm.select("feature/x")
+        await vm.switchBranch()
+        #expect(await vm.canOfferSetAside)
+
+        await vm.select("other")
+        #expect(await vm.canOfferSetAside == false, "stale offer must not survive a new selection")
+
+        await vm.select("feature/x")
+        await vm.switchBranch()
+        #expect(await vm.canOfferSetAside)
+        await vm.reset()
+        #expect(await vm.canOfferSetAside == false)
     }
 
     // MARK: - State management
