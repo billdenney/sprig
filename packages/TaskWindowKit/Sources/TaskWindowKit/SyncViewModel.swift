@@ -28,6 +28,7 @@
 
 import Foundation
 import GitCore
+import SafetyKit
 
 /// Per-leg outcomes of one Sync run. Every leg is best-effort
 /// reportable data; only infrastructure failures (fetch refused, git
@@ -45,17 +46,28 @@ public struct SyncReport: Sendable, Equatable {
     public var currentBranchFastForward: FastForwardOutcome?
     /// Push-leg outcome, nil when the push leg didn't run.
     public var push: PushOutcome?
+    /// Rebase outcome, nil unless ``SyncViewModel/rebaseDivergedThenPush()``
+    /// ran (the ADR 0071-amendment follow-up — never set by ``run()``).
+    public var rebase: RebaseOutcome?
+    /// The ADR 0033 medium-tier safety copy taken before the rebase
+    /// rewrote history — the undo banner's "restore" target. Nil when
+    /// no rewrite was attempted.
+    public var preRebaseSnapshot: SnapshotRefName?
 
     public init(
         fetched: Bool = false,
         skippedMidOperation: Bool = false,
         currentBranchFastForward: FastForwardOutcome? = nil,
-        push: PushOutcome? = nil
+        push: PushOutcome? = nil,
+        rebase: RebaseOutcome? = nil,
+        preRebaseSnapshot: SnapshotRefName? = nil
     ) {
         self.fetched = fetched
         self.skippedMidOperation = skippedMidOperation
         self.currentBranchFastForward = currentBranchFastForward
         self.push = push
+        self.rebase = rebase
+        self.preRebaseSnapshot = preRebaseSnapshot
     }
 }
 
@@ -67,6 +79,7 @@ public actor SyncViewModel {
         case idle
         case fetching
         case fastForwarding
+        case rebasing
         case pushing
         case finished
     }
@@ -160,6 +173,75 @@ public actor SyncViewModel {
             stage = .finished
             state = .failure(.init(from: error))
             return
+        }
+
+        stage = .finished
+        state = .success(report)
+    }
+
+    /// The ADR 0071-amendment follow-up: "replay my commits on top of
+    /// the server's, then push" — the explicit second action the UI
+    /// offers on a diverged report line. **User-initiated only**;
+    /// ``run()`` never calls this.
+    ///
+    /// Sequence: mid-operation guard → ADR 0033 medium-tier snapshot
+    /// (`refs/sprig/snapshots/<ts>/rebase`, surfaced in the report
+    /// for the undo banner) → `git rebase <upstream>` → on a
+    /// *completed* rebase only, a **plain** push. Outcome semantics
+    /// match ``run()``: typed results are report data — a conflicted
+    /// rebase (routed to the resolver, or `rebase --abort` to undo)
+    /// is a successful invocation that found work needing the user.
+    /// A re-rejected push re-reports; nothing here ever forces.
+    public func rebaseDivergedThenPush() async {
+        if case .busy = state { return }
+        state = .busy(progress: nil)
+        let sync = SyncOps(runner: runner)
+        var report = SyncReport()
+
+        // ADR 0056: a repo already mid-operation can't start a rebase.
+        let midOperation = (try? GitMetadataPaths.resolveGitDir(forWorktree: repoURL))
+            .map { GitMetadataPaths.repoIsMidOperation(gitDir: $0) } ?? false
+        if midOperation {
+            report.skippedMidOperation = true
+            stage = .finished
+            state = .success(report)
+            return
+        }
+
+        stage = .rebasing
+        do {
+            // Snapshot before rewriting (ADR 0033: rebase on divergent
+            // history is medium tier). Taken only when the branch
+            // really is about to be rewritten — precondition skips
+            // (not diverged / dirty) shouldn't mint refs.
+            let states = try await sync.branchSyncStates()
+            let current = states.first(where: \.isCurrent)
+            let isDiverged = current.map {
+                $0.upstreamShort != nil && !$0.upstreamGone && $0.ahead > 0 && $0.behind > 0
+            } ?? false
+            let tier = DestructiveOpTier.tier(for: SnapshotRefName.opRebase)
+            if isDiverged, tier?.requiresSnapshot == true {
+                report.preRebaseSnapshot = try await SnapshotWriter(runner: runner)
+                    .createSnapshot(op: SnapshotRefName.opRebase, target: "HEAD")
+            }
+            report.rebase = try await sync.rebaseOntoUpstream()
+        } catch {
+            stage = .finished
+            state = .failure(.init(from: error))
+            return
+        }
+
+        // Push only after a COMPLETED rebase — plain, never forced. A
+        // conflicted/skipped rebase ends here; the report says why.
+        if case .rebased = report.rebase {
+            stage = .pushing
+            do {
+                report.push = try await sync.pushCurrentBranch()
+            } catch {
+                stage = .finished
+                state = .failure(.init(from: error))
+                return
+            }
         }
 
         stage = .finished

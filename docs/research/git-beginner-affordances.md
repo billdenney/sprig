@@ -38,9 +38,11 @@ current branch (publishing with `-u` when no upstream; force never implied — a
 is a typed "needs your attention: diverged" report routing to the resolver).
 `TaskWindowKit.SyncViewModel` (staged progress + per-leg `SyncReport`),
 `SyncOps.pushCurrentBranch`, `sprigctl sync --push`. The beginner mental model: "Sync = make
-my copy and the server match." **Ratified follow-up (ADR 0071 amendment, not yet shipped):**
-the diverged report offers an explicit "replay my commits on top of the server's, then push"
-action — user-initiated rebase → plain push, never a force, medium-tier snapshot first.
+my copy and the server match." **Ratified follow-up (ADR 0071 amendment, shipped):** the
+diverged report offers an explicit "replay my commits on top of the server's, then push"
+action — user-initiated rebase → plain push, never a force, medium-tier snapshot first
+(`SyncViewModel.rebaseDivergedThenPush()`, `sprigctl sync --push --rebase-diverged`); a
+conflicted rebase is left in place for the resolver or one-tap abort.
 
 ### 1.5 "Put back" / undo surface on every destructive verb — partially `shipped`, effort M
 SafetyKit already snapshots before destructive ops (ADR 0033, `refs/sprig/snapshots/*`,

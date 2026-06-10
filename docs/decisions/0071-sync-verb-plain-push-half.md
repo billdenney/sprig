@@ -72,7 +72,7 @@ auto-sync agent job, `sprigctl sync`, and this verb all use it now.
 - A rejected push leaves the user one tap from the resolution flow rather than silently
   failing or dangerously succeeding.
 
-## Amendment — explicit "rebase then push" follow-up (maintainer-ratified 2026-06-11)
+## Amendment — explicit "rebase then push" follow-up (maintainer-ratified 2026-06-11; implemented)
 
 The diverged-branch outcome stays a *report* inside Sync (option 2's rejection stands), but
 the report now gets a ratified second act: the UI offers an **explicit follow-up action** —
@@ -81,9 +81,22 @@ push). Key properties: it is a separate, user-initiated verb on the report line 
 automatic escalation inside Sync); the push after a successful rebase is **plain** — a
 post-rebase upload of replayed commits is fast-forward for a remote that hasn't moved again,
 so the never-force covenant holds (a re-rejection re-reports); a conflicted rebase routes to
-the ADR 0034 conflict surface or one-tap `rebase --abort`. Implementation rides a later
-slice; ADR 0033 tiering applies (rebase on divergent history = medium tier, auto-snapshot
-under ADR 0033 before executing).
+the ADR 0034 conflict surface or one-tap `rebase --abort`. ADR 0033 tiering applies (rebase
+on divergent history = medium tier, auto-snapshot before executing).
+
+**Implementation (same date):** `SyncOps.rebaseOntoUpstream()` — typed `RebaseOutcome`
+(`rebased` / `notDiverged` / `conflicted` — left in place with the unmerged-path count /
+`noUpstream` / `detachedHEAD` / `dirtyWorktree` / `failed`); the same tracked-modifications
+dirty standard as the FF leg, and the same "only a genuinely diverged branch proceeds" rule
+(behind-only belongs to the FF leg, ahead-only to the push leg).
+`SyncViewModel.rebaseDivergedThenPush()` orchestrates: ADR 0056 mid-operation guard →
+medium-tier snapshot (`refs/sprig/snapshots/<ts>/rebase`, surfaced in the report as the
+undo target — minted only when a rewrite will actually run) → rebase → plain push only
+after a *completed* rebase. CLI parity: `sprigctl sync --push --rebase-diverged` (consent
+per invocation; stable JSON tags `rebaseOutcome`/`rebasePushOutcome`/`preRebaseSnapshot`).
+The re-rejection property is pinned by a test that moves the remote again after the fetch:
+the rebase lands on the stale tracking ref, the push re-reports, the remote's newer work
+survives untouched.
 
 ## Links
 

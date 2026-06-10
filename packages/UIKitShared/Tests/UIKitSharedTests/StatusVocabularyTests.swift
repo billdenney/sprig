@@ -129,8 +129,18 @@ struct VocabularyParentheticalPolicyTests {
             .detachedHEAD, // ✓ detached
             .failed(reason: "boom")
         ]
+        let rebaseOutcomes: [RebaseOutcome] = [
+            .rebased(branch: "main", onto: "origin/main", replayed: 2),
+            .notDiverged(branch: "main"),
+            .conflicted(branch: "main", conflictedPathCount: 1),
+            .noUpstream(branch: "main"),
+            .detachedHEAD, // ✓ detached
+            .dirtyWorktree(branch: "main"),
+            .failed(reason: "boom")
+        ]
         return ffOutcomes.map { StatusVocabulary.describe($0, register: .plain) }
             + pushOutcomes.map { StatusVocabulary.describe($0, register: .plain) }
+            + rebaseOutcomes.map { StatusVocabulary.describe($0, register: .plain) }
     }
 
     private var warningAndStaleStrings: [String] {
@@ -164,14 +174,15 @@ struct VocabularyParentheticalPolicyTests {
     /// Every plain-register string in the vocabulary, exercised with
     /// representative values. The (git:) teaching device is reserved
     /// for diverged, detached HEAD, and the never-forces rejection —
-    /// exactly five strings. Anything new that wants a parenthetical
+    /// six strings today (the rebase follow-up added a second
+    /// detached-HEAD line). Anything new that wants a parenthetical
     /// must update this census deliberately.
-    @Test("only the five ratified strings carry a (git:) parenthetical")
+    @Test("only the ratified strings carry a (git:) parenthetical")
     func parentheticalCensus() {
         let all = relationshipStrings + outcomeStrings + warningAndStaleStrings
 
         let withParenthetical = all.filter { $0.contains("(git:") }
-        #expect(withParenthetical.count == 5, "got: \(withParenthetical)")
+        #expect(withParenthetical.count == 6, "got: \(withParenthetical)")
         #expect(withParenthetical.allSatisfy { string in
             string.contains("diverged") || string.contains("detached HEAD")
                 || string.contains("never forces")
@@ -243,6 +254,50 @@ struct VocabularyOutcomeTests {
             #expect(
                 !rejected.localizedCaseInsensitiveContains("use --force"),
                 "and must never INSTRUCT forcing"
+            )
+        }
+    }
+}
+
+@Suite("StatusVocabulary — rebase follow-up outcomes")
+struct VocabularyRebaseTests {
+    @Test("git register is pinned (CLI wire); plain register replays in plain words")
+    func rebaseCoverage() {
+        #expect(
+            StatusVocabulary.describe(
+                RebaseOutcome.rebased(branch: "main", onto: "origin/main", replayed: 2),
+                register: .git
+            ) == "main: rebased 2 commit(s) onto origin/main"
+        )
+        #expect(
+            StatusVocabulary.describe(
+                RebaseOutcome.rebased(branch: "main", onto: "origin/main", replayed: 2),
+                register: .plain
+            ) == "replayed your 2 commit(s) on top of the server's work"
+        )
+        let conflictedPlain = StatusVocabulary.describe(
+            RebaseOutcome.conflicted(branch: "main", conflictedPathCount: 3),
+            register: .plain
+        )
+        #expect(conflictedPlain.contains("resolve"), "conflict copy names the fix path")
+        #expect(conflictedPlain.contains("abort"), "…and the undo path")
+        let outcomes: [RebaseOutcome] = [
+            .rebased(branch: "main", onto: "origin/main", replayed: 1),
+            .notDiverged(branch: "main"),
+            .conflicted(branch: "main", conflictedPathCount: 1),
+            .noUpstream(branch: "main"),
+            .detachedHEAD,
+            .dirtyWorktree(branch: "main"),
+            .failed(reason: "boom")
+        ]
+        for outcome in outcomes {
+            let git = StatusVocabulary.describe(outcome, register: .git)
+            let plain = StatusVocabulary.describe(outcome, register: .plain)
+            #expect(!git.isEmpty)
+            #expect(!plain.isEmpty)
+            #expect(
+                !plain.localizedCaseInsensitiveContains("force"),
+                "rebase copy never mentions forcing: \(plain)"
             )
         }
     }

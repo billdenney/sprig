@@ -38,6 +38,7 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git push --quiet` — plain push of the current branch; **force is never emitted from this surface** (ADR 0052's force verb is separate). Rejections classify by git's stable stderr markers (`non-fast-forward`, `[rejected]`, `fetch first`).
 - `git push --quiet -u <remote> <branch>` — publish-and-track when no upstream exists.
 - `git remote` — remote enumeration for the publish path.
+- `git rebase <upstream>` — the ADR 0071-amendment follow-up (`SyncOps.rebaseOntoUpstream`, `sprigctl sync --push --rebase-diverged`): user-initiated replay of a diverged branch, medium-tier snapshot first (ADR 0033), plain push after. A conflicted rebase is left in place — `git ls-files -u -z` counts the paths for the report; continuation belongs to the resolver, `git rebase --abort` is the one-tap undo.
 
 ### Auto-backup (ADR 0075) — engine invocations
 

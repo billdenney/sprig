@@ -245,8 +245,10 @@ public struct SyncOps: Sendable {
     /// True when the worktree has *tracked* modifications (any
     /// `git status --porcelain -z` record other than untracked
     /// `?? `). Untracked-only trees are fast-forward-safe; git guards
-    /// the overwrite case itself.
-    private func hasTrackedModifications() async throws -> Bool {
+    /// the overwrite case itself. Internal (not private): the rebase
+    /// extension (`SyncOps+Rebase.swift`) applies the same dirty
+    /// standard before rewriting.
+    func hasTrackedModifications() async throws -> Bool {
         let status = try await runner.run(["status", "--porcelain", "-z"])
         guard let text = String(data: status.stdout, encoding: .utf8) else {
             // Undecodable status output: treat as dirty (fail closed).
