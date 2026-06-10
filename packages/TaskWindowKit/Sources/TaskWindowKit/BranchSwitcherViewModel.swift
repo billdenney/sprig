@@ -157,7 +157,7 @@ public actor BranchSwitcherViewModel {
         canOfferSetAside = false
         setAsideOutcome = nil
         guard let chosen = selection else {
-            state = .failure(.init(description: "Pick a branch to switch to first."))
+            state = .failure(.init(description: TaskWindowVocabulary.pickABranchFirst))
             return
         }
         if let head = inventory.first(where: \.isHead), head.shortName == chosen {
@@ -188,7 +188,7 @@ public actor BranchSwitcherViewModel {
             _ = try await runner.run(["switch", chosen])
             recordSuccess(chosen)
         } catch is CancellationError {
-            recordFailure(.init(description: "Switch cancelled."))
+            recordFailure(.init(description: TaskWindowVocabulary.cancelled("Switch")))
         } catch {
             if Self.isDirtyTreeRefusal(error) {
                 canOfferSetAside = true

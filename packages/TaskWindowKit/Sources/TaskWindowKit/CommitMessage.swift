@@ -30,7 +30,7 @@ public struct CommitMessage: Sendable, Equatable {
     /// is submittable. Subject must be non-empty after trimming.
     public var validationError: String? {
         if subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Enter a commit subject."
+            return TaskWindowVocabulary.enterCommitSubject
         }
         return nil
     }

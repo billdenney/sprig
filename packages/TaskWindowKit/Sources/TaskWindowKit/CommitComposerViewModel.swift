@@ -218,7 +218,7 @@ public actor CommitComposerViewModel {
 
         if !conflicted.isEmpty {
             state = .failure(.init(
-                description: "Resolve \(conflicted.count) conflicted file(s) before committing."
+                description: TaskWindowVocabulary.resolveConflictedFirst(count: conflicted.count)
             ))
             return
         }
@@ -229,9 +229,7 @@ public actor CommitComposerViewModel {
         }
 
         if staged.isEmpty, !options.amend, !options.allowEmpty {
-            state = .failure(.init(
-                description: "Nothing to commit — stage changes, amend, or enable allow-empty."
-            ))
+            state = .failure(.init(description: TaskWindowVocabulary.nothingToCommit))
             return
         }
 
@@ -246,7 +244,7 @@ public actor CommitComposerViewModel {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 await self?.recordCommitSuccess(sha)
             } catch is CancellationError {
-                await self?.recordFailure(.init(description: "Commit cancelled."))
+                await self?.recordFailure(.init(description: TaskWindowVocabulary.cancelled("Commit")))
             } catch {
                 await self?.recordFailure(.init(from: error))
             }

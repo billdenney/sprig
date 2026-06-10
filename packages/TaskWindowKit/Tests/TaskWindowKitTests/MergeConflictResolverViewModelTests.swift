@@ -234,7 +234,7 @@ struct MergeConflictResolverViewModelTests {
         await vm.applyAll()
 
         if case let .failure(failure) = await vm.state {
-            #expect(failure.description.contains("No paths"))
+            #expect(failure.description == TaskWindowVocabulary.nothingToApply)
         } else {
             Issue.record("expected .failure when nothing to apply")
         }
