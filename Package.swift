@@ -63,7 +63,10 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // ADR 0070's `PreflightChecks` adds `LFSKit` for the
     // large-staged-file-without-LFS guard rail
     // (`LFSAttributeChecker`, the `git check-attr` wrapper).
-    "TaskWindowKit": ["GitCore", "ConflictKit", "LFSKit"],
+    // ADR 0073's `BranchHygieneViewModel` adds `SafetyKit`: deleting
+    // a branch with unpushed commits is ADR 0033 medium tier, so the
+    // VM wraps the force-delete in `SnapshotWriter.withSnapshot`.
+    "TaskWindowKit": ["GitCore", "ConflictKit", "LFSKit", "SafetyKit"],
     // ADR 0072's `StatusVocabulary` formats GitCore outcome types
     // (FastForwardOutcome, PushOutcome, BranchSyncState) and
     // TaskWindowKit's (PreflightWarning, SetAsideOutcome) into

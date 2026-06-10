@@ -250,6 +250,44 @@ public enum StatusVocabulary {
         }
     }
 
+    // MARK: - Stale branches (ADR 0073)
+
+    /// The cleanup-banner line for one stale branch.
+    public static func describe(
+        _ stale: StaleBranch,
+        register: VocabularyRegister = .plain
+    ) -> String {
+        switch register {
+        case .git: gitDescription(of: stale)
+        case .plain: plainDescription(of: stale)
+        }
+    }
+
+    private static func gitDescription(of stale: StaleBranch) -> String {
+        let upstream = stale.formerUpstream ?? "upstream"
+        if stale.safeToDelete {
+            return "\(stale.name): \(upstream) is gone; merged — safe to delete"
+        }
+        if stale.isCurrent {
+            return "\(stale.name): \(upstream) is gone; currently checked out"
+        }
+        return "\(stale.name): \(upstream) is gone; \(stale.unpushedCommitCount) unpushed commit(s)"
+    }
+
+    private static func plainDescription(of stale: StaleBranch) -> String {
+        if stale.safeToDelete {
+            return "\(stale.name) was merged on the server and its branch there was removed — "
+                + "you can clean it up here (git: upstream gone, fully merged)"
+        }
+        if stale.isCurrent {
+            return "\(stale.name)'s branch on the server was removed; you're on it now — "
+                + "switch away before cleaning up (git: upstream gone)"
+        }
+        return "\(stale.name)'s branch on the server was removed, but it still has "
+            + "\(stale.unpushedCommitCount) commit(s) that exist nowhere else — "
+            + "cleaning up will keep a safety copy first (git: upstream gone, unmerged)"
+    }
+
     // MARK: - Deterministic byte formatting
 
     /// Locale-free size string: bytes below 1 MiB, otherwise MiB with

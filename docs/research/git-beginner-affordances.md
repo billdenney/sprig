@@ -75,11 +75,13 @@ banners carry one-click remedies. **Still proposed:** `git switch` away from a b
 unpushed commits (informational; BranchSwitcher has the ahead/behind data via `SyncOps` when
 its UI wants it) and push-time rails.
 
-### 2.4 Branch-hygiene automation — `proposed`, effort S
-After fetch notices an upstream branch was deleted (typical post-merge), offer "This
-branch was merged on the server — clean it up?" (delete local, with the unpushed-commits
-guard from `DestructiveOpTier`). Keeps the beginner's branch list from becoming a junk
-drawer — a real comprehension cost, not just aesthetics.
+### 2.4 Branch-hygiene automation — `ratified + shipped` (ADR 0073)
+After fetch prunes a deleted upstream, offer "This branch was merged on the server — clean
+it up?". **Shipped:** `GitCore.BranchHygiene` (stale detection classified against the remote
+default branch; typed delete outcomes) + `BranchHygieneViewModel` — safe cleanup on the
+ancestor proof, and a medium-tier `cleanUpKeepingSafetyCopy` that snapshots the tip under
+`refs/sprig/snapshots/…/branch-delete` before `-D` (ADR 0033 pairing via `DestructiveOpTier`),
+surfacing the ref for the undo banner. Banner copy in `StatusVocabulary` (both registers).
 
 ### 2.5 Template-based commit messages (no AI) — `proposed`, effort S
 A non-AI default for the "what do I write here" freeze: pre-fill from a deterministic

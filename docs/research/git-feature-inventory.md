@@ -39,6 +39,15 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git push --quiet -u <remote> <branch>` — publish-and-track when no upstream exists.
 - `git remote` — remote enumeration for the publish path.
 
+### Branch hygiene (ADR 0073) — engine invocations
+
+`GitCore.BranchHygiene` + `BranchHygieneViewModel` (detection rides ADR 0068's `branchSyncStates`):
+
+- `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` — remote default branch (fallback probes `origin/main`, `origin/master`).
+- `git merge-base --is-ancestor <branch> <remote-default>` — the lossless-delete proof.
+- `git rev-list --count <branch> ^<remote-default>` — unpushed-commit count for the confirmation.
+- `git branch -d <name>` / `git branch -D <name>` — typed refusal outcomes; the medium-tier path snapshots the tip via SafetyKit (`refs/sprig/snapshots/…/branch-delete`) before `-D`.
+
 ### Background auto-sync (ADR 0068) — engine invocations
 
 `GitCore.SyncOps` drives these; `AgentKit.AutoSyncScheduler` sequences them hourly (default); `sprigctl sync` is the one-shot CLI face.
