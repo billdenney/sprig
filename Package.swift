@@ -259,6 +259,8 @@ let package = Package(
                 // GitCore for ProcessTerminationGate (race-safe replacement
                 // for Process.waitUntilExit) used by SprigctlSupport;
                 // RepoState + IPCSchema + AgentKit for AgentCommand tests;
+                // TransportKit for the agent --socket end-to-end test
+                // (the test process is the UDS client);
                 // SafetyKit for RecoverCommand tests (snapshot ref names);
                 // ConflictKit for ConflictsCommand tests;
                 // LFSKit for LFSCommand tests;
@@ -270,6 +272,7 @@ let package = Package(
                     "RepoState",
                     "IPCSchema",
                     "AgentKit",
+                    "TransportKit",
                     "SafetyKit",
                     "ConflictKit",
                     "LFSKit",
