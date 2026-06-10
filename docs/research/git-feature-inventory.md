@@ -31,6 +31,14 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git switch <branch>` — on failure after a stash was created, the stash is popped back (fail-closed restore).
 - `git stash pop` — conflicted pops are detected by non-zero exit **plus** `refs/stash` still resolving (git keeps the entry), surfaced as "kept in stash".
 
+### Sync verb (ADR 0071) — engine invocations
+
+`SyncOps.pushCurrentBranch` + `TaskWindowKit.SyncViewModel` (fetch and fast-forward legs reuse ADR 0068's invocations below):
+
+- `git push --quiet` — plain push of the current branch; **force is never emitted from this surface** (ADR 0052's force verb is separate). Rejections classify by git's stable stderr markers (`non-fast-forward`, `[rejected]`, `fetch first`).
+- `git push --quiet -u <remote> <branch>` — publish-and-track when no upstream exists.
+- `git remote` — remote enumeration for the publish path.
+
 ### Background auto-sync (ADR 0068) — engine invocations
 
 `GitCore.SyncOps` drives these; `AgentKit.AutoSyncScheduler` sequences them hourly (default); `sprigctl sync` is the one-shot CLI face.

@@ -77,7 +77,7 @@ extension RepoAgent {
             do {
                 try await sync.fetchAll()
                 guard fastForwardPull else { return }
-                if let gitDir, GitMetadataPaths.gitOperationInFlight(in: gitDir) {
+                if let gitDir, GitMetadataPaths.repoIsMidOperation(gitDir: gitDir) {
                     return
                 }
                 _ = try await sync.fastForwardLocalBranches()

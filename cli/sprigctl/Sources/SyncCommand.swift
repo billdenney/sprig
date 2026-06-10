@@ -40,6 +40,16 @@ struct SyncCommand: AsyncParsableCommand {
     )
     var autostash: Bool = false
 
+    @Flag(
+        name: .long,
+        help: ArgumentHelp(
+            "Plain-push the current branch after fetching (and pulling, with --pull).",
+            discussion: "Publishes with -u when no upstream exists. Never forces; "
+                + "a diverged upstream is reported, not overridden (ADR 0071)."
+        )
+    )
+    var push: Bool = false
+
     @Flag(name: .long, help: "Emit JSON instead of a human-readable summary.")
     var json: Bool = false
 
@@ -56,10 +66,11 @@ struct SyncCommand: AsyncParsableCommand {
             try await sync.fetchAll()
         }
 
-        // ADR 0056: never mutate a repo that's mid-merge/-rebase.
-        // Report-only mode is unaffected.
+        // ADR 0056: never mutate a repo that's mid-merge/-rebase —
+        // active locks OR parked midstream state. Report-only mode is
+        // unaffected.
         let midOperation = (try? GitMetadataPaths.resolveGitDir(forWorktree: repoURL))
-            .map { GitMetadataPaths.gitOperationInFlight(in: $0) } ?? false
+            .map { GitMetadataPaths.repoIsMidOperation(gitDir: $0) } ?? false
         var pullResults: [FastForwardResult]?
         var skippedMidOperation = false
         if pull {
@@ -72,11 +83,29 @@ struct SyncCommand: AsyncParsableCommand {
             }
         }
 
+        // Push leg (ADR 0071): after pull so a fast-forwarded branch
+        // doesn't false-reject. Honors the same mid-operation guard.
+        var pushOutcome: PushOutcome?
+        if push, !skippedMidOperation {
+            pushOutcome = try await sync.pushCurrentBranch()
+        }
+
         let states = try await sync.branchSyncStates()
         if json {
-            try emitJSON(states: states, pullResults: pullResults, fetched: !noFetch, skippedMidOperation: skippedMidOperation)
+            try emitJSON(
+                states: states,
+                pullResults: pullResults,
+                fetched: !noFetch,
+                skippedMidOperation: skippedMidOperation,
+                pushOutcome: pushOutcome
+            )
         } else {
-            emitHuman(states: states, pullResults: pullResults, skippedMidOperation: skippedMidOperation)
+            emitHuman(
+                states: states,
+                pullResults: pullResults,
+                skippedMidOperation: skippedMidOperation,
+                pushOutcome: pushOutcome
+            )
         }
         if skippedMidOperation {
             throw ExitCode(2)
@@ -88,15 +117,38 @@ struct SyncCommand: AsyncParsableCommand {
     private func emitHuman(
         states: [BranchSyncState],
         pullResults: [FastForwardResult]?,
-        skippedMidOperation: Bool
+        skippedMidOperation: Bool,
+        pushOutcome: PushOutcome?
     ) {
         var out = StdoutStream()
         if skippedMidOperation {
             var err = StderrStream()
-            print("# pull skipped: a git operation (merge/rebase/…) is in progress", to: &err)
+            print("# pull/push skipped: a git operation (merge/rebase/…) is in progress", to: &err)
         }
         for state in states {
             print(humanLine(for: state, pullResults: pullResults), to: &out)
+        }
+        if let pushOutcome {
+            print("push: \(describe(pushOutcome))", to: &out)
+        }
+    }
+
+    private func describe(_ outcome: PushOutcome) -> String {
+        switch outcome {
+        case let .pushed(branch, upstream, commits):
+            "\(branch): pushed \(commits) commit(s) to \(upstream)"
+        case let .nothingToPush(branch):
+            "\(branch): nothing to push"
+        case let .publishedNewUpstream(branch, remote):
+            "\(branch): published to \(remote) and now tracks it"
+        case let .rejectedNonFastForward(branch):
+            "\(branch): rejected — the remote has new commits; pull/resolve first (never forced)"
+        case let .noRemotes(branch):
+            "\(branch): no remotes configured; nowhere to push"
+        case .detachedHEAD:
+            "skipped: HEAD is detached (no current branch)"
+        case let .failed(reason):
+            "failed: \(reason)"
         }
     }
 
@@ -164,13 +216,15 @@ struct SyncCommand: AsyncParsableCommand {
         var pullRequested: Bool
         var pullSkippedMidOperation: Bool
         var branches: [BranchJSON]
+        var pushOutcome: String?
     }
 
     private func emitJSON(
         states: [BranchSyncState],
         pullResults: [FastForwardResult]?,
         fetched: Bool,
-        skippedMidOperation: Bool
+        skippedMidOperation: Bool,
+        pushOutcome: PushOutcome?
     ) throws {
         let branches = states.map { state in
             BranchJSON(
@@ -189,13 +243,27 @@ struct SyncCommand: AsyncParsableCommand {
             fetched: fetched,
             pullRequested: pullResults != nil || skippedMidOperation,
             pullSkippedMidOperation: skippedMidOperation,
-            branches: branches
+            branches: branches,
+            pushOutcome: pushOutcome.map(jsonPushOutcome)
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(report)
         var out = StdoutStream()
         print(String(data: data, encoding: .utf8) ?? "{}", to: &out)
+    }
+
+    /// Stable machine-readable push-outcome tags (wire-shape: don't rename).
+    private func jsonPushOutcome(_ outcome: PushOutcome) -> String {
+        switch outcome {
+        case .pushed: "pushed"
+        case .nothingToPush: "nothing-to-push"
+        case .publishedNewUpstream: "published-new-upstream"
+        case .rejectedNonFastForward: "rejected-non-fast-forward"
+        case .noRemotes: "no-remotes"
+        case .detachedHEAD: "detached-head"
+        case .failed: "failed"
+        }
     }
 
     /// Stable machine-readable outcome tags (wire-shape: don't rename).

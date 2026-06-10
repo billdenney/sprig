@@ -114,4 +114,25 @@ struct SprigctlSyncTests {
         #expect(run.exitCode != 0)
         #expect(run.stderr.contains("--autostash only makes sense with --pull"))
     }
+
+    @Test("--push pushes local commits and reports the count (ADR 0071)")
+    func pushPushesLocalCommits() async throws {
+        let fixture = try await makeFixture("push-verb")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        // Catch the subscriber up (the fixture leaves origin one
+        // ahead), then add a local commit to push.
+        try await Sprigctl.spawnGit(["pull", "--ff-only"], cwd: fixture.subscriber)
+        try Sprigctl.write("local\n", to: fixture.subscriber.appendingPathComponent("local.txt"))
+        try await Sprigctl.spawnGit(["add", "local.txt"], cwd: fixture.subscriber)
+        try await Sprigctl.spawnGit(["commit", "-m", "local work"], cwd: fixture.subscriber)
+
+        let run = try await Sprigctl.run(["sync", "--push", "--json", fixture.subscriber.path])
+        #expect(run.exitCode == 0)
+        let object = try JSONSerialization.jsonObject(with: Data(run.stdout.utf8))
+        let report = try #require(object as? [String: Any])
+        #expect(report["pushOutcome"] as? String == "pushed")
+        let branches = try #require(report["branches"] as? [[String: Any]])
+        let main = try #require(branches.first { $0["name"] as? String == "main" })
+        #expect(main["ahead"] as? Int == 0, "post-push the branch is in sync")
+    }
 }
