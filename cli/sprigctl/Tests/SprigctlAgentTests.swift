@@ -1,4 +1,5 @@
 import Foundation
+import GitCore
 import IPCSchema
 import Testing
 
@@ -211,5 +212,89 @@ struct SprigctlAgentTests {
         #expect(refreshes >= 1)
         // `outcome` should be "applied" on a clean repo.
         #expect((obj["outcome"] as? String) == "applied")
+    }
+
+    @Test("agent --preferences starts the enabled background jobs — fetch-on-start lands")
+    func preferencesWiringFetchesOnStart() async throws {
+        // Bare origin + publisher + subscriber: origin gains a commit
+        // the subscriber hasn't fetched, then the agent runs with a
+        // preferences file enabling auto-fetch. The ADR 0068
+        // fire-on-start tick must advance the subscriber's
+        // remote-tracking ref with no other git activity.
+        let root = try Sprigctl.mkRepo("agent-prefs")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let origin = root.appendingPathComponent("origin.git")
+        try await Sprigctl.spawnGit(["init", "--bare", "-b", "main", origin.path], cwd: root)
+        let publisher = root.appendingPathComponent("publisher")
+        try await Sprigctl.spawnGit(["clone", origin.path, publisher.path], cwd: root)
+        try await Sprigctl.initRepo(at: publisher)
+        try Sprigctl.write("seed\n", to: publisher.appendingPathComponent("seed.txt"))
+        try await Sprigctl.spawnGit(["add", "seed.txt"], cwd: publisher)
+        try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: publisher)
+        try await Sprigctl.spawnGit(["push", "origin", "main"], cwd: publisher)
+        let subscriber = root.appendingPathComponent("subscriber")
+        try await Sprigctl.spawnGit(["clone", origin.path, subscriber.path], cwd: root)
+        try await Sprigctl.initRepo(at: subscriber)
+        try Sprigctl.write("incoming\n", to: publisher.appendingPathComponent("incoming.txt"))
+        try await Sprigctl.spawnGit(["add", "incoming.txt"], cwd: publisher)
+        try await Sprigctl.spawnGit(["commit", "-m", "incoming"], cwd: publisher)
+        try await Sprigctl.spawnGit(["push", "origin", "main"], cwd: publisher)
+
+        // Minimal preferences: fetch on, backup off (keeps the test's
+        // observable surface to exactly one job).
+        let prefsURL = root.appendingPathComponent("prefs.json")
+        try Sprigctl.write(
+            """
+            {
+              "schemaVersion": 1,
+              "watchRoots": [],
+              "branchSortRecencyFirst": true,
+              "autoFetchEnabled": true,
+              "autoBackupEnabled": false
+            }
+            """,
+            to: prefsURL
+        )
+
+        // `--duration 4.0`: the fire-on-start fetch is a local-file
+        // remote and completes in milliseconds on macOS/Linux; the
+        // budget is for the Windows VM's process-spawn + filesystem
+        // latency (quirk-C class, ~2 s worst case).
+        let out = try await Sprigctl.run([
+            "agent",
+            "--polling",
+            "--polling-interval", "0.5",
+            "--duration", "4.0",
+            "--preferences", prefsURL.path,
+            subscriber.path
+        ])
+        #expect(out.exitCode == 0)
+        #expect(out.stderr.contains("auto-fetch on, auto-backup off"))
+
+        let originTip = try await Runner(defaultWorkingDirectory: origin)
+            .run(["rev-parse", "refs/heads/main"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let trackedTip = try await Runner(defaultWorkingDirectory: subscriber)
+            .run(["rev-parse", "refs/remotes/origin/main"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(trackedTip == originTip, "the fire-on-start fetch must land before --duration")
+    }
+
+    @Test("agent --preferences with a malformed file errors instead of silently defaulting")
+    func malformedPreferencesError() async throws {
+        let repo = try Sprigctl.mkRepo("agent-prefs-bad")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await Sprigctl.initRepo(at: repo)
+        let prefsURL = repo.appendingPathComponent("prefs.json")
+        try Sprigctl.write("{ not json", to: prefsURL)
+
+        let out = try await Sprigctl.run([
+            "agent",
+            "--polling",
+            "--duration", "0.5",
+            "--preferences", prefsURL.path,
+            repo.path
+        ])
+        #expect(out.exitCode != 0)
     }
 }

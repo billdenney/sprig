@@ -61,7 +61,7 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 
 ### Background auto-sync (ADR 0068) — engine invocations
 
-`GitCore.SyncOps` drives these; `AgentKit.AutoSyncScheduler` sequences them hourly (default); `sprigctl sync` is the one-shot CLI face.
+`GitCore.SyncOps` drives these; `AgentKit.AutoSyncScheduler` sequences them hourly (default); `sprigctl sync` is the one-shot CLI face. Host wiring (ADR 0068 amendment): `sprigctl agent --preferences PATH` maps the user's `AppPreferences` to the auto-fetch and auto-backup schedulers via `AgentKit.AgentPreferencesWiring` — the same mapping the platform hosts will use.
 
 - `git fetch --all --prune --no-write-fetch-head --quiet` — the hourly auto-fetch.
 - `git for-each-ref --format='%(refname:short)…%(upstream)…%(upstream:track)…%(HEAD)' refs/heads/` — one-pass upstream relationship snapshot (`SyncOps.branchSyncStates`).
