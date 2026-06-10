@@ -47,19 +47,37 @@ public final class MockFileWatcher: FileWatcher, @unchecked Sendable {
     private actor State {
         private var continuation: AsyncStream<WatchEvent>.Continuation?
         private var pending: [WatchEvent] = []
+        /// Latched by ``finish()``. Load-bearing for the
+        /// stop-before-attach race: `start(paths:)` attaches the
+        /// continuation via an unstructured Task (an async actor
+        /// hop), so a fast `stop()` can reach this actor FIRST. A
+        /// nil-continuation finish must not be lost — without the
+        /// latch, the late attach installs a continuation nobody
+        /// will ever finish and the consumer's `for await` hangs
+        /// forever (bit WatcherKitTests intermittently ~1-in-5 full
+        /// runs; the main-snapshot toolchain's scheduling widened
+        /// the window).
+        private var finished = false
 
         func attach(_ cont: AsyncStream<WatchEvent>.Continuation) {
             if continuation != nil {
                 preconditionFailure("MockFileWatcher.start called twice")
             }
-            continuation = cont
+            // Deliver everything emitted before the attach hop won
+            // the actor, THEN honor a finish that raced in ahead.
             for event in pending {
                 cont.yield(event)
             }
             pending.removeAll()
+            if finished {
+                cont.finish()
+                return
+            }
+            continuation = cont
         }
 
         func yield(_ event: WatchEvent) {
+            guard !finished else { return }
             if let continuation {
                 continuation.yield(event)
             } else {
@@ -74,9 +92,9 @@ public final class MockFileWatcher: FileWatcher, @unchecked Sendable {
         }
 
         func finish() {
+            finished = true
             continuation?.finish()
             continuation = nil
-            pending.removeAll()
         }
     }
 }

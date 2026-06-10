@@ -13,9 +13,11 @@ import Testing
 
 // `.serialized`: each test builds a real merge conflict and the apply
 // pipeline rewrites working-tree files through AtomicWriteWithRetry —
-// under full-suite load on the Windows VM (Defender, no exclusions)
-// parallel members stack retry ladders past the ~64 s ceiling. Same
-// rationale as PreferencesViewModelTests / SyncOpsRealGitTests.
+// under full-suite load on the Windows VM parallel members stack
+// sharing-violation retry ladders past the ~64 s ceiling (persists
+// even with Defender exclusions; see PreferencesViewModelTests'
+// header for the current attribution). Same rationale as
+// SyncOpsRealGitTests.
 @Suite("MergeConflictResolverViewModel — per-region text resolution", .serialized)
 struct MergeConflictResolverPerRegionTests {
     // MARK: - Fixture

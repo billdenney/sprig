@@ -75,6 +75,7 @@ public actor RepoAgent {
     private let tickInterval: Duration
     private let snapshotPolicy: SnapshotPolicy
     private let autoSync: AutoSyncStartup?
+    private let autoBackup: AutoBackupStartup?
 
     private var coalescer: EventCoalescer
     private var driver: RepoRefreshDriver?
@@ -84,6 +85,7 @@ public actor RepoAgent {
     private var snapshotPruneCount: Int = 0
     private var snapshotPruneAt: Date?
     private var autoSyncScheduler: AutoSyncScheduler?
+    private var autoBackupScheduler: AutoSyncScheduler?
 
     /// - Parameters:
     ///   - repoRoot: absolute path to the worktree root.
@@ -117,6 +119,9 @@ public actor RepoAgent {
     ///     disables it. Hosts that want the hourly fetch pass
     ///     `AutoSyncStartup()`; `fastForwardPull: true` adds the
     ///     opt-in fast-forward pass.
+    ///   - autoBackup: ADR 0075 uncommitted-work insurance; nil
+    ///     (default) disables it. `AutoBackupStartup()` gives the
+    ///     30-minute / 7-day-TTL defaults.
     public init(
         repoRoot: URL,
         gitDir: URL?,
@@ -127,7 +132,8 @@ public actor RepoAgent {
         sink: any BadgeEventSink,
         tickInterval: Duration = .milliseconds(100),
         snapshotPolicy: SnapshotPolicy = .default,
-        autoSync: AutoSyncStartup? = nil
+        autoSync: AutoSyncStartup? = nil,
+        autoBackup: AutoBackupStartup? = nil
     ) {
         self.repoRoot = repoRoot
         self.gitDir = gitDir
@@ -139,6 +145,7 @@ public actor RepoAgent {
         self.tickInterval = tickInterval
         self.snapshotPolicy = snapshotPolicy
         self.autoSync = autoSync
+        self.autoBackup = autoBackup
         coalescer = EventCoalescer()
     }
 
@@ -213,6 +220,15 @@ public actor RepoAgent {
                 gitDir: gitDir
             )
         }
+
+        // ADR 0075 auto-backup — same lifecycle shape as auto-sync.
+        // (Construction lives in RepoAgent+AutoBackup.swift.)
+        if let autoBackup {
+            autoBackupScheduler = await Self.startAutoBackupScheduler(
+                autoBackup,
+                runner: runner
+            )
+        }
     }
 
     /// Stop the watcher loop and the underlying watcher. Before
@@ -237,11 +253,15 @@ public actor RepoAgent {
         guard running else { return }
         running = false
 
-        // Auto-sync first: stop scheduling new fetches before tearing
-        // down the pipeline they'd feed.
+        // Auto-sync/backup first: stop scheduling new background work
+        // before tearing down the pipeline it'd feed.
         if let autoSyncScheduler {
             await autoSyncScheduler.stop()
             self.autoSyncScheduler = nil
+        }
+        if let autoBackupScheduler {
+            await autoBackupScheduler.stop()
+            self.autoBackupScheduler = nil
         }
 
         // Tell every active subscriber their subscription is gone.

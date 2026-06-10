@@ -24,6 +24,7 @@ struct SprigCtl: AsyncParsableCommand {
             LogCommand.self,
             AgentCommand.self,
             RecoverCommand.self,
+            BackupCommand.self,
             ConflictsCommand.self,
             LFSCommand.self,
             SubmoduleCommand.self,

@@ -7,14 +7,14 @@ import Foundation
 @testable import TaskWindowKit
 import Testing
 
-// `.serialized`: each save() is an atomic temp-write + rename, which
-// Windows Defender on the local VM (no exclusions, per security
-// policy) scans aggressively. With the suite's tests running in
-// parallel under full-suite git churn, concurrent saves stack
-// sharing-violation retry ladders until AtomicWriteWithRetry's ~64 s
-// ceiling blows (observed repeatedly on the Server 2022 VM; hosted
-// runners ship Defender exclusions and don't hit this). Serial keeps
-// each save's violation window short.
+// `.serialized`: each save() is an atomic temp-write + rename that
+// can hit ERROR_SHARING_VIOLATION streaks under full-suite load on
+// Windows. (Originally attributed to Defender; scoped exclusions for
+// the repo + temp dirs were added 2026-06-10 and the streaks
+// persisted — the remaining holder is concurrent child-process
+// handle inheritance under ~1000-test churn, the quirk-C
+// `Data.write` class.) Serial keeps each save's violation window
+// short; the retry ladder absorbs the rest.
 @Suite("PreferencesViewModel — Codable round-trip + load/save semantics", .serialized)
 struct PreferencesViewModelTests {
     // MARK: - Fixture helpers
@@ -121,6 +121,9 @@ struct PreferencesViewModelTests {
         #expect(decoded.autoFetchEnabled == true)
         #expect(decoded.autoFetchIntervalMinutes == 60)
         #expect(decoded.autoPullFastForward == false)
+        #expect(decoded.autoBackupEnabled == true)
+        #expect(decoded.autoBackupIntervalMinutes == 30)
+        #expect(decoded.autoBackupTTLDays == 7)
         #expect(decoded.gitIdentity == GitIdentity(name: "Anne", email: "anne@example.com"))
     }
 

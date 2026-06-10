@@ -180,7 +180,9 @@ let package = Package(
             // `AgentKit/TransportBadgeEventSink`).
             let extraDeps: [Target.Dependency] = switch name {
             case "AgentKit":
-                ["GitCore", "RepoState", "IPCSchema", "WatcherKit", "TransportKit"]
+                // SafetyKit: ADR 0075's auto-backup job
+                // (`WorktreeBackup`) runs inside the agent.
+                ["GitCore", "RepoState", "IPCSchema", "WatcherKit", "TransportKit", "SafetyKit"]
             default:
                 []
             }
