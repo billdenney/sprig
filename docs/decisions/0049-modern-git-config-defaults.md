@@ -20,6 +20,25 @@ Captured in the plan. This file exists as the canonical ADR location for linking
 
 See the plan for trade-offs. When implementation reveals new consequences, update this file and cite the commit.
 
+## Amendment 2026-06-11 — global excludes provisioning (§11.11, the "ask less" principle)
+
+The first engine piece of §11.11's safety net: **`GitCore.GlobalExcludes`** provisions the
+user's global excludes file with OS noise (`JunkFilePatterns.osNoise`: `.DS_Store`,
+`.AppleDouble`, `._*`, `.Spotlight-V100`, `.Trashes`, `Thumbs.db`, `ehthumbs.db`,
+`Desktop.ini`) so the question "ignore this junk here?" never arises in any repository again
+— ignored files never show as untracked, which also keeps the per-repo `.gitignore`
+suggestion banner quiet for these. This is the **ask-less principle** (master plan §11's
+intervention levels) made explicit: one consent, zero future questions.
+
+Consent + config safety: provisioning is an explicit act — onboarding, or `sprigctl setup
+--global-ignore` — never a background side effect. It **never writes git config**: a set
+`core.excludesFile` (any scope, `~` expanded) means appending to the user's chosen file;
+unset means writing git's own documented default (`$XDG_CONFIG_HOME/git/ignore` →
+`~/.config/git/ignore`), which git reads with no config key at all. Append-only mechanics
+(header-once, line-dedup, never rewrites) are shared with the ADR 0070 per-repo suggestion
+via the extracted `IgnoreFileEditor`. Real-git pinned: provisioning makes `.DS_Store`
+vanish from porcelain while `git config --list --local` stays byte-identical.
+
 ## Links
 
 - Master plan, §3 Decision Log (ADR 0049).

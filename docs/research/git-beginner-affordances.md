@@ -113,6 +113,19 @@ way `git commit` does); otherwise a humble synthesized subject from the staged p
 `CommitComposerViewModel.suggestMessage()` fills only an empty draft — never clobbers user
 input. The AI drafting path (ADR 0035) remains the opt-in upgrade.
 
+## The organizing principle: ask less
+
+Every affordance above is an instance of one rule — **convert questions into defaults,
+suggestions, or undo**. The master plan's §11 intervention levels are the taxonomy: prefer
+**(a) silent defaults** (set once with onboarding consent, visible in Settings, never asked
+again — the ADR 0049 config bundle, hourly fetch ON, backup ON, and now the global
+OS-noise excludes) over **(b) ask-on-first-encounter** (cache the answer: hook trust,
+LFS-track-this?) over recurring prompts (never). Where a question can't be removed it
+becomes a **non-blocking nudge with the remedy attached** (ADR 0070 rails, each with its
+own "never show again"), a **suggestion that acts only on click** (the `.gitignore` banner),
+or an **undo instead of a confirm** (ADR 0033/0075: snapshots + backups make acting first
+safe). The trust spine stays: destructive-op confirms (§11.6) are not negotiable away.
+
 ## Tier 3 — worth keeping on the radar
 
 - **3.1 Stale-work nudges** (`proposed`, S) — Status window section: "branch X: 4 changed

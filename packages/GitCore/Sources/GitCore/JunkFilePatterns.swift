@@ -105,6 +105,23 @@ public enum JunkFilePatterns {
         .init(gitignoreLine: "Thumbs.db", category: .temporary)
     ]
 
+    /// Operating-system droppings (Finder/Explorer metadata) — the
+    /// `GlobalExcludes` set (§11.11 "ask less": ignored once,
+    /// globally, instead of per-repo questions forever). Narrower
+    /// than ``temporaries`` on purpose: editor/Office temp files in
+    /// a GLOBAL ignore would be too opinionated; OS metadata is
+    /// junk in every repository by definition.
+    public static let osNoise: [JunkFilePattern] = [
+        .init(gitignoreLine: ".DS_Store", category: .temporary),
+        .init(gitignoreLine: ".AppleDouble", category: .temporary),
+        .init(gitignoreLine: "._*", category: .temporary),
+        .init(gitignoreLine: ".Spotlight-V100", category: .temporary),
+        .init(gitignoreLine: ".Trashes", category: .temporary),
+        .init(gitignoreLine: "Thumbs.db", category: .temporary),
+        .init(gitignoreLine: "ehthumbs.db", category: .temporary),
+        .init(gitignoreLine: "Desktop.ini", category: .temporary)
+    ]
+
     /// Everything, in suggestion-display order (secrets first).
     public static let all: [JunkFilePattern] = secrets + temporaries
 

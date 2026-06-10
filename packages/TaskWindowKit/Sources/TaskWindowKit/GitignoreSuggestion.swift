@@ -67,24 +67,10 @@ public enum GitignoreSuggestion {
     /// written, so the caller can report "added 2, 1 already there".
     @discardableResult
     public static func append(patterns: [String], toRepoRoot repoRoot: URL) throws -> [String] {
-        let url = repoRoot.appendingPathComponent(".gitignore")
-        let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        let existingLines = Set(
-            existing.split(whereSeparator: \.isNewline)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
+        try IgnoreFileEditor.append(
+            patterns: patterns,
+            to: repoRoot.appendingPathComponent(".gitignore"),
+            header: "# Added by Sprig (likely secrets / temporary files)"
         )
-        let additions = patterns.filter { !existingLines.contains($0) }
-        guard !additions.isEmpty else { return [] }
-
-        var content = existing
-        if !content.isEmpty, !content.hasSuffix("\n") {
-            content += "\n"
-        }
-        if !existingLines.contains("# Added by Sprig (likely secrets / temporary files)") {
-            content += "# Added by Sprig (likely secrets / temporary files)\n"
-        }
-        content += additions.joined(separator: "\n") + "\n"
-        try Data(content.utf8).write(to: url)
-        return additions
     }
 }
