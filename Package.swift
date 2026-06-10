@@ -64,6 +64,12 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // large-staged-file-without-LFS guard rail
     // (`LFSAttributeChecker`, the `git check-attr` wrapper).
     "TaskWindowKit": ["GitCore", "ConflictKit", "LFSKit"],
+    // ADR 0072's `StatusVocabulary` formats GitCore outcome types
+    // (FastForwardOutcome, PushOutcome, BranchSyncState) and
+    // TaskWindowKit's (PreflightWarning, SetAsideOutcome) into
+    // user-facing copy. UIKitShared sits ABOVE the view-model layer:
+    // shells + sprigctl consume it; VMs never format.
+    "UIKitShared": ["GitCore", "TaskWindowKit"],
     // ConflictKit re-exports `GitCore.UnmergedEntry` /
     // `UnmergedStage` / `GitFileMode` via classification helpers
     // (`ConflictKind.classify(_:)`) so M4 MergeConflictResolver can
@@ -225,6 +231,7 @@ let package = Package(
                     "LFSKit",
                     "SubmoduleKit",
                     "DiagKit",
+                    "UIKitShared",
                     .product(name: "ArgumentParser", package: "swift-argument-parser")
                 ],
                 path: "cli/sprigctl/Sources"

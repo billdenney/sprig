@@ -11,6 +11,7 @@
 import ArgumentParser
 import Foundation
 import GitCore
+import UIKitShared
 
 /// `sprigctl sync [<repo>] [--no-fetch] [--pull] [--autostash] [--json]`
 struct SyncCommand: AsyncParsableCommand {
@@ -129,26 +130,7 @@ struct SyncCommand: AsyncParsableCommand {
             print(humanLine(for: state, pullResults: pullResults), to: &out)
         }
         if let pushOutcome {
-            print("push: \(describe(pushOutcome))", to: &out)
-        }
-    }
-
-    private func describe(_ outcome: PushOutcome) -> String {
-        switch outcome {
-        case let .pushed(branch, upstream, commits):
-            "\(branch): pushed \(commits) commit(s) to \(upstream)"
-        case let .nothingToPush(branch):
-            "\(branch): nothing to push"
-        case let .publishedNewUpstream(branch, remote):
-            "\(branch): published to \(remote) and now tracks it"
-        case let .rejectedNonFastForward(branch):
-            "\(branch): rejected — the remote has new commits; pull/resolve first (never forced)"
-        case let .noRemotes(branch):
-            "\(branch): no remotes configured; nowhere to push"
-        case .detachedHEAD:
-            "skipped: HEAD is detached (no current branch)"
-        case let .failed(reason):
-            "failed: \(reason)"
+            print("push: \(StatusVocabulary.describe(pushOutcome, register: .git))", to: &out)
         }
     }
 
@@ -157,46 +139,15 @@ struct SyncCommand: AsyncParsableCommand {
         pullResults: [FastForwardResult]?
     ) -> String {
         let marker = state.isCurrent ? "*" : " "
-        let relationship = describeRelationship(of: state)
+        // ADR 0072: all human copy comes from the shared vocabulary;
+        // the CLI uses the terse `.git` register (these exact strings
+        // are pinned by SprigctlSyncTests).
+        let relationship = StatusVocabulary.describeRelationship(of: state, register: .git)
         var line = "\(marker) \(state.name): \(relationship)"
         if let outcome = pullResults?.first(where: { $0.branch == state.name })?.outcome {
-            line += " — \(describe(outcome))"
+            line += " — \(StatusVocabulary.describe(outcome, register: .git))"
         }
         return line
-    }
-
-    private func describeRelationship(of state: BranchSyncState) -> String {
-        guard let upstream = state.upstreamShort else { return "no upstream" }
-        if state.upstreamGone { return "upstream \(upstream) is gone" }
-        switch (state.ahead, state.behind) {
-        case (0, 0): return "up to date with \(upstream)"
-        case let (a, 0): return "ahead of \(upstream) by \(a)"
-        case let (0, b): return "behind \(upstream) by \(b)"
-        case let (a, b): return "diverged from \(upstream) (ahead \(a), behind \(b))"
-        }
-    }
-
-    private func describe(_ outcome: FastForwardOutcome) -> String {
-        switch outcome {
-        case let .fastForwarded(from, to):
-            "fast-forwarded \(String(from.prefix(8)))..\(String(to.prefix(8)))"
-        case .upToDate:
-            "nothing to do"
-        case let .aheadOnly(ahead):
-            "\(ahead) unpushed commit(s); nothing to pull"
-        case let .diverged(ahead, behind):
-            "needs attention: diverged (ahead \(ahead), behind \(behind))"
-        case .noUpstream:
-            "no upstream; skipped"
-        case .upstreamGone:
-            "upstream deleted on remote; skipped"
-        case .skippedDirtyWorktree:
-            "skipped: uncommitted changes (use --autostash to set them aside)"
-        case .skippedCheckedOutElsewhere:
-            "skipped: checked out in another worktree"
-        case let .failed(reason):
-            "failed: \(reason)"
-        }
     }
 
     // MARK: - JSON output
