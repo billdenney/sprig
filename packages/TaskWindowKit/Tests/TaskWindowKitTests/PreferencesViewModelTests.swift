@@ -167,7 +167,13 @@ struct PreferencesViewModelTests {
     func saveLoadRoundTrip() async throws {
         let dir = try makeTempDir(tag: "save-load")
         defer { cleanup(dir) }
-        let prefsURL = dir.appendingPathComponent("nested/prefs.json")
+        // Write into the existing fixture dir, NOT a fresh nested one:
+        // this test's job is round-trip fidelity. Parent-directory
+        // creation has its own dedicated test below — and a brand-new
+        // directory is Defender's most aggressive scan path on the
+        // Windows VM, which made this member the suite's recurring
+        // full-suite-load casualty for no coverage gain.
+        let prefsURL = dir.appendingPathComponent("prefs.json")
         let edited = AppPreferences(
             watchRoots: [URL(fileURLWithPath: "/tmp/x")],
             gitIdentity: GitIdentity(name: "Bee", email: "bee@example.com"),
@@ -186,7 +192,7 @@ struct PreferencesViewModelTests {
         } else {
             Issue.record("save() should be .success, got \(writerState)")
         }
-        #expect(FileManager.default.fileExists(atPath: prefsURL.path))
+        #expect(await waitForFile(at: prefsURL.path))
 
         // A fresh VM with different initial defaults loads back the
         // saved value (proving the file actually drives the load).

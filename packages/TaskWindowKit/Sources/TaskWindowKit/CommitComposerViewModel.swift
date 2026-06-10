@@ -96,6 +96,11 @@ public actor CommitComposerViewModel {
     /// large-file threshold instead of staging 50 MiB fixtures.
     private let preflight: PreflightChecks
 
+    /// Staged paths whose index status is `A` (newly added) — feeds
+    /// ADR 0074's Add-vs-Update suggestion wording. Repopulated by
+    /// every ``refresh()``.
+    private var stagedAdded: Set<String> = []
+
     /// In-flight Task, retained so ``cancel`` can interrupt it.
     private var runningTask: Task<Void, Never>?
 
@@ -117,6 +122,29 @@ public actor CommitComposerViewModel {
 
     public func setMessage(_ newMessage: CommitMessage) {
         message = newMessage
+    }
+
+    /// ADR 0074: fill ``message`` with the deterministic suggestion —
+    /// the repo's `commit.template` when configured, otherwise a
+    /// subject synthesized from the staged paths ("Update README.md",
+    /// "Add docs (3 files)").
+    ///
+    /// Never clobbers user input: a no-op (returning false) when the
+    /// current subject or body is non-empty, or when there's nothing
+    /// to suggest from. The UI calls this on open / after staging
+    /// changes; an explicit "suggest" button can call it after
+    /// ``setMessage(_:)`` cleared the draft.
+    @discardableResult
+    public func suggestMessage() async -> Bool {
+        guard message.subject.isEmpty, message.body.isEmpty else { return false }
+        guard let suggestion = await CommitMessageSuggestion.suggest(
+            stagedPaths: staged,
+            newPaths: stagedAdded,
+            runner: runner,
+            repoURL: repoURL
+        ) else { return false }
+        message = suggestion
+        return true
     }
 
     public func setOptions(_ newOptions: CommitOptions) {
@@ -305,17 +333,23 @@ public actor CommitComposerViewModel {
         var unstaged: [String] = []
         var untracked: [String] = []
         var conflicted: [String] = []
+        var added: Set<String> = []
         for entry in status.entries {
             let buckets = Self.classify(entry)
             if let path = buckets.staged { staged.append(path) }
             if let path = buckets.unstaged { unstaged.append(path) }
             if let path = buckets.untracked { untracked.append(path) }
             if let path = buckets.conflicted { conflicted.append(path) }
+            // Track staged-as-new for ADR 0074's Add-vs-Update wording.
+            if case let .ordinary(ord) = entry, ord.xy.index == .added {
+                added.insert(ord.path)
+            }
         }
         self.staged = staged
         self.unstaged = unstaged
         self.untracked = untracked
         self.conflicted = conflicted
+        stagedAdded = added
         if let oid = status.branch?.oid {
             state = .success(oid)
         } else {
