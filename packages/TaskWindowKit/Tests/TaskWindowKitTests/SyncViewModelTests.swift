@@ -168,6 +168,139 @@ struct SyncViewModelTests {
         #expect(report.push == nil)
     }
 
+    @Test("rebase follow-up: diverged branch is replayed, snapshotted, and pushed")
+    func rebaseFollowUpReplaysAndPushes() async throws {
+        let fixture = try await makeFixture("rebase-replay")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runner = Runner(defaultWorkingDirectory: fixture.subscriber)
+        try await commit(named: "remote.txt", at: fixture.publisher)
+        _ = try await Runner(defaultWorkingDirectory: fixture.publisher).run(["push"])
+        try await commit(named: "local.txt", at: fixture.subscriber)
+        _ = try await runner.run(["fetch", "origin"])
+        let preHEAD = try await runner.run(["rev-parse", "HEAD"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let vm = SyncViewModel(repoURL: fixture.subscriber, runner: runner)
+        await vm.rebaseDivergedThenPush()
+
+        let report = try await report(of: vm)
+        #expect(report.rebase == .rebased(branch: "main", onto: "origin/main", replayed: 1))
+        // The ADR 0033 safety copy points at the REWRITTEN tip — the
+        // undo target if the user regrets the replay.
+        let snapshot = try #require(report.preRebaseSnapshot)
+        let snapshotSHA = try await runner.run(["rev-parse", snapshot.refName]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(snapshotSHA == preHEAD)
+        // Plain push went through; the origin advanced to our HEAD.
+        #expect(report.push == .pushed(branch: "main", upstream: "origin/main", commits: 1))
+        let localHEAD = try await runner.run(["rev-parse", "HEAD"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let originHEAD = try await Runner(defaultWorkingDirectory: fixture.origin)
+            .run(["rev-parse", "refs/heads/main"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(originHEAD == localHEAD)
+        #expect(await vm.stage == .finished)
+    }
+
+    @Test("rebase follow-up: conflict reports, skips the push, keeps the safety copy")
+    func rebaseFollowUpConflictReports() async throws {
+        let fixture = try await makeFixture("rebase-conflict")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runner = Runner(defaultWorkingDirectory: fixture.subscriber)
+        let publisherRunner = Runner(defaultWorkingDirectory: fixture.publisher)
+        try Data("remote version\n".utf8)
+            .write(to: fixture.publisher.appendingPathComponent("seed.txt"))
+        _ = try await publisherRunner.run(["commit", "-am", "remote edit"])
+        _ = try await publisherRunner.run(["push"])
+        try Data("local version\n".utf8)
+            .write(to: fixture.subscriber.appendingPathComponent("seed.txt"))
+        _ = try await runner.run(["commit", "-am", "local edit"])
+        _ = try await runner.run(["fetch", "origin"])
+
+        let vm = SyncViewModel(repoURL: fixture.subscriber, runner: runner)
+        await vm.rebaseDivergedThenPush()
+
+        let report = try await report(of: vm)
+        #expect(report.rebase == .conflicted(branch: "main", conflictedPathCount: 1))
+        #expect(report.push == nil, "no push after an incomplete rebase")
+        #expect(report.preRebaseSnapshot != nil, "the undo target survives the conflict")
+        let gitDir = try GitMetadataPaths.resolveGitDir(forWorktree: fixture.subscriber)
+        #expect(
+            GitMetadataPaths.repoIsMidOperation(gitDir: gitDir),
+            "the rebase is left in place for the resolver"
+        )
+        _ = try await runner.run(["rebase", "--abort"], throwOnNonZero: false)
+    }
+
+    @Test("rebase follow-up: a remote that moved again re-rejects the push — never forced")
+    func rebaseFollowUpReRejection() async throws {
+        let fixture = try await makeFixture("rebase-rereject")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runner = Runner(defaultWorkingDirectory: fixture.subscriber)
+        try await commit(named: "remote.txt", at: fixture.publisher)
+        _ = try await Runner(defaultWorkingDirectory: fixture.publisher).run(["push"])
+        try await commit(named: "local.txt", at: fixture.subscriber)
+        _ = try await runner.run(["fetch", "origin"])
+        // The remote moves AGAIN after our fetch — the rebase targets
+        // the (now stale) remote-tracking ref, so the follow-up push
+        // must re-reject rather than overwrite.
+        try await commit(named: "remote2.txt", at: fixture.publisher)
+        _ = try await Runner(defaultWorkingDirectory: fixture.publisher).run(["push"])
+        let publisherHEAD = try await Runner(defaultWorkingDirectory: fixture.publisher)
+            .run(["rev-parse", "HEAD"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let vm = SyncViewModel(repoURL: fixture.subscriber, runner: runner)
+        await vm.rebaseDivergedThenPush()
+
+        let report = try await report(of: vm)
+        #expect(report.rebase == .rebased(branch: "main", onto: "origin/main", replayed: 1))
+        #expect(report.push == .rejectedNonFastForward(branch: "main"))
+        let originHEAD = try await Runner(defaultWorkingDirectory: fixture.origin)
+            .run(["rev-parse", "refs/heads/main"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(originHEAD == publisherHEAD, "the remote's newer work survives untouched")
+    }
+
+    @Test("rebase follow-up: not diverged → typed report, no snapshot minted, no push")
+    func rebaseFollowUpNotDiverged() async throws {
+        let fixture = try await makeFixture("rebase-clean")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runner = Runner(defaultWorkingDirectory: fixture.subscriber)
+
+        let vm = SyncViewModel(repoURL: fixture.subscriber, runner: runner)
+        await vm.rebaseDivergedThenPush()
+
+        let report = try await report(of: vm)
+        #expect(report.rebase == .notDiverged(branch: "main"))
+        #expect(report.preRebaseSnapshot == nil)
+        #expect(report.push == nil)
+        let refs = try await runner.run(["for-each-ref", "refs/sprig/snapshots"])
+        #expect(refs.stdoutString.isEmpty, "precondition skips must not mint snapshot refs")
+    }
+
+    @Test("rebase follow-up honors the mid-operation guard")
+    func rebaseFollowUpMidOperation() async throws {
+        let fixture = try await makeFixture("rebase-midop")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let runner = Runner(defaultWorkingDirectory: fixture.subscriber)
+        _ = try await runner.run(["switch", "-c", "side"])
+        try Data("side\n".utf8).write(to: fixture.subscriber.appendingPathComponent("seed.txt"))
+        _ = try await runner.run(["commit", "-am", "side edit"])
+        _ = try await runner.run(["switch", "main"])
+        try Data("main\n".utf8).write(to: fixture.subscriber.appendingPathComponent("seed.txt"))
+        _ = try await runner.run(["commit", "-am", "main edit"])
+        _ = try await runner.run(["merge", "side"], throwOnNonZero: false) // conflicts → mid-merge
+
+        let vm = SyncViewModel(repoURL: fixture.subscriber, runner: runner)
+        await vm.rebaseDivergedThenPush()
+
+        let report = try await report(of: vm)
+        #expect(report.skippedMidOperation)
+        #expect(report.rebase == nil)
+        #expect(report.push == nil)
+    }
+
     @Test("reset() returns stage and state to idle for a re-run")
     func resetForRerun() async throws {
         let fixture = try await makeFixture("reset")

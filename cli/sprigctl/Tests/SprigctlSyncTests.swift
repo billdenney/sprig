@@ -135,4 +135,47 @@ struct SprigctlSyncTests {
         let main = try #require(branches.first { $0["name"] as? String == "main" })
         #expect(main["ahead"] as? Int == 0, "post-push the branch is in sync")
     }
+
+    @Test("--rebase-diverged without --push errors with a helpful message")
+    func rebaseDivergedRequiresPush() async throws {
+        let fixture = try await makeFixture("rebase-flagcheck")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let run = try await Sprigctl.run(
+            ["sync", "--rebase-diverged", fixture.subscriber.path]
+        )
+        #expect(run.exitCode != 0)
+        #expect(run.stderr.contains("--rebase-diverged only makes sense with --push"))
+    }
+
+    @Test("--push --rebase-diverged replays a diverged branch, snapshots, and pushes (ADR 0071 amendment)")
+    func rebaseDivergedReplaysAndPushes() async throws {
+        let fixture = try await makeFixture("rebase-verb")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        // The fixture's origin is one commit ahead; a local commit on
+        // the un-fetched subscriber makes it diverged after the
+        // command's own fetch.
+        try Sprigctl.write("local\n", to: fixture.subscriber.appendingPathComponent("local.txt"))
+        try await Sprigctl.spawnGit(["add", "local.txt"], cwd: fixture.subscriber)
+        try await Sprigctl.spawnGit(["commit", "-m", "local work"], cwd: fixture.subscriber)
+
+        let run = try await Sprigctl.run(
+            ["sync", "--push", "--rebase-diverged", "--json", fixture.subscriber.path]
+        )
+        #expect(run.exitCode == 0)
+        let object = try JSONSerialization.jsonObject(with: Data(run.stdout.utf8))
+        let report = try #require(object as? [String: Any])
+        // First push attempt is rejected (diverged), the follow-up
+        // replays and the second push lands — never a force.
+        #expect(report["pushOutcome"] as? String == "rejected-non-fast-forward")
+        #expect(report["rebaseOutcome"] as? String == "rebased")
+        #expect(report["rebasePushOutcome"] as? String == "pushed")
+        let snapshot = try #require(report["preRebaseSnapshot"] as? String)
+        #expect(snapshot.hasPrefix("refs/sprig/snapshots/"))
+        #expect(snapshot.hasSuffix("/rebase"))
+        let branches = try #require(report["branches"] as? [[String: Any]])
+        let main = try #require(branches.first { $0["name"] as? String == "main" })
+        #expect(main["ahead"] as? Int == 0, "replayed and pushed — in sync")
+        #expect(main["behind"] as? Int == 0)
+    }
 }
