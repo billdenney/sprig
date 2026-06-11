@@ -13,42 +13,7 @@ import Testing
     import FoundationNetworking
 #endif
 
-private final class FakeForgeHTTPClient: ForgeHTTPClient, @unchecked Sendable {
-    let status: Int
-    let body: Data
-    private let lock = NSLock()
-    private var captured: URLRequest?
-
-    init(status: Int, body: Data) {
-        self.status = status
-        self.body = body
-    }
-
-    var lastRequest: URLRequest? {
-        lock.lock()
-        defer { lock.unlock() }
-        return captured
-    }
-
-    /// Sync capture (NSLock's lock()/unlock() are unavailable in
-    /// async contexts on the snapshot toolchain).
-    private func capture(_ request: URLRequest) {
-        lock.lock()
-        captured = request
-        lock.unlock()
-    }
-
-    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        capture(request)
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: status,
-            httpVersion: "HTTP/1.1",
-            headerFields: nil
-        )!
-        return (body, response)
-    }
-}
+// The shared `FakeForgeHTTPClient` lives in ForgeTestSupport.swift.
 
 @Suite("ForgeRepoBrowser — GitHub listing")
 struct ForgeRepoBrowserTests {

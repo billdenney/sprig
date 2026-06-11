@@ -36,10 +36,22 @@ INJECTED, never persisted here.** The layering:
   (Keychain / DPAPI / Secret Service — stubs today). Recording that boundary is half this
   ADR's point: the portable layer treats the token as an opaque input.
 
-Pagination beyond the first 100 (Link header) and Bitbucket/Gitea providers are noted
-follow-ups; the enum is where they join. **GitLab landed same-day** (`/api/v4/projects?
-membership=true`, bearer token, self-hosted `baseURL`; `internal` visibility maps to
-`isPrivate` — it still requires auth to clone).
+**GitLab landed same-day** (`/api/v4/projects?membership=true`, bearer token, self-hosted
+`baseURL`; `internal` visibility maps to `isPrivate` — it still requires auth to clone).
+**Pagination + Bitbucket + Gitea landed 2026-06-11**, completing the v1 provider matrix:
+
+- Every provider pages to an explicit `maxPages = 10` cap (~1000 repos on 100-per-page
+  forges) — an explicit ceiling, not a silent truncation: all four sort
+  most-recently-active first, so the tail is the least likely pick. GitHub/GitLab/Gitea
+  advertise the next page via the RFC 5988 `Link` header (parser fails *closed* to
+  "what we already have"); Bitbucket Cloud carries a `next` URL in the response body.
+- **Bitbucket Cloud**: `/2.0/repositories?role=member&pagelen=100&sort=-updated_on`,
+  bearer token; clone URLs come as a `links.clone` array (`https` required — its absence
+  is a `malformedResponse`, not a silent skip; `ssh` optional).
+- **Gitea**: `/api/v1/user/repos?limit=50` (the server clamps to its
+  `MAX_RESPONSE_ITEMS`, default 50), self-hosted `baseURL` like GitLab, and the
+  **`Authorization: token <x>` scheme** — Gitea's documented canonical form, the one
+  every self-hosted version accepts (Bearer only works on recent releases).
 
 ## Considered options
 

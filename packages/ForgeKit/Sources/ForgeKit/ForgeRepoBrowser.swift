@@ -2,19 +2,22 @@
 //
 // Affordance 3.2 / ADR 0078 — the portable half of "browse my repos
 // instead of pasting a clone URL". Given a forge token, list the
-// user's repositories with their clone URLs. GitHub first; the
-// provider enum is where GitLab/Bitbucket/Gitea join (ADR 0063's
-// per-forge matrix).
+// user's repositories with their clone URLs across GitHub, GitLab,
+// Bitbucket, and Gitea (ADR 0063's per-forge matrix).
 //
 // Layering (recorded in ADR 0078): TOKENS ARE INJECTED. Acquisition
 // (OAuth device flow) is shell/onboarding work; storage is
 // CredentialKit's platform adapters (Keychain / DPAPI / Secret
 // Service — stubs today). This package never persists a token.
 //
+// Pagination: every provider is paginated to ``ForgeRepoBrowser/maxPages``
+// (an explicit cap, not a silent one — see `listRepos`). GitHub,
+// GitLab, and Gitea advertise the next page via the RFC 5988 `Link`
+// header; Bitbucket carries a `next` URL in the response body. The
+// per-provider wire code lives in ForgeRepoBrowser+Providers.swift.
+//
 // Tier 1 portable. Pure Foundation (+ FoundationNetworking on
-// non-Apple platforms). The HTTP seam mirrors AIKit's proven
-// `HTTPClient` shape — injectable for tests; only *git* is
-// never-mocked in this repo, HTTP fakes are conventional.
+// non-Apple platforms).
 
 import Foundation
 #if canImport(FoundationNetworking)
@@ -52,6 +55,8 @@ public struct ForgeRepo: Sendable, Equatable {
 public enum ForgeProvider: String, Sendable, CaseIterable {
     case github
     case gitlab
+    case bitbucket
+    case gitea
 }
 
 /// Typed failures the UI can word.
@@ -64,82 +69,31 @@ public enum ForgeError: Error, Equatable, Sendable {
     case malformedResponse(detail: String)
 }
 
-/// Minimal HTTP transport seam (AIKit's `HTTPClient` shape).
-public protocol ForgeHTTPClient: Sendable {
-    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
-}
-
-/// `URLSession`-backed default.
-public struct URLSessionForgeHTTPClient: ForgeHTTPClient {
-    private let session: URLSession
-
-    public init(session: URLSession = .shared) {
-        self.session = session
-    }
-
-    public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ForgeError.malformedResponse(detail: "non-HTTP response")
-        }
-        return (data, httpResponse)
-    }
-}
-
-/// GitLab's documented `/api/v4/projects` element shape (the fields
-/// we consume). `visibility` is `public`/`internal`/`private`; both
-/// non-public levels map to `isPrivate` (internal still requires
-/// auth to clone).
-private struct GitLabProject: Decodable {
-    let pathWithNamespace: String
-    let httpUrlToRepo: String
-    let sshUrlToRepo: String?
-    let description: String?
-    let visibility: String
-
-    enum CodingKeys: String, CodingKey {
-        case pathWithNamespace = "path_with_namespace"
-        case httpUrlToRepo = "http_url_to_repo"
-        case sshUrlToRepo = "ssh_url_to_repo"
-        case description
-        case visibility
-    }
-}
-
-/// GitHub's documented `/user/repos` element shape (the fields we
-/// consume). File-private: the public surface is ``ForgeRepo``.
-private struct GitHubRepo: Decodable {
-    let fullName: String
-    let cloneUrl: String
-    let sshUrl: String?
-    let description: String?
-    let isPrivate: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case fullName = "full_name"
-        case cloneUrl = "clone_url"
-        case sshUrl = "ssh_url"
-        case description
-        case isPrivate = "private"
-    }
-}
-
 /// Lists the authenticated user's repositories.
 public struct ForgeRepoBrowser: Sendable {
-    private let client: any ForgeHTTPClient
+    /// Hard page cap per listing. With 100-per-page providers that is
+    /// ~1000 repositories, most recently active first — an explicit
+    /// ceiling for the pick-from-list affordance, not a silent
+    /// truncation (documented on ``listRepos(provider:token:baseURL:)``
+    /// and in ADR 0078).
+    static let maxPages = 10
+
+    let client: any ForgeHTTPClient
 
     public init(client: any ForgeHTTPClient = URLSessionForgeHTTPClient()) {
         self.client = client
     }
 
-    /// First page (100 repos, most recently pushed first) of the
-    /// user's repositories. Pagination via the `Link` header is a
-    /// noted follow-up — 100 covers the affordance's "pick from a
-    /// list" purpose for most users.
+    /// The user's repositories, most recently active first, across
+    /// up to ``maxPages`` pages (~1000 repos on 100-per-page forges).
+    /// Repositories beyond the cap are not fetched — the affordance
+    /// is "pick from a list", and every provider sorts
+    /// recently-active-first, so the tail is the least likely pick.
     ///
     /// - Parameters:
     ///   - token: a personal-access/OAuth token. Never persisted here.
-    ///   - baseURL: override for GitHub Enterprise (and tests).
+    ///   - baseURL: override for self-hosted instances (GitHub
+    ///     Enterprise, self-managed GitLab, Gitea) and tests.
     public func listRepos(
         provider: ForgeProvider,
         token: String,
@@ -150,57 +104,29 @@ public struct ForgeRepoBrowser: Sendable {
             try await listGitHub(token: token, baseURL: baseURL)
         case .gitlab:
             try await listGitLab(token: token, baseURL: baseURL)
+        case .bitbucket:
+            try await listBitbucket(token: token, baseURL: baseURL)
+        case .gitea:
+            try await listGitea(token: token, baseURL: baseURL)
         }
     }
 
-    private func listGitLab(token: String, baseURL: URL?) async throws -> [ForgeRepo] {
-        let base = baseURL ?? URL(string: "https://gitlab.com")!
-        let endpoint = base.appendingPathComponent("api")
-            .appendingPathComponent("v4")
-            .appendingPathComponent("projects")
-        let data = try await fetchJSON(
-            endpoint: endpoint,
-            queryItems: [
-                URLQueryItem(name: "membership", value: "true"),
-                URLQueryItem(name: "order_by", value: "last_activity_at"),
-                URLQueryItem(name: "per_page", value: "100")
-            ],
-            token: token,
-            accept: "application/json"
-        )
-        do {
-            return try JSONDecoder().decode([GitLabProject].self, from: data).map {
-                ForgeRepo(
-                    fullName: $0.pathWithNamespace,
-                    cloneURL: $0.httpUrlToRepo,
-                    sshURL: $0.sshUrlToRepo,
-                    description: $0.description,
-                    isPrivate: $0.visibility != "public"
-                )
-            }
-        } catch {
-            throw ForgeError.malformedResponse(detail: String(describing: error))
-        }
-    }
+    // MARK: - Shared wire core
 
-    /// Shared GET + status classification: bearer auth, 401 →
+    /// One authenticated GET + status classification: 401 →
     /// ``ForgeError/unauthorized``, other non-2xx →
     /// ``ForgeError/httpStatus(_:)``.
-    private func fetchJSON(
-        endpoint: URL,
-        queryItems: [URLQueryItem],
-        token: String,
+    ///
+    /// - Parameter authorization: the full `Authorization` header
+    ///   value — `Bearer <token>` on GitHub/GitLab/Bitbucket,
+    ///   `token <token>` on Gitea (its documented canonical scheme).
+    func fetchPage(
+        url: URL,
+        authorization: String,
         accept: String
-    ) async throws -> Data {
-        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
-            throw ForgeError.malformedResponse(detail: "unbuildable endpoint URL")
-        }
-        components.queryItems = queryItems
-        guard let url = components.url else {
-            throw ForgeError.malformedResponse(detail: "unbuildable endpoint URL")
-        }
+    ) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
         request.setValue(accept, forHTTPHeaderField: "Accept")
 
         let (data, response) = try await client.send(request)
@@ -208,33 +134,76 @@ public struct ForgeRepoBrowser: Sendable {
         guard (200 ..< 300).contains(response.statusCode) else {
             throw ForgeError.httpStatus(response.statusCode)
         }
-        return data
+        return (data, response)
     }
 
-    private func listGitHub(token: String, baseURL: URL?) async throws -> [ForgeRepo] {
-        let base = baseURL ?? URL(string: "https://api.github.com")!
-        let data = try await fetchJSON(
-            endpoint: base.appendingPathComponent("user").appendingPathComponent("repos"),
-            queryItems: [
-                URLQueryItem(name: "per_page", value: "100"),
-                URLQueryItem(name: "sort", value: "pushed")
-            ],
-            token: token,
-            accept: "application/vnd.github+json"
-        )
-
-        do {
-            return try JSONDecoder().decode([GitHubRepo].self, from: data).map {
-                ForgeRepo(
-                    fullName: $0.fullName,
-                    cloneURL: $0.cloneUrl,
-                    sshURL: $0.sshUrl,
-                    description: $0.description,
-                    isPrivate: $0.isPrivate
-                )
-            }
-        } catch {
-            throw ForgeError.malformedResponse(detail: String(describing: error))
+    /// Follow RFC 5988 `Link: <…>; rel="next"` pagination (GitHub,
+    /// GitLab, Gitea) from `first`, collecting every page's body up
+    /// to ``maxPages``.
+    func fetchLinkPaginated(
+        first: URL,
+        authorization: String,
+        accept: String
+    ) async throws -> [Data] {
+        var pages: [Data] = []
+        var next: URL? = first
+        while let url = next, pages.count < Self.maxPages {
+            let (data, response) = try await fetchPage(
+                url: url,
+                authorization: authorization,
+                accept: accept
+            )
+            pages.append(data)
+            next = Self.nextLink(from: response)
         }
+        return pages
+    }
+
+    /// Compose an endpoint URL from a base path + query items.
+    static func endpoint(_ base: URL, query: [URLQueryItem]) throws -> URL {
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw ForgeError.malformedResponse(detail: "unbuildable endpoint URL")
+        }
+        components.queryItems = query
+        guard let url = components.url else {
+            throw ForgeError.malformedResponse(detail: "unbuildable endpoint URL")
+        }
+        return url
+    }
+
+    // MARK: - Link header parsing
+
+    /// The `rel="next"` target from a response's `Link` header, or
+    /// nil when there is no next page (or no parseable header —
+    /// pagination fails *closed* to "what we already have").
+    static func nextLink(from response: HTTPURLResponse) -> URL? {
+        // Case-insensitive header lookup: corelibs-foundation's
+        // `allHeaderFields` preserves the wire casing.
+        let raw = response.allHeaderFields.first { key, _ in
+            String(describing: key).lowercased() == "link"
+        }?.value
+        guard let header = raw as? String else { return nil }
+        return nextLink(inLinkHeader: header)
+    }
+
+    /// Parse `<url1>; rel="prev", <url2>; rel="next"` (quotes and
+    /// spacing optional per RFC 5988 relaxations seen in the wild).
+    static func nextLink(inLinkHeader header: String) -> URL? {
+        for entry in header.split(separator: ",") {
+            let segments = entry.split(separator: ";")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let target = segments.first,
+                  target.hasPrefix("<"), target.hasSuffix(">")
+            else { continue }
+            let isNext = segments.dropFirst().contains { segment in
+                segment.lowercased()
+                    .replacingOccurrences(of: "\"", with: "")
+                    .replacingOccurrences(of: " ", with: "") == "rel=next"
+            }
+            if isNext {
+                return URL(string: String(target.dropFirst().dropLast()))
+            }
+        }
+        return nil
     }
 }
