@@ -89,6 +89,7 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0077 | Status insight lines — "what changed?" digest + stale-work nudge           | accepted |
 | 0078 | Clone wizard forge browse — pick from a list, tokens injected              | accepted |
 | 0079 | Stash browser — SHA identity, drop always keeps a safety copy              | accepted |
+| 0080 | Credential storage defers to git's helper chain                            | accepted |
 
 ADRs 0001–0053 were ratified simultaneously in the initial scaffolding, based on the planning dialogue captured in the master plan file. Subsequent ADRs (0054+) follow the normal one-per-PR cadence.
 

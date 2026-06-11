@@ -193,6 +193,10 @@ let package = Package(
                     "GitCore", "RepoState", "IPCSchema", "WatcherKit",
                     "TransportKit", "SafetyKit", "TaskWindowKit"
                 ]
+            case "CredentialKit":
+                // GitCore.Runner: the portable default store defers to
+                // the user's `git credential` helper chain (ADR 0080).
+                ["GitCore"]
             default:
                 []
             }
@@ -200,6 +204,10 @@ let package = Package(
             // can pull in additional Tier-1 packages without those becoming
             // production deps of the adapter.
             let extraTestDeps: [Target.Dependency] = switch name {
+            case "CredentialKit":
+                // Real-git round-trip tests construct `GitCore.Runner`
+                // fixtures directly.
+                ["GitCore"]
             case "TransportKit":
                 // Integration tests demonstrate `Transport` + `IPCSchema`
                 // composition end-to-end (encode envelope → send → receive
@@ -252,6 +260,7 @@ let package = Package(
                     "DiagKit",
                     "UIKitShared",
                     "TaskWindowKit",
+                    "CredentialKit",
                     .product(name: "ArgumentParser", package: "swift-argument-parser")
                 ],
                 path: "cli/sprigctl/Sources"
