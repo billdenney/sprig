@@ -53,6 +53,7 @@ Severity = likelihood × impact, both 1 (low) – 5 (high). 25 = existential, 1 
 - **Likelihood:** 3. BDFL through 1.0 is explicit (ADR 0017). Maintainer illness, life event, or burnout halts everything.
 - **Impact:** 3. Project pause; community fork possible but high friction.
 - **Mitigation:** ADR 0017's transition-to-steering plan should be drafted in `docs/planning/governance-transition.md` by M7. Keep all keys / certs / accounts documented in a recovery doc accessible to a designated successor.
+- **Realized once (2026-06-11), documentation form:** the master plan lived at a machine-local path outside the repo and was lost; 80+ cross-references dangled. Recovered by vendoring the reconstruction into `docs/planning/master-plan.md`. Standing rule extracted from the incident (now in CLAUDE.md): the source of truth never lives outside the repository.
 - **Owner:** maintainer.
 
 ### R8 — AI data-leakage anxieties (severity 8)
@@ -99,10 +100,18 @@ Severity = likelihood × impact, both 1 (low) – 5 (high). 25 = existential, 1 
 
 ### R14 — Self-hosted runner failure (severity 6)
 
+- **Reframed 2026-06-11 (severity raised 6 → 9 while unprovisioned):** the original entry priced the runner *failing*; the live risk was it *not existing* while moving onto the critical path — it gates the M1 100k benchmark (the one open M1 box), the E2E suite, M2-Mac's badge-latency verification, release signing (master-plan §5.5), and CI for all Mac-shell code. **Mac hardware is imminent (2026-06)**; provisioning is the named first M2-Mac precursor task in `milestones.md`, after which this entry returns to the operational framing below.
 - **Likelihood:** 3. Hardware fails; macOS updates break the runner; signing cert expires.
 - **Impact:** 2. Releases blocked for hours-to-days.
 - **Mitigation:** 24-hour recovery target (`docs/ci/self-hosted.md`). Fallback path: temporary build on maintainer's primary Mac. Keychain backup procedure with annual restore drill.
 - **Owner:** maintainer.
+
+### R16 — Actor-VM ↔ shell binding ergonomics unproven (severity 9) *(added 2026-06-11)*
+
+- **Likelihood:** 3. All 14 `TaskWindowKit` view models are Swift actors; the documented consumption pattern ("SwiftUI wraps reads in `Task` from `@MainActor`") is plausible but has never been exercised against a real shell. swift-cross-ui's story is even less proven. If the pattern is wrong (e.g. shells want `@Observable` main-actor façades), every VM shares the flaw.
+- **Impact:** 3. A pattern rework across 14 VMs mid-M3, or — worse — per-window ad-hoc workarounds that diverge the two shells.
+- **Mitigation:** the M3 **spike-first gate** (`milestones.md`): one real window bound to one existing VM per shell *before* mass window-building; any pattern change lands once, as an ADR, while it's cheap. The swift-cross-ui half runs early on the existing Windows VM rig.
+- **Owner:** maintainer (Mac spike) + me (Windows spike).
 
 ### R15 — Multi-agent git interactions in prior code (severity 9)
 
@@ -122,4 +131,4 @@ Severity = likelihood × impact, both 1 (low) – 5 (high). 25 = existential, 1 
 
 ## Master plan source
 
-This file mirrors and expands master plan §9. When the two diverge, the master plan is canonical for *strategic* risks; this file is canonical for *operational* details (likelihoods, owners, mitigation status).
+This file mirrors and expands [`master-plan.md`](master-plan.md) §9. When the two diverge, the master plan is canonical for *strategic* risks; this file is canonical for *operational* details (likelihoods, owners, mitigation status).

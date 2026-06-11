@@ -1,6 +1,6 @@
 # Git feature inventory
 
-Which `git` commands Sprig surfaces, in what tier, and where each lands in the milestone plan. **Authoritative source: §10 of the master plan** at `/home/bill/.claude/plans/please-switch-to-plan-glittery-corbato.md`. This file is a brief navigation index against that.
+Which `git` commands Sprig surfaces, in what tier, and where each lands in the milestone plan. **Authoritative source: [`master-plan.md`](../planning/master-plan.md) §10** plus the per-ADR engine-invocation sections below, which are the maintained record of every git command Sprig actually runs.
 
 ## Tiering at a glance
 

@@ -2,7 +2,7 @@
 
 Sprig's macOS app is the user-facing 1.0 target, but the **engine is portable** and runs first-class on macOS, Linux, and Windows. Every PR has CI that builds, tests, and lints on all three.
 
-This document mirrors §12 of the master plan (`/home/bill/.claude/plans/please-switch-to-plan-glittery-corbato.md`).
+This document mirrors §12 of the master plan ([`docs/planning/master-plan.md`](../planning/master-plan.md)).
 
 **Companion doc:** [`cross-platform-quirks.md`](cross-platform-quirks.md) catalogs the *operational* surprises we've hit during development — symptoms, root causes, fix patterns, and upstream-fix candidates. Add an entry there whenever a CI failure surfaces on one platform but not another.
 

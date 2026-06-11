@@ -13,7 +13,7 @@ This doc is the entry point for new contributors. Deeper-dive companion docs:
 - [`ai-integration.md`](ai-integration.md) — AIKit provider abstraction.
 - [`cross-platform.md`](cross-platform.md) — three-tier rules; how the engine stays portable.
 
-The master plan at `/home/bill/.claude/plans/please-switch-to-plan-glittery-corbato.md` is the long-form authoritative source for design rationale and ADR cross-references.
+The master plan at [`docs/planning/master-plan.md`](../planning/master-plan.md) is the long-form authoritative source for design rationale and ADR cross-references.
 
 ## High-level diagram
 

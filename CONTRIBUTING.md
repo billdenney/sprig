@@ -52,9 +52,10 @@ Before opening a PR, please confirm:
 - [ ] No new `#if os(macOS)` in portable (Tier 1) packages.
 - [ ] No hardcoded absolute paths outside `tests/fixtures/` or `docs/`.
 - [ ] Any new tier-2 adapter includes Mac/Linux/Windows source files (stubs OK).
-- [ ] Destructive operations create a snapshot ref via `SafetyKit`.
-- [ ] Any user-visible change has a CHANGELOG.md entry under `[Unreleased]`.
+- [ ] Destructive operations create a snapshot ref via `SafetyKit` — **and ship a pinned undo round-trip test** (perform the op, restore through the real Recover path, assert the original state exactly; see CLAUDE.md Testing expectations).
+- [ ] Any user-visible change has a CHANGELOG.md entry under `[Unreleased]` — **2–3 lines + the ADR pointer**; the ADR carries the detail (style ratified at engine-0.5.0; the pre-0.5.0 paragraph-style entries are grandfathered).
 - [ ] Any behavior change has an ADR or links to an existing one.
+- [ ] Engine slices pass the full gate in [`docs/ci/slice-gate.md`](docs/ci/slice-gate.md) before push (format, lint, full local suite, Windows-VM sweep + receipts).
 
 ## Writing ADRs
 

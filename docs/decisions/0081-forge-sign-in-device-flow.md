@@ -43,6 +43,11 @@ injected like tokens; the resulting access token goes straight into CredentialKi
   on** — both are the typed `unsupportedProvider`, worded as guidance to store a
   personal access token via `sprigctl credential --set` (same key, so every downstream
   consumer is provider-uniform).
+- **Version floor (noted 2026-06-11):** GitLab's device grant requires **GitLab ≥ 17.2**
+  (`/oauth/authorize_device` landed there). On an older self-managed instance, `begin`
+  surfaces `httpStatus(404)`; callers should word that as the same PAT guidance the
+  unsupported providers get. Improving that wording at the `forge login` face is a
+  noted follow-up.
 
 CLI face: **`sprigctl forge login|logout|status --provider <p>`** — login prints the
 code + URL, polls, stores under service `forge.<provider>` / account `token` (the one
