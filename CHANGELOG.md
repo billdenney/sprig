@@ -12,6 +12,7 @@ pointer (the ADR carries the detail — see CONTRIBUTING).
 - **Plan vendored + planning docs realigned (M2.5 checkpoint)** — the master plan now lives in-repo (`docs/planning/master-plan.md`) after the original's loss; 53 stub ADRs re-pointed; ADR 0051 expanded in place; M2.5 checkpoint + re-scoped M3 in roadmap/milestones; slice gate codified (`docs/ci/slice-gate.md`); `VM-ENV-1` filed; R14 reframed/R16 added. Force-push stays in v1 behind the full high tier (master-plan §2.5/§10).
 
 ### Fixed
+- **Hosted-Windows CI red since #145: credential-fixture isolation (quirk G2)** — git 2.54's Windows build no longer honors the `credential.helper=""` chain reset (empirically pinned vs git 2.43), so hosted runners' Git Credential Manager leaked test secrets across fixtures (one test even reached the real GitHub API with a stale token). Fixtures now isolate via `GIT_CONFIG_NOSYSTEM` + global-config redirection, with a `--show-origin` pin that the effective chain is exactly the local helper. No product change — `GitCredentialChainStore` deliberately honors the user's real chain.
 - **House-style enforcement now covers the Recover vocabulary strings** — `notASnapshotRef`/`notABackupRef`/`recoveryRefMissing` were missing from the test catalog. Shared history-rewrite guards extracted to `GitCore.HistoryRewriteGuards` (behavior-neutral; ADR 0082/0083 engines now share one implementation).
 
 ## [engine-0.5.0] — 2026-06-11
