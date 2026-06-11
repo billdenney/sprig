@@ -69,3 +69,15 @@ The OS-level message-boundary feature would replace our 4-byte length prefix on 
 ## What changed and why (in-PR amendment, 2026-05-19)
 
 The original draft of this ADR (committed earlier in PR #111) accepted "ship synchronous I/O first; do IOCP later." That decision was reversed mid-PR after hosted Windows CI hung for over an hour on the synchronous variant's `Run tests` step — the cancellation mechanisms it relied on were documented as no-ops / undefined behavior, and CI environment differences (Defender holds, scheduler quirks, parallel-test load) tipped the race against us reliably. The OVERLAPPED refactor landed within the same PR; the ADR was rewritten to match. The original "blocking-IO + IOCP-later" framing is preserved above under "Alternatives considered" so the failed approach is documented for future contributors.
+
+## Amendment 2026-06-11 — host accept loop shipped (`sprigctl agent --pipe`)
+
+The serving glue arrived with the cross-transport host seam: **`sprigctl agent --pipe NAME`**
+runs the same accept loop as the Linux/macOS `--socket` host (one `ClientRequestDispatcher`
+per connection, shared `SubscriptionRegistry` + `SubscriptionTransportRoutes`,
+`RoutedBadgeEventSink` teed with stdout diagnostics) over `NamedPipeServer`. The protocol and
+framing are byte-identical across transports (ADR 0048's covenant), pinned by parallel
+two-process end-to-end tests — UDS on Linux/macOS, named pipe on Windows — each proving
+connect → `subscribe` → `subscribeAck` → file change → `badgeChanged`. The
+peer-SID-restricted DACL noted in the implementation comments remains the security follow-up
+for the production Windows Service host, alongside ADR 0076's `SO_PEERCRED` analogue.

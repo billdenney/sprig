@@ -69,6 +69,12 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git fetch . <upstream-ref>:refs/heads/<branch> --quiet` — ref-only fast-forward of non-checked-out branches; git itself refuses non-FF updates and worktree-checked-out branches.
 - `git status --porcelain -z` — tracked-modification (dirty) gate before touching the checked-out branch.
 
+### Global excludes provisioning (ADR 0049 amendment) — engine invocations
+
+`GitCore.GlobalExcludes` (CLI face `sprigctl setup --global-ignore`):
+
+- `git config --get core.excludesFile` — resolution across all scopes, exactly like git's own excludes lookup; unset falls back to the documented `$XDG_CONFIG_HOME/git/ignore` default, so provisioning never writes config.
+
 ## Newer-git features Sprig explicitly takes advantage of
 
 Master plan §10 has a per-version (2.40 → 2.46) breakdown. Highlights:

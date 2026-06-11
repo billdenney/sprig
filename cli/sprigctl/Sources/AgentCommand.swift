@@ -74,6 +74,17 @@ struct AgentCommand: AsyncParsableCommand {
     @Option(
         name: .long,
         help: ArgumentHelp(
+            "Serve the agent over a named pipe at \\\\.\\pipe\\NAME (Windows — ADR 0067).",
+            discussion: "The Windows face of --socket: identical protocol and "
+                + "framing, named-pipe transport. Bare names are canonicalized "
+                + "to the \\\\.\\pipe\\ namespace."
+        )
+    )
+    var pipe: String?
+
+    @Option(
+        name: .long,
+        help: ArgumentHelp(
             "Read AppPreferences JSON from PATH and run the background jobs it enables (ADR 0068 auto-fetch, ADR 0075 auto-backup).",
             discussion: "The M2 host wiring: the platform hosts (macOS "
                 + "LaunchAgent, Windows Service) always pass their "
@@ -121,16 +132,12 @@ struct AgentCommand: AsyncParsableCommand {
 
         let (autoSync, autoBackup) = try makeBackgroundJobs()
 
-        // M2 IPC serving (ADR 0076): with --socket, tee the stdout
-        // sink with a routed sink fed by per-client dispatchers.
-        #if os(Linux) || os(macOS)
-            let serving = try makeServing(registry: registry)
-            let agentSink: any BadgeEventSink = serving
-                .map { TeeBadgeEventSink([sink, $0.routedSink]) } ?? sink
-        #else
-            try rejectSocketFlag()
-            let agentSink: any BadgeEventSink = sink
-        #endif
+        // M2 IPC serving (ADR 0076 / 0067): with --socket (UDS) or
+        // --pipe (named pipe), tee the stdout sink with a routed sink
+        // fed by per-client dispatchers.
+        let serving = try makeServing(registry: registry)
+        let agentSink: any BadgeEventSink = serving
+            .map { TeeBadgeEventSink([sink, $0.routedSink]) } ?? sink
 
         let agent = RepoAgent(
             repoRoot: rootURL,
@@ -158,12 +165,10 @@ struct AgentCommand: AsyncParsableCommand {
         if preferences != nil {
             print(jobsLabel(autoSync: autoSync, autoBackup: autoBackup), to: &err)
         }
-        #if os(Linux) || os(macOS)
-            if let socket, serving != nil {
-                print("# agent: serving at \(socket)", to: &err)
-            }
-            defer { serving?.shutdown() }
-        #endif
+        if let serving {
+            print("# agent: serving at \(serving.address)", to: &err)
+        }
+        defer { serving?.shutdown() }
 
         try await agent.start()
 
@@ -189,19 +194,6 @@ struct AgentCommand: AsyncParsableCommand {
 // MARK: - Host helpers
 
 extension AgentCommand {
-    #if !os(Linux) && !os(macOS)
-        /// `--socket` requires the ADR 0076 UDS transport; the Windows
-        /// host serves over named pipes in a later slice.
-        private func rejectSocketFlag() throws {
-            guard socket == nil else {
-                throw ValidationError(
-                    "--socket is not supported on this platform yet "
-                        + "(the Windows host serves over named pipes in a later slice)"
-                )
-            }
-        }
-    #endif
-
     /// Optional auto-stop. Mirrors `sprigctl watch`'s --duration.
     private func makeStopTask(
         agent: RepoAgent,
