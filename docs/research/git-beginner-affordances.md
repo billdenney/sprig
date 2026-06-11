@@ -132,8 +132,10 @@ safe). The trust spine stays: destructive-op confirms (§11.6) are not negotiabl
   "branch X: 4 changed files, no commit in 9 days." `RepoStatusSummary.lastCommitDate` +
   `StatusVocabulary.staleWorkNudge`; surfaced only inside the Status window (no
   notification spam, per ADR 0014's restraint).
-- **3.2 Clone wizard with provider browse** (`proposed`, M) — pick-from-list of your
-  GitHub/GitLab repos via the ADR 0063 forge tokens instead of pasting clone URLs.
+- **3.2 Clone wizard with provider browse** (`ratified`, engine half `shipped`, ADR 0078) —
+  `ForgeKit.ForgeRepoBrowser` (GitHub first; tokens injected, never persisted) +
+  `CloneDialogViewModel.browseRepos/selectBrowsed`. Token acquisition (OAuth device flow)
+  and storage (CredentialKit platform adapters) ride the shell/onboarding slices.
 - **3.3 "What changed?" digest after fetch** (`ratified + shipped`, ADR 0077) — when a
   fetch moves a remote-tracking ref, "12 new commits from 3 people on origin/main"
   (`SyncOps.fetchAllDigesting`, pure `git log` counting, no AI); in

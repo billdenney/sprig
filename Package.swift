@@ -7,7 +7,8 @@ import PackageDescription
 let tier1Targets: [String] = [
     "GitCore", "RepoState", "ConflictKit", "AIKit", "LFSKit",
     "SubmoduleKit", "SubtreeKit", "SafetyKit", "IPCSchema",
-    "PlatformKit", "DiagKit", "StatusKit", "TaskWindowKit", "UIKitShared"
+    "PlatformKit", "DiagKit", "StatusKit", "TaskWindowKit", "UIKitShared",
+    "ForgeKit"
 ]
 
 /// Per-target dependency overrides for Tier-1 packages. Default Tier-1
@@ -68,7 +69,8 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // VM wraps the force-delete in `SnapshotWriter.withSnapshot`.
     // RepoState: the Recover VM (ADR 0033 amendment) lists snapshot
     // refs via `SnapshotIndex` alongside SafetyKit's backups.
-    "TaskWindowKit": ["GitCore", "ConflictKit", "LFSKit", "SafetyKit", "RepoState"],
+    // ForgeKit: the CloneDialog's forge-browse affordance (ADR 0078).
+    "TaskWindowKit": ["GitCore", "ConflictKit", "LFSKit", "SafetyKit", "RepoState", "ForgeKit"],
     // ADR 0072's `StatusVocabulary` formats GitCore outcome types
     // (FastForwardOutcome, PushOutcome, BranchSyncState) and
     // TaskWindowKit's (PreflightWarning, SetAsideOutcome) into
