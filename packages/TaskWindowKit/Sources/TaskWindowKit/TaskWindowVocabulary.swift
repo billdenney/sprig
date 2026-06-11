@@ -109,6 +109,16 @@ public enum TaskWindowVocabulary {
         "That safety copy no longer exists: '\(ref)'. Refresh the list."
     }
 
+    // MARK: - Stash browser (ADR 0079)
+
+    public static func stashEntryGone(_ subject: String) -> String {
+        "'\(subject)' is no longer in the set-aside list — the list has been refreshed."
+    }
+
+    public static func stashConflicted(_ subject: String) -> String {
+        "Applying '\(subject)' hit conflicts — resolve them in your files; the set-aside copy is kept."
+    }
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the

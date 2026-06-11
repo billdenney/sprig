@@ -132,7 +132,7 @@ struct RecoverCommand: AsyncParsableCommand {
         // we touch git. This keeps `--restore <some-other-branch>`
         // from accidentally rewinding HEAD via the recover tool;
         // arbitrary refs need `git reset --hard`, not Sprig.
-        guard SnapshotRefName.parse(ref) != nil else {
+        guard let parsed = SnapshotRefName.parse(ref) else {
             throw ValidationError(
                 "ref does not match the snapshot format \(SnapshotRefName.prefix)<ts>/<op>: \(ref)"
             )
@@ -156,6 +156,16 @@ struct RecoverCommand: AsyncParsableCommand {
         // before the reset reads it (caught by the Recover VM's
         // round-trip test).
         let targetSHA = revParse.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // ADR 0079: a stash-drop safety copy points at the dropped
+        // stash COMMIT, not a repo state — `reset --hard` would
+        // wrongly move the branch onto it. Restore = put the entry
+        // back in the stash list; worktree and HEAD untouched, so no
+        // insurance refs are needed.
+        if parsed.op == SnapshotRefName.opStashDrop {
+            try await restoreStashEntry(ref: ref, sha: targetSHA, runner: runner)
+            return
+        }
 
         // Uncommitted-work insurance (ADR 0033 amendment): the hard
         // reset below would eat dirty tracked changes AND untracked
@@ -188,6 +198,18 @@ struct RecoverCommand: AsyncParsableCommand {
         }
         print("Before-restore snapshot: \(beforeSnapshot.refName)", to: &out)
         print("Run `sprigctl recover --restore \(beforeSnapshot.refName)` to undo.", to: &out)
+    }
+
+    /// `git stash store <sha>` with the stash commit's own subject as
+    /// the reflog message, so the restored entry reads exactly like
+    /// it did before the drop.
+    private func restoreStashEntry(ref: String, sha: String, runner: Runner) async throws {
+        let subject = try await runner.run(["log", "-1", "--format=%s", sha])
+            .stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = try await runner.run(["stash", "store", "-m", subject, sha])
+        var out = StdoutStream()
+        print("Restored stash entry from \(ref)", to: &out)
+        print("It is back in the stash list as stash@{0}.", to: &out)
     }
 }
 
