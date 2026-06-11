@@ -35,6 +35,13 @@ struct TaskWindowVocabularyTests {
             TaskWindowVocabulary.checkedOutSwitchAway("feature/x"),
             TaskWindowVocabulary.stashEntryGone("On main: WIP"),
             TaskWindowVocabulary.stashConflicted("On main: WIP"),
+            TaskWindowVocabulary.historyShared,
+            TaskWindowVocabulary.historyMidstream,
+            TaskWindowVocabulary.historyStagedChanges,
+            TaskWindowVocabulary.historyNoCommits,
+            TaskWindowVocabulary.historyDetached,
+            TaskWindowVocabulary.historyNeedTwo,
+            TaskWindowVocabulary.historyNotEnoughHistory,
             TaskWindowVocabulary.cancelled("Clone"),
             TaskWindowVocabulary.cancelled()
         ]

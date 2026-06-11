@@ -111,6 +111,10 @@ public struct SnapshotRefName: Equatable, Hashable, Sendable {
     /// HEAD before `reset --hard`-ing to another snapshot — a restore
     /// is itself reversible (ADR 0033 amendment).
     public static let opRestore = "restore"
+    /// `git commit --amend` replacing only the message (ADR 0082).
+    public static let opReword = "reword"
+    /// Combining the last N commits into one (ADR 0082).
+    public static let opSquash = "squash"
 
     // MARK: - Format internals (exposed for tests)
 
