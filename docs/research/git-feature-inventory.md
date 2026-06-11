@@ -40,6 +40,12 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git stash drop <ref>` — only reachable via `dropKeepingSafetyCopy`, which first writes `refs/sprig/snapshots/<ts>/stash-drop` at the stash commit (ADR 0033 medium tier).
 - `git stash store -m <original subject> <sha>` — Recover's restore path for stash-drop safety copies (additive; never `reset --hard`, which would move the branch onto the stash commit).
 
+### Clone (ADR 0030 / 0078) — engine invocations
+
+`TaskWindowKit.CloneDialogViewModel` + `sprigctl clone`:
+
+- `git clone [--recurse-submodules] [--depth N] <source> <target>` — argv built by `CloneRequest.gitArguments()` (unit-pinned); submodule recursion defaults on per master plan §10. Note: local-path clones ignore `--depth`; the `file://` transport honors it (test-pinned).
+
 ### History editing (ADR 0082) — engine invocations
 
 `GitCore.HistoryOps` + `TaskWindowKit.HistoryEditViewModel`:

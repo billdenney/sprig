@@ -19,6 +19,7 @@ struct SprigCtl: AsyncParsableCommand {
         subcommands: [
             VersionCommand.self,
             StatusCommand.self,
+            CloneCommand.self,
             WatchCommand.self,
             ReposCommand.self,
             LogCommand.self,
