@@ -31,6 +31,15 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git switch <branch>` — on failure after a stash was created, the stash is popped back (fail-closed restore).
 - `git stash pop` — conflicted pops are detected by non-zero exit **plus** `refs/stash` still resolving (git keeps the entry), surfaced as "kept in stash".
 
+### Stash browser (ADR 0079) — engine invocations
+
+`GitCore.StashOps` by-ref verbs + `TaskWindowKit.StashViewModel`:
+
+- `git stash list --format=%gd%x00%H%x00%cI%x00%s` — NUL-delimited fields (selector, commit SHA, ISO-8601 date, subject) so subjects can't break the parse; SHA is the stable entry identity (selectors reindex on every pop/drop).
+- `git stash apply <ref>` / `git stash pop <ref>` — by-ref variants; kept-on-conflict verified by the entry's SHA still appearing in `git stash list --format=%H`, not by selector.
+- `git stash drop <ref>` — only reachable via `dropKeepingSafetyCopy`, which first writes `refs/sprig/snapshots/<ts>/stash-drop` at the stash commit (ADR 0033 medium tier).
+- `git stash store -m <original subject> <sha>` — Recover's restore path for stash-drop safety copies (additive; never `reset --hard`, which would move the branch onto the stash commit).
+
 ### Sync verb (ADR 0071) — engine invocations
 
 `SyncOps.pushCurrentBranch` + `TaskWindowKit.SyncViewModel` (fetch and fast-forward legs reuse ADR 0068's invocations below):

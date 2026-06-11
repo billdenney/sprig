@@ -67,6 +67,10 @@ public enum RecoverOutcome: Sendable, Equatable {
         beforeRestore: SnapshotRefName,
         uncommittedBackup: BackupRefName?
     )
+    /// An ADR 0079 stash-drop safety copy was restored by putting the
+    /// entry back in the stash list (`git stash store`) — additive;
+    /// worktree and HEAD untouched, so no insurance refs ride along.
+    case restoredStashEntry(refName: String)
 }
 
 /// View model for the Recover task window. Construct with the repo's
@@ -151,12 +155,20 @@ public actor RecoverViewModel {
     /// insurance refs taken FIRST — uncommitted work into an ADR 0075
     /// backup (a hard reset would otherwise eat it), and pre-restore
     /// HEAD into a fresh snapshot so this restore is itself undoable.
+    ///
+    /// **Stash-drop snapshots restore differently.** A
+    /// `…/stash-drop` safety copy (ADR 0079) points at the dropped
+    /// stash *commit*, not a repo state — `reset --hard` there would
+    /// wrongly move the branch onto the stash commit. Restoring one
+    /// means putting the entry back in the stash list
+    /// (`git stash store`), which touches neither the worktree nor
+    /// HEAD, so no insurance refs are needed.
     public func restoreSnapshot(_ refName: String) async {
         if case .busy = state { return }
         // Reject anything that isn't a Sprig snapshot ref before
         // touching git — `reset --hard <arbitrary-ref>` is a
         // different, more dangerous verb than Recover.
-        guard SnapshotRefName.parse(refName) != nil else {
+        guard let parsed = SnapshotRefName.parse(refName) else {
             state = .failure(.init(description: TaskWindowVocabulary.notASnapshotRef(refName)))
             return
         }
@@ -184,6 +196,11 @@ public actor RecoverViewModel {
             let targetSHA = exists.stdoutString
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
+            if parsed.op == SnapshotRefName.opStashDrop {
+                try await restoreStashEntry(refName: refName, sha: targetSHA)
+                return
+            }
+
             let uncommitted = try await backups.createBackupIfDirty()
             let beforeRestore = try await snapshotWriter.createSnapshot(
                 op: SnapshotRefName.opRestore
@@ -204,6 +221,18 @@ public actor RecoverViewModel {
     /// Reset operation state (keeps the list).
     public func reset() {
         state = .idle
+    }
+
+    /// ADR 0079 stash-drop restore: `git stash store <sha>` puts the
+    /// dropped entry back in the stash list, carrying its original
+    /// subject forward as the reflog message so the restored entry
+    /// reads exactly like it did before the drop.
+    private func restoreStashEntry(refName: String, sha: String) async throws {
+        let subject = try await runner.run(["log", "-1", "--format=%s", sha])
+            .stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = try await runner.run(["stash", "store", "-m", subject, sha])
+        state = .success(.restoredStashEntry(refName: refName))
+        await refreshKeepingState()
     }
 
     /// Re-list after a successful restore without clobbering the
