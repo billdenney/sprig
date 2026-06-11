@@ -119,7 +119,10 @@ timestamp). **`fetchNow()`** is this ADR's manual-fetch affordance: one
 `fetch --all --prune`, then a full re-summary so behind/ahead counts reflect the fresh
 remote-tracking refs — proven by a bare-origin test where the behind-count appears only
 after the call. The pause/backoff *panel* data (this ADR's platform signals) joins when the
-Tier-2 signal adapters land; the Tier-3 window is M3 shell work.
+Tier-2 signal adapters land; the Tier-3 window is M3 shell work. **CLI face (same week):**
+`sprigctl status --summary [--json]` prints the identical dashboard — counts, relationship,
+in-progress operation, safety net, and the ADR 0077 stale-work line — worded by the shared
+vocabulary's terse register.
 
 ## Links
 
