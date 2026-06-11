@@ -57,16 +57,21 @@ enum Sprigctl {
     /// Environment that makes a spawned sprigctl's git see ONLY the
     /// fixture repo's local config: `GIT_CONFIG_NOSYSTEM` disables
     /// the system + ProgramData scopes (where Git Credential Manager
-    /// lives on Windows hosts), and the home/XDG redirects move the
+    /// lives on Windows hosts), and the HOME/XDG redirects move the
     /// global config to an empty directory. Needed because the
     /// `credential.helper=""` chain-reset idiom is not honored by
     /// git 2.54's Windows build (quirk G2) — without this, hosted
     /// CI's GCM leaks stored secrets across credential fixtures.
+    ///
+    /// USERPROFILE is deliberately NOT redirected: Git for Windows
+    /// prefers HOME when set (verified on git 2.54 — the effective
+    /// chain is exactly the local entry), and redirecting
+    /// USERPROFILE breaks the spawned process's own runtime
+    /// (FoundationNetworking init died silently in `forge login`).
     static func credentialIsolationEnvironment(home: URL) -> [String: String] {
         [
             "GIT_CONFIG_NOSYSTEM": "1",
             "HOME": home.path,
-            "USERPROFILE": home.path,
             "XDG_CONFIG_HOME": home.path
         ]
     }
