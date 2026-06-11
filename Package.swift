@@ -261,6 +261,7 @@ let package = Package(
                     "UIKitShared",
                     "TaskWindowKit",
                     "CredentialKit",
+                    "ForgeKit",
                     .product(name: "ArgumentParser", package: "swift-argument-parser")
                 ],
                 path: "cli/sprigctl/Sources"
