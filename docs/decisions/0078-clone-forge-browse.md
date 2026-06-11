@@ -71,7 +71,11 @@ INJECTED, never persisted here.** The layering:
 - ForgeKit is the natural home for ADR 0063's later verbs (PR list/create, badge queries) —
   same client seam, same token boundary.
 - A `sprigctl clone --browse` face needs a token source (env var or CredentialKit) — rides
-  the CredentialKit slice.
+  the CredentialKit slice. **Landed 2026-06-11**: the token source is ADR 0080's git
+  credential chain (filled by ADR 0081's `forge login` or a stored PAT);
+  `sprigctl clone --browse --provider <p>` prints the numbered list and clones the pick,
+  and plain `sprigctl clone <url> [dir]` drives the same `CloneDialogViewModel` the task
+  windows bind.
 
 ## Links
 

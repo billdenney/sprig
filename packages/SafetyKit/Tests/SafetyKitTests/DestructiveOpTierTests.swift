@@ -57,6 +57,8 @@ struct DestructiveOpTierTests {
         #expect(DestructiveOpTier.tier(for: SnapshotRefName.opRevert) == .medium)
         #expect(DestructiveOpTier.tier(for: SnapshotRefName.opBranchDelete) == .medium)
         #expect(DestructiveOpTier.tier(for: SnapshotRefName.opCheckoutDirty) == .medium)
+        #expect(DestructiveOpTier.tier(for: SnapshotRefName.opReword) == .medium)
+        #expect(DestructiveOpTier.tier(for: SnapshotRefName.opSquash) == .medium)
     }
 
     @Test("high-tier op tags map to .high (force-push and friends)")

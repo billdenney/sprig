@@ -119,6 +119,25 @@ public enum TaskWindowVocabulary {
         "Applying '\(subject)' hit conflicts — resolve them in your files; the set-aside copy is kept."
     }
 
+    // MARK: - History editing (ADR 0082)
+
+    public static let historyShared =
+        "Those commits are already on the server — Sprig never rewrites shared history."
+
+    public static let historyMidstream =
+        "Finish or abort the merge or rebase in progress first."
+
+    public static let historyStagedChanges =
+        "You have staged changes — commit or unstage them first so they don't get mixed into the rewrite."
+
+    public static let historyNoCommits = "No commits yet to edit."
+
+    public static let historyDetached = "You're not on a branch — switch to a branch first."
+
+    public static let historyNeedTwo = "Pick at least 2 commits to combine."
+
+    public static let historyNotEnoughHistory = "There aren't that many commits to combine."
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the

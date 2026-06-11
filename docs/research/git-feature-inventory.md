@@ -40,6 +40,22 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git stash drop <ref>` — only reachable via `dropKeepingSafetyCopy`, which first writes `refs/sprig/snapshots/<ts>/stash-drop` at the stash commit (ADR 0033 medium tier).
 - `git stash store -m <original subject> <sha>` — Recover's restore path for stash-drop safety copies (additive; never `reset --hard`, which would move the branch onto the stash commit).
 
+### Clone (ADR 0030 / 0078) — engine invocations
+
+`TaskWindowKit.CloneDialogViewModel` + `sprigctl clone`:
+
+- `git clone [--recurse-submodules] [--depth N] <source> <target>` — argv built by `CloneRequest.gitArguments()` (unit-pinned); submodule recursion defaults on per master plan §10. Note: local-path clones ignore `--depth`; the `file://` transport honors it (test-pinned).
+
+### History editing (ADR 0082) — engine invocations
+
+`GitCore.HistoryOps` + `TaskWindowKit.HistoryEditViewModel`:
+
+- `git branch -r --contains <rev>` — the shared-history oracle: any output means the commit is on a remote and the rewrite refuses. For squash the check runs on the oldest affected commit (`HEAD~(N-1)`); a remote containing a child contains its ancestors.
+- `git diff --cached --quiet` — exit 1 means the index differs from HEAD; both verbs refuse rather than fold staged changes into the rewrite.
+- `git commit --amend -m <message>` — reword (message-only after the staged guard; hooks run per defer-to-git).
+- `git reset --soft HEAD~N` + `git commit -m <message>` — squash; the new commit's tree is byte-identical to the old tip's.
+- `git rev-list --count HEAD --not --remotes` — the rewritable depth the VM exposes as `unpushedCount` (squash bound; zero means everything is shared).
+
 ### Sync verb (ADR 0071) — engine invocations
 
 `SyncOps.pushCurrentBranch` + `TaskWindowKit.SyncViewModel` (fetch and fast-forward legs reuse ADR 0068's invocations below):
