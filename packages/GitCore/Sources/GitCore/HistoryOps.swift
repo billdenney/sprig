@@ -142,29 +142,18 @@ public struct HistoryOps: Sendable {
     }
 
     private func sharedGuards() async throws -> CommonRefusal? {
-        let onBranch = try await runner.run(
-            ["symbolic-ref", "--quiet", "HEAD"],
-            throwOnNonZero: false
+        let common = try await HistoryRewriteGuards(runner: runner).firstRefusal(
+            requireExistingHEAD: true,
+            refuseDirtyWorktree: false
         )
-        guard onBranch.exitCode == 0 else { return .detachedHEAD }
-
-        let worktree = runner.defaultWorkingDirectory
-            ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        let gitDir = try GitMetadataPaths.resolveGitDir(forWorktree: worktree)
-        guard MidstreamOperation.detectFromMarkers(gitDirURL: gitDir) == .none else {
-            return .midstream
+        switch common {
+        case .detachedHEAD: return .detachedHEAD
+        case .midstream: return .midstream
+        case .noCommits: return .noCommits
+        case .stagedChanges: return .stagedChanges
+        case .dirtyWorktree: return nil // not requested for message-only edits
+        case nil: break
         }
-
-        guard try await resolves("HEAD") else { return .noCommits }
-
-        // `diff --cached --quiet` exits 1 when the index differs
-        // from HEAD — the changes an amend would silently absorb.
-        let staged = try await runner.run(
-            ["diff", "--cached", "--quiet"],
-            throwOnNonZero: false
-        )
-        guard staged.exitCode == 0 else { return .stagedChanges }
-
         guard try await isUnshared("HEAD") else { return .shared }
         return nil
     }
