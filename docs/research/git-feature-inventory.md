@@ -46,6 +46,14 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 
 - `git clone [--recurse-submodules] [--depth N] <source> <target>` — argv built by `CloneRequest.gitArguments()` (unit-pinned); submodule recursion defaults on per master plan §10. Note: local-path clones ignore `--depth`; the `file://` transport honors it (test-pinned).
 
+### Rebase plan (ADR 0083) — engine invocations
+
+`GitCore.RebasePlanOps` + `TaskWindowKit.RebasePlanViewModel`:
+
+- `git -c sequence.editor="printf '<todo>' >\"$1\"" rebase -i <HEAD~count | --root>` — the todo (lines of `pick|fixup|drop <40-hex-sha>`) rides the one-shot config value; SHAs are charset-validated before interpolation so the editor command can't be injected. Git's own sequencer owns conflict parking and `--continue`/`--abort`.
+- `git log --reverse --format=%H%x00%s HEAD --not --remotes` — the rewritable range in todo order (oldest first).
+- Conflict discrimination reuses the Sync rebase leg's pattern: rebase markers (`rebase-merge`/`rebase-apply`) + `git ls-files -u -z` for the conflicted path count.
+
 ### History editing (ADR 0082) — engine invocations
 
 `GitCore.HistoryOps` + `TaskWindowKit.HistoryEditViewModel`:

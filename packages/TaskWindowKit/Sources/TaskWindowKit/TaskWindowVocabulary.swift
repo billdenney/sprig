@@ -138,6 +138,20 @@ public enum TaskWindowVocabulary {
 
     public static let historyNotEnoughHistory = "There aren't that many commits to combine."
 
+    // MARK: - Rebase plan (ADR 0083)
+
+    public static let nothingToRebase =
+        "Everything is already on the server — nothing to reorder."
+
+    public static let invalidRebasePlan =
+        "That plan doesn't match the commits to replay — refresh and try again."
+
+    public static let rebaseConflictHandoff =
+        "The replay hit conflicts — resolve them in the Conflicts window, or abort the rebase to put everything back."
+
+    public static let rebaseDirtyWorktree =
+        "You have unsaved changes — commit or set them aside first."
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the
