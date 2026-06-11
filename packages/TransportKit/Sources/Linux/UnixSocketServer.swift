@@ -22,6 +22,13 @@
 
     /// Accept loop for one Unix-domain socket path.
     public final class UnixSocketServer: @unchecked Sendable {
+        /// Decides whether a connecting peer (by effective UID) may
+        /// be served. The default accepts only the server's own
+        /// user — the socket file's mode is the first gate; this is
+        /// defense-in-depth against permissive modes and inherited
+        /// descriptors (ADR 0076's peer-SID analogue).
+        public typealias PeerPolicy = @Sendable (uid_t) -> Bool
+
         /// One element per accepted client. Finishes on ``close()``.
         public let connections: AsyncStream<UnixSocketTransport>
 
@@ -30,9 +37,14 @@
         private let lock = NSLock()
         private let listenFD: Int32
         private var closed = false
+        private let peerPolicy: PeerPolicy
         private let connectionsContinuation: AsyncStream<UnixSocketTransport>.Continuation
 
-        public init(socketPath: String) throws {
+        public init(
+            socketPath: String,
+            peerPolicy: @escaping PeerPolicy = { $0 == geteuid() }
+        ) throws {
+            self.peerPolicy = peerPolicy
             self.socketPath = socketPath
 
             // Stale-socket cleanup (sockets only — see header).
@@ -119,6 +131,17 @@
                             &one, socklen_t(MemoryLayout<Int32>.size)
                         )
                     #endif
+                    // Peer-credential gate: an unverifiable or
+                    // policy-rejected peer is closed before any
+                    // transport exists — it never reaches a
+                    // dispatcher.
+                    guard let policy = self?.peerPolicy,
+                          let peer = UnixSocketServer.peerUID(of: client),
+                          policy(peer)
+                    else {
+                        _ = systemClose(client)
+                        continue
+                    }
                     continuation.yield(UnixSocketTransport(fd: client))
                 }
             }
@@ -128,6 +151,38 @@
             lock.lock()
             defer { lock.unlock() }
             return closed
+        }
+
+        /// The connecting peer's effective UID — `SO_PEERCRED` on
+        /// Linux, `getpeereid(2)` on Darwin. Nil when the kernel
+        /// can't say, which the accept gate treats as a rejection
+        /// (fail closed).
+        /// Linux's `struct ucred` (pid, uid, gid — all 32-bit), mirrored
+        /// locally because Glibc's Swift overlay hides it behind
+        /// `_GNU_SOURCE`. The layout is kernel ABI, stable since 2.2.
+        private struct LinuxPeerCredentials {
+            var pid: Int32 = 0
+            var uid: UInt32 = 0
+            var gid: UInt32 = 0
+        }
+
+        static func peerUID(of fd: Int32) -> uid_t? {
+            #if canImport(Glibc)
+                // SO_PEERCRED is 17 on every architecture Sprig's Linux
+                // CI targets (x86_64, aarch64); the overlay doesn't
+                // export the constant.
+                let soPeerCred: Int32 = 17
+                var credentials = LinuxPeerCredentials()
+                var length = socklen_t(MemoryLayout<LinuxPeerCredentials>.size)
+                let result = getsockopt(fd, SOL_SOCKET, soPeerCred, &credentials, &length)
+                guard result == 0 else { return nil }
+                return uid_t(credentials.uid)
+            #else
+                var euid = uid_t(0)
+                var egid = gid_t(0)
+                guard getpeereid(fd, &euid, &egid) == 0 else { return nil }
+                return euid
+            #endif
         }
     }
 #endif

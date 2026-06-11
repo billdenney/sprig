@@ -202,5 +202,41 @@
                 _ = try UnixSocketTransport.connect(path: longPath)
             }
         }
+
+        @Test("the default peer policy serves the server's own user")
+        func defaultPeerPolicyAcceptsSameUser() async throws {
+            // Every earlier test exercises this implicitly; this one
+            // pins it as the contract: same-euid connections are
+            // served under the DEFAULT policy.
+            let pair = try await makePair("peer-accept")
+            defer { pair.server.close() }
+            try await pair.clientSide.send(Data("hello".utf8))
+            var inbox = pair.agentSide.messages().makeAsyncIterator()
+            #expect(await inbox.next() == Data("hello".utf8))
+            await pair.clientSide.close()
+            await pair.agentSide.close()
+        }
+
+        @Test("a policy-rejected peer is closed before any transport is yielded")
+        func rejectedPeerNeverServed() async throws {
+            let path = makeSocketPath("peer-reject")
+            // Reject everyone — the same code path a cross-user
+            // connection takes, exercisable without root.
+            let server = try UnixSocketServer(socketPath: path, peerPolicy: { _ in false })
+            defer { server.close() }
+
+            let client = try UnixSocketTransport.connect(path: path)
+            // The server closes the descriptor immediately: the
+            // client's stream finishes without ever receiving data...
+            var inbox = client.messages().makeAsyncIterator()
+            #expect(await inbox.next() == nil, "rejected peer sees EOF")
+            // ...and the server never yields a connection. close()
+            // then finishes the stream; if a transport HAD been
+            // yielded it would arrive before nil.
+            server.close()
+            var accepted = server.connections.makeAsyncIterator()
+            #expect(await accepted.next() == nil, "no transport for a rejected peer")
+            await client.close()
+        }
     }
 #endif

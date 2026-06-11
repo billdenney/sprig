@@ -67,8 +67,15 @@ Implementation shape (`UnixSocketTransport` + `UnixSocketServer` in
   (stdout diagnostics + the `RoutedBadgeEventSink`). The full protocol — connect → subscribe
   → ack → file change → `badgeChanged` envelope — is pinned by a genuinely two-process
   end-to-end test (the agent process serving, the test process as the UDS client).
-- Peer authentication rides filesystem permissions for now; `SO_PEERCRED` validation (the
-  named-pipe transport's peer-SID analogue) is a follow-up noted for the Linux host slice.
+- ~~Peer authentication rides filesystem permissions for now; `SO_PEERCRED` validation (the
+  named-pipe transport's peer-SID analogue) is a follow-up noted for the Linux host slice.~~
+  **Closed (same week):** `UnixSocketServer` now gates every accepted descriptor on the
+  peer's effective UID (`SO_PEERCRED` on Linux via a locally-mirrored `ucred` — the Glibc
+  overlay hides it behind `_GNU_SOURCE`; `getpeereid(2)` on Darwin). The default policy
+  serves only the server's own user; unverifiable peers fail closed. The policy is
+  injectable, which makes the rejection path testable without root: an always-reject server
+  closes the descriptor before any transport exists — the client sees immediate EOF and no
+  dispatcher is ever constructed.
 - The macOS CI matrix now compiles + tests this code, catching Darwin/Glibc drift on every
   PR.
 
