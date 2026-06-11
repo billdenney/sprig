@@ -51,6 +51,7 @@ public struct ForgeRepo: Sendable, Equatable {
 /// `sprigctl` flags).
 public enum ForgeProvider: String, Sendable, CaseIterable {
     case github
+    case gitlab
 }
 
 /// Typed failures the UI can word.
@@ -82,6 +83,26 @@ public struct URLSessionForgeHTTPClient: ForgeHTTPClient {
             throw ForgeError.malformedResponse(detail: "non-HTTP response")
         }
         return (data, httpResponse)
+    }
+}
+
+/// GitLab's documented `/api/v4/projects` element shape (the fields
+/// we consume). `visibility` is `public`/`internal`/`private`; both
+/// non-public levels map to `isPrivate` (internal still requires
+/// auth to clone).
+private struct GitLabProject: Decodable {
+    let pathWithNamespace: String
+    let httpUrlToRepo: String
+    let sshUrlToRepo: String?
+    let description: String?
+    let visibility: String
+
+    enum CodingKeys: String, CodingKey {
+        case pathWithNamespace = "path_with_namespace"
+        case httpUrlToRepo = "http_url_to_repo"
+        case sshUrlToRepo = "ssh_url_to_repo"
+        case description
+        case visibility
     }
 }
 
@@ -127,31 +148,80 @@ public struct ForgeRepoBrowser: Sendable {
         switch provider {
         case .github:
             try await listGitHub(token: token, baseURL: baseURL)
+        case .gitlab:
+            try await listGitLab(token: token, baseURL: baseURL)
         }
     }
 
-    private func listGitHub(token: String, baseURL: URL?) async throws -> [ForgeRepo] {
-        let base = baseURL ?? URL(string: "https://api.github.com")!
-        let endpoint = base.appendingPathComponent("user").appendingPathComponent("repos")
+    private func listGitLab(token: String, baseURL: URL?) async throws -> [ForgeRepo] {
+        let base = baseURL ?? URL(string: "https://gitlab.com")!
+        let endpoint = base.appendingPathComponent("api")
+            .appendingPathComponent("v4")
+            .appendingPathComponent("projects")
+        let data = try await fetchJSON(
+            endpoint: endpoint,
+            queryItems: [
+                URLQueryItem(name: "membership", value: "true"),
+                URLQueryItem(name: "order_by", value: "last_activity_at"),
+                URLQueryItem(name: "per_page", value: "100")
+            ],
+            token: token,
+            accept: "application/json"
+        )
+        do {
+            return try JSONDecoder().decode([GitLabProject].self, from: data).map {
+                ForgeRepo(
+                    fullName: $0.pathWithNamespace,
+                    cloneURL: $0.httpUrlToRepo,
+                    sshURL: $0.sshUrlToRepo,
+                    description: $0.description,
+                    isPrivate: $0.visibility != "public"
+                )
+            }
+        } catch {
+            throw ForgeError.malformedResponse(detail: String(describing: error))
+        }
+    }
+
+    /// Shared GET + status classification: bearer auth, 401 →
+    /// ``ForgeError/unauthorized``, other non-2xx →
+    /// ``ForgeError/httpStatus(_:)``.
+    private func fetchJSON(
+        endpoint: URL,
+        queryItems: [URLQueryItem],
+        token: String,
+        accept: String
+    ) async throws -> Data {
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
             throw ForgeError.malformedResponse(detail: "unbuildable endpoint URL")
         }
-        components.queryItems = [
-            URLQueryItem(name: "per_page", value: "100"),
-            URLQueryItem(name: "sort", value: "pushed")
-        ]
+        components.queryItems = queryItems
         guard let url = components.url else {
             throw ForgeError.malformedResponse(detail: "unbuildable endpoint URL")
         }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
 
         let (data, response) = try await client.send(request)
         guard response.statusCode != 401 else { throw ForgeError.unauthorized }
         guard (200 ..< 300).contains(response.statusCode) else {
             throw ForgeError.httpStatus(response.statusCode)
         }
+        return data
+    }
+
+    private func listGitHub(token: String, baseURL: URL?) async throws -> [ForgeRepo] {
+        let base = baseURL ?? URL(string: "https://api.github.com")!
+        let data = try await fetchJSON(
+            endpoint: base.appendingPathComponent("user").appendingPathComponent("repos"),
+            queryItems: [
+                URLQueryItem(name: "per_page", value: "100"),
+                URLQueryItem(name: "sort", value: "pushed")
+            ],
+            token: token,
+            accept: "application/vnd.github+json"
+        )
 
         do {
             return try JSONDecoder().decode([GitHubRepo].self, from: data).map {

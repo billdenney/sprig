@@ -36,8 +36,10 @@ INJECTED, never persisted here.** The layering:
   (Keychain / DPAPI / Secret Service — stubs today). Recording that boundary is half this
   ADR's point: the portable layer treats the token as an opaque input.
 
-Pagination beyond the first 100 (Link header) and GitLab/Bitbucket/Gitea providers are
-noted follow-ups; the enum is where they join.
+Pagination beyond the first 100 (Link header) and Bitbucket/Gitea providers are noted
+follow-ups; the enum is where they join. **GitLab landed same-day** (`/api/v4/projects?
+membership=true`, bearer token, self-hosted `baseURL`; `internal` visibility maps to
+`isPrivate` — it still requires auth to clone).
 
 ## Considered options
 
