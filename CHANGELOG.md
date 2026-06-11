@@ -8,6 +8,9 @@ pointer (the ADR carries the detail — see CONTRIBUTING).
 
 ## [Unreleased]
 
+### Added
+- **Revert verb (new ADR 0084)** — `HistoryOps.revert(sha:)`: forward-fix a commit with `git revert --no-edit`; conflicts park `REVERT_HEAD` for the resolver, merge commits and unknown SHAs are typed refusals. `HistoryEditViewModel.revert(sha:)` pairs the medium-tier snapshot; Recover round-trip pinned. 6 new tests.
+
 ### Changed
 - **Plan vendored + planning docs realigned (M2.5 checkpoint)** — the master plan now lives in-repo (`docs/planning/master-plan.md`) after the original's loss; 53 stub ADRs re-pointed; ADR 0051 expanded in place; M2.5 checkpoint + re-scoped M3 in roadmap/milestones; slice gate codified (`docs/ci/slice-gate.md`); `VM-ENV-1` filed; R14 reframed/R16 added. Force-push stays in v1 behind the full high tier (master-plan §2.5/§10).
 

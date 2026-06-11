@@ -54,6 +54,13 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git log --reverse --format=%H%x00%s HEAD --not --remotes` — the rewritable range in todo order (oldest first).
 - Conflict discrimination reuses the Sync rebase leg's pattern: rebase markers (`rebase-merge`/`rebase-apply`) + `git ls-files -u -z` for the conflicted path count.
 
+### Revert (ADR 0084) — engine invocations
+
+`GitCore.HistoryOps.revert` + `TaskWindowKit.HistoryEditViewModel.revert(sha:)`:
+
+- `git revert --no-edit <sha>` — forward-fix; clean-tree required (shared `HistoryRewriteGuards`). Conflicts park `REVERT_HEAD` (`MidstreamOperation` classifies it; `ls-files -u -z` counts paths); `git revert --abort` is the one-tap undo of the parked state.
+- `git rev-parse --quiet --verify <sha>^2` — merge-commit detection: a second parent refuses (`-m` mainline choice deferred to a picker UI).
+
 ### History editing (ADR 0082) — engine invocations
 
 `GitCore.HistoryOps` + `TaskWindowKit.HistoryEditViewModel`:

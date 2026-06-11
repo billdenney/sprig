@@ -49,6 +49,9 @@ struct TaskWindowVocabularyTests {
             TaskWindowVocabulary.invalidRebasePlan,
             TaskWindowVocabulary.rebaseConflictHandoff,
             TaskWindowVocabulary.rebaseDirtyWorktree,
+            TaskWindowVocabulary.revertConflicted,
+            TaskWindowVocabulary.revertMergeCommit,
+            TaskWindowVocabulary.revertUnknownCommit,
             TaskWindowVocabulary.cancelled("Clone"),
             TaskWindowVocabulary.cancelled()
         ]

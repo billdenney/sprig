@@ -185,3 +185,47 @@ public actor HistoryEditViewModel {
         }
     }
 }
+
+// MARK: - Revert (ADR 0084)
+
+extension HistoryEditViewModel {
+    /// Forward-fix `sha` — a NEW commit with the opposite change, so
+    /// it is the safe verb for already-shared commits. ADR 0033
+    /// medium tier (`revert` op tag): the pre-revert tip is
+    /// snapshotted first, so the revert itself is one Recover
+    /// restore away (round-trip test-pinned).
+    public func revert(sha: String) async {
+        if case .busy = state { return }
+        state = .busy(progress: nil)
+        do {
+            try await takeSafetyCopy(op: SnapshotRefName.opRevert)
+            try await apply(revertOutcome: history.revert(sha))
+            await refreshKeepingState()
+        } catch {
+            state = .failure(.init(from: error))
+        }
+    }
+
+    private func apply(revertOutcome outcome: RevertOutcome) {
+        switch outcome {
+        case let .reverted(newSHA):
+            state = .success(newSHA)
+        case .conflicted:
+            state = .failure(.init(description: TaskWindowVocabulary.revertConflicted))
+        case .refusedUnknownCommit:
+            state = .failure(.init(description: TaskWindowVocabulary.revertUnknownCommit))
+        case .refusedMergeCommit:
+            state = .failure(.init(description: TaskWindowVocabulary.revertMergeCommit))
+        case .refusedMidstream:
+            state = .failure(.init(description: TaskWindowVocabulary.historyMidstream))
+        case .refusedStagedChanges:
+            state = .failure(.init(description: TaskWindowVocabulary.historyStagedChanges))
+        case .refusedDirtyWorktree:
+            state = .failure(.init(description: TaskWindowVocabulary.rebaseDirtyWorktree))
+        case .refusedDetachedHEAD:
+            state = .failure(.init(description: TaskWindowVocabulary.historyDetached))
+        case let .failed(reason):
+            state = .failure(.init(description: reason))
+        }
+    }
+}
