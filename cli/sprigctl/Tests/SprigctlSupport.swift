@@ -54,7 +54,7 @@ enum Sprigctl {
     /// also drained via async tasks BEFORE the wait; doing it after
     /// (the previous code) risks a separate pipe-buffer deadlock when
     /// stdout/stderr exceeds ~64 KB and the child blocks writing.
-    static func run(_ args: [String], cwd: URL? = nil) async throws -> Captured {
+    static func run(_ args: [String], cwd: URL? = nil, stdin: Data? = nil) async throws -> Captured {
         let binary = try locateBinary()
         let process = Process()
         process.executableURL = binary
@@ -64,11 +64,20 @@ enum Sprigctl {
         let errPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
+        let inPipe = Pipe()
+        process.standardInput = inPipe
 
         let gate = ProcessTerminationGate()
         process.terminationHandler = { _ in gate.signal() }
 
         try process.run()
+
+        // Feed stdin (or immediate EOF when nil) — commands like
+        // `credential --set` read the secret from stdin.
+        if let stdin {
+            try inPipe.fileHandleForWriting.write(contentsOf: stdin)
+        }
+        try inPipe.fileHandleForWriting.close()
 
         async let outBytes = readToEnd(outPipe.fileHandleForReading)
         async let errBytes = readToEnd(errPipe.fileHandleForReading)
