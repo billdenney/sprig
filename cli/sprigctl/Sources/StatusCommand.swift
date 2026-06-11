@@ -1,8 +1,11 @@
 import ArgumentParser
 import Foundation
 import GitCore
+import TaskWindowKit
+import UIKitShared
 
-/// `sprigctl status [--json] [path]` — dump a repo's porcelain-v2 state.
+/// `sprigctl status [--json] [--summary] [path]` — dump a repo's
+/// porcelain-v2 state, or the ADR 0064 dashboard summary.
 struct StatusCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "status",
@@ -12,12 +15,29 @@ struct StatusCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Emit JSON instead of a human-readable summary.")
     var json: Bool = false
 
+    @Flag(
+        name: .long,
+        help: ArgumentHelp(
+            "Print the Status-window dashboard instead of raw porcelain: tree counts, "
+                + "branch relationships, in-progress operation, safety-net size.",
+            discussion: "The CLI face of ADR 0064's Status surface — the same "
+                + "summary the task window renders, worded by the shared "
+                + "vocabulary's terse register. Includes the ADR 0077 "
+                + "stale-work line when the working tree is dirty."
+        )
+    )
+    var summary: Bool = false
+
     @Argument(help: "Repository path (defaults to current directory).")
     var path: String?
 
     func run() async throws {
         let repoURL = URL(fileURLWithPath: path ?? FileManager.default.currentDirectoryPath)
         let runner = Runner(defaultWorkingDirectory: repoURL)
+        if summary {
+            try await runSummary(repoURL: repoURL, runner: runner)
+            return
+        }
         let output = try await runner.run([
             "status",
             "--porcelain=v2",
