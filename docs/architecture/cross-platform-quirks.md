@@ -459,6 +459,18 @@ SwiftLint and SwiftFormat disagree on a few stylistic choices that show up in th
 
 ---
 
+## G. Git environment differences
+
+### G1. Git for Windows defaults `core.autocrlf=true` — worktree bytes differ per OS
+
+- **Symptom** — a test writes `"line\n"` (LF), drives git through any worktree-writing operation (`stash push`'s implicit reset, `stash apply`/`pop`, `checkout`, `reset --hard`, merge), then reads the file back and gets `"line\r\n"`. Asserting byte-exact LF content fails on Windows only — deterministically, not load-dependent (which distinguishes it from E1/E3 at a glance, though the failure *reads* similarly: "file content isn't what I just made git produce").
+- **Root cause** — Git for Windows ships `core.autocrlf=true` in its **system** gitconfig. Every checkout-path write runs the smudge conversion LF → CRLF for files git classifies as text. Fixture repos created with `git init` inherit it; macOS/Linux git defaults to no conversion, so the same test passes there.
+- **Fix pattern** — fixture repos whose tests assert post-checkout bytes pin the conversion off at creation: `git config core.autocrlf false`. This keeps assertions byte-exact (strict) on every OS instead of loosening them to tolerate `\r`. Production code is unaffected — Sprig defers to the user's git and never reads worktree bytes around these operations.
+- **Where in the repo** — `packages/GitCore/Tests/GitCoreTests/StashOpsBrowseTests.swift`, `packages/TaskWindowKit/Tests/TaskWindowKitTests/StashViewModelTests.swift` (both `makeRepo` helpers; ADR 0079 slice — the first byte-exact post-checkout reads in the suite).
+- **U:** Not a bug — documented, intentional Git for Windows packaging default. Documentation only.
+
+---
+
 ## Upstream suggestion shortlist
 
 Distilling the `U:` items above, ranked by where filing a fix would have the highest leverage:

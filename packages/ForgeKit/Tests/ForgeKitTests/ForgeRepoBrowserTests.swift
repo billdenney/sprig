@@ -145,4 +145,62 @@ struct ForgeRepoBrowserTests {
         let url = try #require(fake.lastRequest?.url?.absoluteString)
         #expect(url.hasPrefix("https://github.example.com/api/v3/user/repos?"))
     }
+
+    // MARK: - GitLab provider
+
+    private var gitlabWire: Data {
+        Data("""
+        [
+          {
+            "path_with_namespace": "bill/sprig-mirror",
+            "http_url_to_repo": "https://gitlab.com/bill/sprig-mirror.git",
+            "ssh_url_to_repo": "git@gitlab.com:bill/sprig-mirror.git",
+            "description": "mirror",
+            "visibility": "public"
+          },
+          {
+            "path_with_namespace": "bill/internal-tool",
+            "http_url_to_repo": "https://gitlab.com/bill/internal-tool.git",
+            "ssh_url_to_repo": null,
+            "description": null,
+            "visibility": "internal"
+          }
+        ]
+        """.utf8)
+    }
+
+    @Test("GitLab request shape: /api/v4/projects with membership + bearer token")
+    func gitlabRequestShape() async throws {
+        let fake = FakeForgeHTTPClient(status: 200, body: gitlabWire)
+        _ = try await ForgeRepoBrowser(client: fake)
+            .listRepos(provider: .gitlab, token: "glpat-x")
+
+        let request = try #require(fake.lastRequest)
+        let url = try #require(request.url?.absoluteString)
+        #expect(url.hasPrefix("https://gitlab.com/api/v4/projects?"))
+        #expect(url.contains("membership=true"))
+        #expect(url.contains("order_by=last_activity_at"))
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer glpat-x")
+    }
+
+    @Test("GitLab wire decodes; internal visibility maps to private; self-hosted base works")
+    func gitlabDecodesWire() async throws {
+        let fake = FakeForgeHTTPClient(status: 200, body: gitlabWire)
+        let repos = try await ForgeRepoBrowser(client: fake)
+            .listRepos(provider: .gitlab, token: "t")
+
+        #expect(repos.map(\.fullName) == ["bill/sprig-mirror", "bill/internal-tool"])
+        #expect(repos[0].isPrivate == false)
+        #expect(repos[1].isPrivate == true, "internal still requires auth to clone")
+        #expect(repos[1].sshURL == nil)
+
+        let hosted = FakeForgeHTTPClient(status: 200, body: Data("[]".utf8))
+        _ = try await ForgeRepoBrowser(client: hosted).listRepos(
+            provider: .gitlab,
+            token: "t",
+            baseURL: #require(URL(string: "https://git.example.com"))
+        )
+        let hostedURL = try #require(hosted.lastRequest?.url?.absoluteString)
+        #expect(hostedURL.hasPrefix("https://git.example.com/api/v4/projects?"))
+    }
 }

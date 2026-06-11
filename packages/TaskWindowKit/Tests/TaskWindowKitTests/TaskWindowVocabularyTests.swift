@@ -33,6 +33,8 @@ struct TaskWindowVocabularyTests {
             TaskWindowVocabulary.switchAwayBeforeCleanup("feature/x"),
             TaskWindowVocabulary.refusedNotFullyMerged("feature/x"),
             TaskWindowVocabulary.checkedOutSwitchAway("feature/x"),
+            TaskWindowVocabulary.stashEntryGone("On main: WIP"),
+            TaskWindowVocabulary.stashConflicted("On main: WIP"),
             TaskWindowVocabulary.cancelled("Clone"),
             TaskWindowVocabulary.cancelled()
         ]
