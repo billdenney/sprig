@@ -79,8 +79,9 @@ struct SyncCommand: AsyncParsableCommand {
         let runner = Runner(defaultWorkingDirectory: repoURL)
         let sync = SyncOps(runner: runner)
 
+        var fetchDigests: [FetchDigest] = []
         if !noFetch {
-            try await sync.fetchAll()
+            fetchDigests = try await sync.fetchAllDigesting()
         }
 
         // ADR 0056: never mutate a repo that's mid-merge/-rebase —
@@ -109,6 +110,7 @@ struct SyncCommand: AsyncParsableCommand {
             try await runRebaseLeg(sync: sync, runner: runner, into: &legs)
         }
 
+        legs.fetchDigests = fetchDigests
         let states = try await sync.branchSyncStates()
         if json {
             try emitJSON(states: states, legs: legs)
@@ -150,6 +152,7 @@ struct SyncCommand: AsyncParsableCommand {
 private struct SyncLegs {
     var fetched: Bool
     var skippedMidOperation = false
+    var fetchDigests: [FetchDigest] = []
     var pullResults: [FastForwardResult]?
     var pushOutcome: PushOutcome?
     var rebaseOutcome: RebaseOutcome?
@@ -167,6 +170,11 @@ extension SyncCommand {
         if legs.skippedMidOperation {
             var err = StderrStream()
             print("# pull/push skipped: a git operation (merge/rebase/…) is in progress", to: &err)
+        }
+        // ADR 0077's "what changed?" digest — one line per moved ref,
+        // before the relationship lines so cause precedes effect.
+        for digest in legs.fetchDigests {
+            print("fetched: \(StatusVocabulary.describe(digest, register: .git))", to: &out)
         }
         for state in states {
             print(humanLine(for: state, pullResults: legs.pullResults), to: &out)

@@ -128,14 +128,17 @@ safe). The trust spine stays: destructive-op confirms (§11.6) are not negotiabl
 
 ## Tier 3 — worth keeping on the radar
 
-- **3.1 Stale-work nudges** (`proposed`, S) — Status window section: "branch X: 4 changed
-  files, no commit in 9 days." Surfaced only when the Status window is opened (no
-  notifications spam, per ADR 0014's restraint).
+- **3.1 Stale-work nudges** (`ratified + shipped`, ADR 0077) — Status window section:
+  "branch X: 4 changed files, no commit in 9 days." `RepoStatusSummary.lastCommitDate` +
+  `StatusVocabulary.staleWorkNudge`; surfaced only inside the Status window (no
+  notification spam, per ADR 0014's restraint).
 - **3.2 Clone wizard with provider browse** (`proposed`, M) — pick-from-list of your
   GitHub/GitLab repos via the ADR 0063 forge tokens instead of pasting clone URLs.
-- **3.3 "What changed?" digest after fetch** (`proposed`, S) — when auto-fetch moves a
-  remote-tracking ref, the Status window shows "12 new commits from 3 people on main"
-  (pure `git log --oneline old..new` counting; no AI).
+- **3.3 "What changed?" digest after fetch** (`ratified + shipped`, ADR 0077) — when a
+  fetch moves a remote-tracking ref, "12 new commits from 3 people on origin/main"
+  (`SyncOps.fetchAllDigesting`, pure `git log` counting, no AI); in
+  `RepoStatusSummary.fetchDigests` for the Status window and printed by `sprigctl sync`
+  today.
 - **3.4 Conflict-resolution wording** (`ratified` direction, ADR 0027/0028) — the M4
   resolver already plans "keep mine / keep theirs / keep both" labels; double down for
   the beginner register (2.1) with file-level "accept all mine/theirs" affordances.

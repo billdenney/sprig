@@ -48,6 +48,16 @@ public struct RepoStatusSummary: Sendable, Equatable {
     /// nil when there are none.
     public var newestSafetyCopy: Date?
 
+    /// Affordance 3.3 (ADR 0077): per-ref movement summaries from the
+    /// most recent ``StatusViewModel/fetchNow()`` — empty when the
+    /// fetch moved nothing, nil when no fetch ran this session.
+    public var fetchDigests: [FetchDigest]?
+
+    /// Affordance 3.1 (ADR 0077): HEAD's committer date — the shells
+    /// render "no commit in 9 days" against the dirty counts above.
+    /// Nil on an unborn branch.
+    public var lastCommitDate: Date?
+
     /// The checked-out branch's relationship, if any.
     public var currentBranchState: BranchSyncState? {
         branches.first(where: \.isCurrent)
@@ -63,7 +73,9 @@ public struct RepoStatusSummary: Sendable, Equatable {
         midOperation: MidstreamOperation = .none,
         snapshotCount: Int = 0,
         backupCount: Int = 0,
-        newestSafetyCopy: Date? = nil
+        newestSafetyCopy: Date? = nil,
+        fetchDigests: [FetchDigest]? = nil,
+        lastCommitDate: Date? = nil
     ) {
         self.stagedCount = stagedCount
         self.unstagedCount = unstagedCount
@@ -75,6 +87,8 @@ public struct RepoStatusSummary: Sendable, Equatable {
         self.snapshotCount = snapshotCount
         self.backupCount = backupCount
         self.newestSafetyCopy = newestSafetyCopy
+        self.fetchDigests = fetchDigests
+        self.lastCommitDate = lastCommitDate
     }
 }
 
@@ -115,17 +129,24 @@ public actor StatusViewModel {
     /// re-summary so behind/ahead counts reflect the fresh
     /// remote-tracking refs. A fetch failure (offline, auth) is the
     /// only `.failure`; the summary itself re-raises real repo
-    /// breakage through ``refresh()``'s path.
+    /// breakage through ``refresh()``'s path. The summary's
+    /// ``RepoStatusSummary/fetchDigests`` carry affordance 3.3's
+    /// "what changed?" answer for every ref the fetch moved.
     public func fetchNow() async {
         if case .busy = state { return }
         state = .busy(progress: nil)
+        let digests: [FetchDigest]
         do {
-            try await sync.fetchAll()
+            digests = try await sync.fetchAllDigesting()
         } catch {
             state = .failure(.init(from: error))
             return
         }
         await refresh()
+        if case var .success(summary) = state {
+            summary.fetchDigests = digests
+            state = .success(summary)
+        }
     }
 
     private func buildSummary() async throws -> RepoStatusSummary {
@@ -154,6 +175,17 @@ public actor StatusViewModel {
         summary.snapshotCount = snapshotDates.count
         summary.backupCount = backupDates.count
         summary.newestSafetyCopy = (snapshotDates + backupDates).max()
+
+        // Affordance 3.1: HEAD's committer date for the stale-work
+        // line. Best-effort — an unborn branch has no commit.
+        let lastCommit = try await runner.run(
+            ["log", "-1", "--format=%cI"],
+            throwOnNonZero: false
+        )
+        if lastCommit.exitCode == 0 {
+            let raw = lastCommit.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+            summary.lastCommitDate = ISO8601DateFormatter().date(from: raw)
+        }
         return summary
     }
 

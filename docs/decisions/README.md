@@ -86,6 +86,7 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0074 | Template commit messages — deterministic, non-AI default                   | accepted |
 | 0075 | Auto-backup — Time-Machine-style insurance for uncommitted work            | accepted |
 | 0076 | Linux IPC — Unix domain sockets, not D-Bus                                 | accepted |
+| 0077 | Status insight lines — "what changed?" digest + stale-work nudge           | accepted |
 
 ADRs 0001–0053 were ratified simultaneously in the initial scaffolding, based on the planning dialogue captured in the master plan file. Subsequent ADRs (0054+) follow the normal one-per-PR cadence.
 

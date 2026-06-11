@@ -52,6 +52,8 @@ struct SprigctlSyncTests {
         #expect(run.exitCode == 0)
         #expect(run.stdout.contains("main"))
         #expect(run.stdout.contains("behind origin/main by 1"))
+        // ADR 0077: the fetch that moved origin/main says what changed.
+        #expect(run.stdout.contains("fetched: origin/main: 1 new commit(s) (1 author(s))"))
         // No --pull: the working tree must be untouched.
         let untouched = fixture.subscriber.appendingPathComponent("incoming.txt")
         #expect(!FileManager.default.fileExists(atPath: untouched.path))
