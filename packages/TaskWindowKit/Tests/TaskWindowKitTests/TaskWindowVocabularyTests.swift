@@ -42,6 +42,10 @@ struct TaskWindowVocabularyTests {
             TaskWindowVocabulary.historyDetached,
             TaskWindowVocabulary.historyNeedTwo,
             TaskWindowVocabulary.historyNotEnoughHistory,
+            TaskWindowVocabulary.nothingToRebase,
+            TaskWindowVocabulary.invalidRebasePlan,
+            TaskWindowVocabulary.rebaseConflictHandoff,
+            TaskWindowVocabulary.rebaseDirtyWorktree,
             TaskWindowVocabulary.cancelled("Clone"),
             TaskWindowVocabulary.cancelled()
         ]
