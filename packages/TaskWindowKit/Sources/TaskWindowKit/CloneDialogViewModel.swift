@@ -25,6 +25,7 @@
 //     `AgentKit` / `RepoState`'s discovery surface, triggered after a
 //     successful clone.
 
+import ForgeKit
 import Foundation
 import GitCore
 
@@ -143,6 +144,51 @@ public actor CloneDialogViewModel {
     /// flight (e.g. typing a new target dir for a "Clone again" retry).
     public func update(_ newRequest: CloneRequest) {
         request = newRequest
+    }
+
+    // MARK: - Forge browse (affordance 3.2, ADR 0078)
+
+    /// Repositories from the most recent ``browseRepos(...)`` — the
+    /// pick-from-list alternative to pasting a clone URL.
+    public private(set) var browseResults: [ForgeRepo] = []
+
+    /// Typed failure of the most recent browse, kept separate from
+    /// ``state`` (browsing is a form aid; it must never clobber an
+    /// in-flight clone's lifecycle).
+    public private(set) var browseError: ForgeError?
+
+    /// List the user's repositories on `provider`. The TOKEN IS
+    /// INJECTED — acquisition is onboarding/shell work and storage is
+    /// CredentialKit's platform adapters; this VM never persists it.
+    public func browseRepos(
+        provider: ForgeProvider,
+        token: String,
+        browser: ForgeRepoBrowser = ForgeRepoBrowser()
+    ) async {
+        browseError = nil
+        do {
+            browseResults = try await browser.listRepos(provider: provider, token: token)
+        } catch let error as ForgeError {
+            browseResults = []
+            browseError = error
+        } catch {
+            browseResults = []
+            browseError = .malformedResponse(detail: String(describing: error))
+        }
+    }
+
+    /// Adopt a browsed repository into the form: the HTTPS clone URL
+    /// becomes the source, and the repo's name seeds the target
+    /// directory when the user hasn't typed one yet (never clobbers
+    /// a non-empty target).
+    public func selectBrowsed(_ repo: ForgeRepo) {
+        request.sourceURL = repo.cloneURL
+        let trimmedTarget = request.targetDirectory
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedTarget.isEmpty {
+            let name = repo.fullName.split(separator: "/").last.map(String.init)
+            request.targetDirectory = name ?? ""
+        }
     }
 
     // MARK: - Operations

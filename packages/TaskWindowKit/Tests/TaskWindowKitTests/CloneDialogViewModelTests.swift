@@ -5,8 +5,12 @@
 // tests." Each test stands up a bare fixture repo to act as the
 // upstream, runs the VM, and verifies the resulting cloned worktree.
 
+import ForgeKit
 import Foundation
 import GitCore
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
 @testable import TaskWindowKit
 import Testing
 
@@ -253,5 +257,66 @@ struct CloneDialogViewModelTests {
         await vm.reset()
         let final = await vm.state
         #expect(final == .idle)
+    }
+}
+
+// MARK: - Forge browse (affordance 3.2, ADR 0078)
+
+private struct CannedForgeClient: ForgeHTTPClient {
+    let status: Int
+    let body: Data
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        (body, HTTPURLResponse(
+            url: request.url!,
+            statusCode: status,
+            httpVersion: "HTTP/1.1",
+            headerFields: nil
+        )!)
+    }
+}
+
+extension CloneDialogViewModelTests {
+    @Test("browseRepos populates results; selectBrowsed fills source + seeds target")
+    func browseAndSelect() async throws {
+        let wire = Data("""
+        [{"full_name": "bill/sprig", "clone_url": "https://github.com/bill/sprig.git",
+          "ssh_url": null, "description": null, "private": false}]
+        """.utf8)
+        let vm = CloneDialogViewModel(
+            request: CloneRequest(sourceURL: "", targetDirectory: ""),
+            runner: Runner()
+        )
+        let browser = ForgeRepoBrowser(client: CannedForgeClient(status: 200, body: wire))
+
+        await vm.browseRepos(provider: .github, token: "t", browser: browser)
+        let results = await vm.browseResults
+        #expect(await vm.browseError == nil)
+        #expect(results.map(\.fullName) == ["bill/sprig"])
+
+        try await vm.selectBrowsed(#require(results.first))
+        #expect(await vm.request.sourceURL == "https://github.com/bill/sprig.git")
+        #expect(await vm.request.targetDirectory == "sprig", "repo name seeds the empty target")
+
+        // A user-typed target is never clobbered.
+        var edited = await vm.request
+        edited.targetDirectory = "my-dir"
+        await vm.update(edited)
+        try await vm.selectBrowsed(#require(results.first))
+        #expect(await vm.request.targetDirectory == "my-dir")
+    }
+
+    @Test("an expired token surfaces the typed unauthorized error without touching state")
+    func browseUnauthorized() async {
+        let vm = CloneDialogViewModel(
+            request: CloneRequest(sourceURL: "", targetDirectory: ""),
+            runner: Runner()
+        )
+        let browser = ForgeRepoBrowser(client: CannedForgeClient(status: 401, body: Data()))
+
+        await vm.browseRepos(provider: .github, token: "expired", browser: browser)
+        #expect(await vm.browseError == .unauthorized)
+        #expect(await vm.browseResults.isEmpty)
+        #expect(await vm.state == .idle, "browsing never clobbers the clone lifecycle")
     }
 }
