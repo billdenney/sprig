@@ -42,6 +42,16 @@ The parser-fidelity and watcher event-budget gates are now wired into hosted CI 
 
 ## M2 — Shell integration alpha (parallel tracks)
 
+> **Substrate status (2026-06-11).** The portable share of M2 is substantively done ahead of
+> the shell work: `IPCSchema` envelopes serving real clients end-to-end on **two transports**
+> (UDS with same-user peer validation, ADR 0076; Windows named pipes, ADR 0067 — byte-identical
+> framing), the agent host running preferences-driven background jobs (`sprigctl agent
+> --preferences/--socket/--pipe`, ADR 0068/0075 host wiring), per-client dispatchers + routed
+> event fan-out, and the full task-window VM layer (eleven VMs incl. Status + Recover). What
+> remains in the lists below is genuinely shell-territory: the Mac XPC adapter + LaunchAgent
+> registration, the FinderSync/Explorer extensions, and the per-platform perf/a11y proofs.
+
+
 ### M2-Mac — FinderSync alpha
 
 Exit criteria:

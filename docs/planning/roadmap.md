@@ -29,6 +29,12 @@ The macOS-shell and Windows-shell tracks share most engineering work — the eng
 
 ### M2 — Shell integration alpha (parallel tracks)
 
+> **2026-06-11:** the 🌐 engine share of M2 is substantively shipped (transports + serving
+> hosts + preferences wiring + the complete TaskWindowKit VM layer + the beginner-affordance
+> backlog 1.1–3.5 where ratified) — see `milestones.md`'s substrate note. Remaining M2 work
+> is concentrated in the 🍎/🪟 shell tracks.
+
+
 - 🍎 **M2-Mac — FinderSync alpha**: SprigAgent LaunchAgent, XPC protocol, FinderSync extension with overlay badges and the MVP-10 right-click verbs (clone, status, commit, push, pull, fetch, branch-switch, stage/unstage, diff, log). Sheets, not full task windows yet.
 - 🪟 **M2-Win — Explorer shell-extension alpha**: research spike on `IShellIconOverlayIdentifier` (15-overlay-slot competition with OneDrive/Dropbox), `IContextMenu` plumbing, named-pipe IPC to a Windows Service host of SprigAgent. `docs/research/windows-shell-apis.md` lands here as the M2-Mac equivalent of `docs/research/macos-finder-apis.md`. By the end of M2-Win, overlay badges + the MVP-10 verbs work in Explorer.
 
