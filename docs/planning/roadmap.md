@@ -38,12 +38,21 @@ The macOS-shell and Windows-shell tracks share most engineering work — the eng
 - 🍎 **M2-Mac — FinderSync alpha**: SprigAgent LaunchAgent, XPC protocol, FinderSync extension with overlay badges and the MVP-10 right-click verbs (clone, status, commit, push, pull, fetch, branch-switch, stage/unstage, diff, log). Sheets, not full task windows yet.
 - 🪟 **M2-Win — Explorer shell-extension alpha**: research spike on `IShellIconOverlayIdentifier` (15-overlay-slot competition with OneDrive/Dropbox), `IContextMenu` plumbing, named-pipe IPC to a Windows Service host of SprigAgent. `docs/research/windows-shell-apis.md` lands here as the M2-Mac equivalent of `docs/research/macos-finder-apis.md`. By the end of M2-Win, overlay badges + the MVP-10 verbs work in Explorer.
 
-The two M2 sub-milestones can run sequentially (Mac first, Win second) or in parallel if the Windows expert is available — engineering plan decides per-PR. The `IPCSchema` package is shared across both.
+The two M2 sub-milestones can run sequentially (Mac first, Win second) or in parallel if the Windows expert is available — engineering plan decides per-PR. The `IPCSchema` package is shared across both. **M2-Mac starts with the self-hosted-runner provisioning + the Mac-transport experiment** (UDS-in-app-group vs XPC) — see `milestones.md`; Mac hardware is imminent (2026-06).
+
+### M2.5 — Portable-engine checkpoint *(added 2026-06-11)*
+
+🌐 The named checkpoint for the engine having run ahead of the shells: 14 task-window
+VMs, IPC serving on two transports, ADRs 0068–0083, the full beginner-affordance
+backlog, `sprigctl` at 17 subcommands. Tagged `engine-0.5.0`; exit criteria in
+`milestones.md`. Shell milestones below consume this state.
 
 ### M3 — First task windows (parallel tracks)
 
-- 🍎 **M3-Mac**: SwiftUI + AppKit task windows for CommitComposer, LogBrowser, DiffViewer, BranchSwitcher, CloneDialog, Preferences.
-- 🪟 **M3-Win**: same task windows in swift-cross-ui (per ADR 0055). Reuses the view-model code from `TaskWindowKit` and `RepoState`. Per-window tweaks for Windows-native interaction conventions (menu placement, keyboard shortcuts).
+**Re-scoped 2026-06-11** (the VM layer already exists — M3 is shell *bring-up*, not feature construction; see `milestones.md` for the spike-first gate and window order):
+
+- 🍎 **M3-Mac**: SwiftUI + AppKit task windows over the existing `TaskWindowKit` VMs — spike one window (Status) first to validate the actor-VM binding pattern, then the daily-driver set (Commit, Sync, Clone, Stash, Recover), then the rest.
+- 🪟 **M3-Win**: same windows in swift-cross-ui (per ADR 0055); the swift-cross-ui spike runs early on the existing Windows VM rig (R1). Per-window tweaks for Windows-native interaction conventions (menu placement, keyboard shortcuts).
 
 ### M4 — MergeConflictResolver (MVP gate, parallel tracks)
 
@@ -79,7 +88,8 @@ The two M2 sub-milestones can run sequentially (Mac first, Win second) or in par
 
 - **Calendar slip**: each macOS-shell milestone needs a Windows-shell counterpart. Worst case (strict serialization), 1.0 takes ~2× the engineering calendar of a macOS-only 1.0. Mitigation: invest hard in shared view-model code in `TaskWindowKit` so the per-shell delta is small.
 - **Contributor recruiting**: Windows-shell work needs Windows-native expertise (COM, MSIX, Windows Service authoring). The maintainer's BDFL coverage probably can't fill this alone. ADR 0017's "open up steering when 3+ steady contributors emerge" applies — finding a Windows-shell-savvy collaborator is on the M2 critical path.
-- **swift-cross-ui maturity**: framework is younger than SwiftUI on macOS. ADR 0055 documents the WinUI 3 fallback. Re-evaluate at the start of M3-Win.
+- **swift-cross-ui maturity**: framework is younger than SwiftUI on macOS. ADR 0055 documents the WinUI 3 fallback. The re-evaluation spike no longer waits for M3-Win's calendar slot — the Windows VM test rig exists now, so the spike is cheap and should run early (risk R1).
+- **View-model binding ergonomics (R16)**: 14 actor-based VMs were built before any shell exists; the documented SwiftUI consumption pattern is plausible but unproven. Mitigation: the M3 spike-first gate — one real window per shell before mass window-building.
 - **Distribution doubling**: macOS DMG + Homebrew Cask **and** Windows MSIX + winget. Both pipelines need release engineering and code-signing infrastructure.
 
 See `docs/planning/risk-register.md` for the full risk list (engine + per-shell risks combined).

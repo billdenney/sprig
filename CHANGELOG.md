@@ -2,9 +2,23 @@
 
 All notable changes to Sprig are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versioning: [SemVer](https://semver.org/).
+Versioning: [SemVer](https://semver.org/). Engine checkpoints are tagged `engine-0.x.y`
+ahead of the 1.0 app; entry style from `engine-0.5.0` onward is 2–3 lines + the ADR
+pointer (the ADR carries the detail — see CONTRIBUTING).
 
 ## [Unreleased]
+
+### Changed
+- **Plan vendored + planning docs realigned (M2.5 checkpoint)** — the master plan now lives in-repo (`docs/planning/master-plan.md`) after the original's loss; 53 stub ADRs re-pointed; ADR 0051 expanded in place; M2.5 checkpoint + re-scoped M3 in roadmap/milestones; slice gate codified (`docs/ci/slice-gate.md`); `VM-ENV-1` filed; R14 reframed/R16 added. Force-push stays in v1 behind the full high tier (master-plan §2.5/§10).
+
+### Fixed
+- **House-style enforcement now covers the Recover vocabulary strings** — `notASnapshotRef`/`notABackupRef`/`recoveryRefMissing` were missing from the test catalog. Shared history-rewrite guards extracted to `GitCore.HistoryRewriteGuards` (behavior-neutral; ADR 0082/0083 engines now share one implementation).
+
+## [engine-0.5.0] — 2026-06-11
+
+The M2.5 portable-engine checkpoint (see `docs/planning/milestones.md`): the complete
+task-window VM layer, IPC serving on two transports, the beginner-affordance backlog,
+and the engine halves of M4–M6 — ADRs 0056–0083. Tagged on `main` as `engine-0.5.0`.
 
 ### Fixed
 - **Intermittent full-suite hang (lost AsyncStream finish in `MockFileWatcher`)** — ~1-in-5 full `swift test` runs on the Linux snapshot toolchain hung forever in WatcherKit's "stream yields emitted events in order": `start(paths:)` attached its continuation via an unstructured Task, so a fast `stop()` could win the actor hop first — the nil-continuation `finish()` was lost and the late attach installed a continuation nobody would ever finish. Fixed with a finish-latch (attach replays pending events, then honors a raced-ahead finish); 500-iteration regression test. Cataloged as quirk **F3** with the diagnostic trap that cost us a mis-attribution first (`sigsuspend` + idle `ep_poll` does *not* prove tests finished — a parked async test occupies no thread). ci-linux.yml gains `timeout-minutes: 30` as a general anti-hang failsafe.

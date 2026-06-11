@@ -54,10 +54,24 @@ The parser-fidelity and watcher event-budget gates are now wired into hosted CI 
 
 ### M2-Mac — FinderSync alpha
 
+> **Precursor (2026-06-11, Mac hardware imminent):** provision the self-hosted
+> macOS-arm64 runner first — it unblocks the M1 100k benchmark gate, the E2E suite, the
+> badge-latency verification below, and release signing (master-plan §5.5) in one stroke.
+>
+> **Experiment #1 — the Mac transport.** Before writing the XPC adapter, verify on real
+> hardware whether the FinderSync extension and the LaunchAgent can rendezvous over the
+> existing **Unix-domain-socket transport via an app-group container** socket path. The
+> portable UDS transport already compiles and passes its full suite on macOS (incl.
+> `getpeereid` peer validation), and the two-process e2e tests already cover it. If the
+> sandbox permits it: the XPC adapter is deleted from the critical path, one wire
+> transport serves all three platforms, and ADR 0048/0067 get amended. If not: ship the
+> XPC adapter as planned. Either way the experiment is hours, and it decides a whole
+> adapter.
+
 Exit criteria:
 
 - [ ] `SprigAgent` LaunchAgent registered via `SMAppService`, runnable across reboots.
-- [ ] `IPCSchema` Codable envelopes finalized for v1; XPC transport in `TransportKit/Mac` shipped.
+- [ ] `IPCSchema` Codable envelopes finalized for v1; **Mac transport decided by experiment #1** — UDS-in-app-group (preferred if sandbox-verified) or the XPC adapter in `TransportKit/Mac` — shipped, with ADR 0048/0067 amended to record the outcome.
 - [ ] `RepoState` (basic dirty-set + badge trie) populated by `WatcherKit` events.
 - [ ] `SprigFinder` extension shipping the 10-state badge set (or 5/8 per user's reveal-level preference).
 - [ ] Right-click menu shows the MVP-10 verbs (clone, status, commit, push, pull, fetch, branch-switch, stage/unstage, diff, log) plus `Sprig ▶` submenu.
@@ -80,23 +94,60 @@ Exit criteria:
 - [ ] Killing the SprigAgent service falls back to "no badge / no menu" within 2 seconds, no Explorer hang.
 - [ ] First-run diagnostic showing overlay-slot competition (vs OneDrive et al) functional.
 
+## M2.5 — Portable-engine checkpoint *(new, 2026-06-11 plan review)*
+
+The engine ran breadth-first and outpaced the shells: the complete task-window VM layer
+(**14 view models**), the IPC substrate on two transports, the beginner-affordance
+backlog 1.1–3.5, and the engine halves of M4 (conflict resolver), M5 (rebase plans,
+history editing, stash), and M6 (submodule/LFS surfaces) shipped before any shell
+exists. M2.5 names and tags that state so the changelog has a cadence anchor and the
+milestone-exit disciplines actually fire.
+
+Exit criteria:
+
+- [x] ADRs 0068–0083 ratified and implemented with the slice gate (`docs/ci/slice-gate.md`).
+- [x] `sprigctl` surfaces the engine end-to-end (17 subcommands — see `docs/architecture/sprigctl-cli.md`).
+- [x] Disabled-tests review: `disabled-tests.md` is empty (nothing disabled on CI).
+- [x] Audit-followups review: every Pending entry has a live trigger (`VM-ENV-1` filed as part of this review; `UP-5472` re-checked 2026-06-11, still pinned; `R15-F1..F4` remain deliberately deferred until M2 agent surfaces real failures).
+- [x] Master plan vendored into the repo (`master-plan.md`) after the original's loss; ADR stubs re-pointed.
+- [ ] Tag `engine-0.5.0` on main (cut by maintainer after this PR merges; CHANGELOG section already snapshotted).
+
+Honest remaining *engine* backlog (tracked, not blocking the checkpoint): stacked-branch
+restack (ADR 0051 on the 0083 substrate), plan message-editing, the Revert verb,
+ForgeKit PR list, AIKit feature integration (M7).
+
 ## M3 — First task windows (parallel tracks)
 
-**Outline; expand at M3 scoping.**
+**Re-scoped 2026-06-11:** the original M3 planned *building* 6 windows; the VM layer now
+holds **14 ready view models**, so M3 is a **shell bring-up** milestone — its risk is
+binding ergonomics and platform quirks, not feature construction.
 
-Goal: replace the M2 sheets with proper standalone task windows on both shells. Concrete windows: CommitComposer, LogBrowser, DiffViewer, BranchSwitcher, CloneDialog, Preferences.
+- **Spike-first gate (both shells, risk R16):** the FIRST M3 task per shell is one real
+  window bound to one *existing* VM (suggested: Status), explicitly to validate the
+  actor-VM ↔ UI binding pattern before any mass window-building. If the pattern needs
+  rework (e.g. a `@MainActor` observable façade over the actors), fix it once, while
+  the change is cheap, and record it as an ADR.
+  - 🪟 The swift-cross-ui half of this spike should run **now-ish on the existing
+    Windows VM rig** rather than waiting for M3-Win's calendar slot — R1's "re-evaluate
+    at M3-Win start" is cheap to satisfy early.
+- **Window order is usage-priority, not the original fixed six:** Status, CommitComposer,
+  Sync, CloneDialog, Stash, Recover first (the daily-driver loop), then LogBrowser,
+  DiffViewer, BranchSwitcher, Preferences, and the rest of the 14.
 
-Critical exit gates (preview):
+Critical exit gates (unchanged in spirit):
 
-- All 6 task windows reuse view-model code from `TaskWindowKit` (Tier 1 portable).
-- Per-shell delta is rendering-only (SwiftUI on macOS, swift-cross-ui on Windows).
+- All shipped windows reuse `TaskWindowKit` view models (Tier 1 portable); per-shell
+  delta is rendering-only (SwiftUI on macOS, swift-cross-ui on Windows).
 - Every task window passes the VoiceOver / Narrator a11y audit checklist (ADR 0042).
 - LogBrowser renders 50k-commit history in <300 ms.
 - CommitComposer → push round-trip works against a local bare fixture remote.
 
 ## M4 — MergeConflictResolver (MVP gate, parallel tracks)
 
-**Outline; expand at M4 scoping.**
+**Outline; expand at M4 scoping.** *(2026-06-11 note: the engine half is substantively
+built — `MergeConflictResolverViewModel` with per-region text resolution, LFS/submodule
+conflict classification, midstream finalize/abort. M4 is the rendering + fixtures
+milestone over that engine.)*
 
 Goal: 3-way merge view, conflict list, hunk-level accept/reject, "abort merge" safety, binary/LFS conflict handling. Optional delegation to external mergetools.
 
@@ -111,11 +162,22 @@ Critical exit gates (preview):
 
 ## M5 — Rebase + advanced branching
 
-**Outline.** RebaseInteractive task window, cherry-pick, revert, tag, stash flows. Tiered confirmations (ADR 0033) firing correctly per destructiveness level. Interactive rebase produces identical history vs. `git rebase -i` for 50 scripted scenarios.
+**Outline.** *(2026-06-11 note: large engine pieces shipped early — the rebase-plan
+engine ADR 0083, reword/squash ADR 0082, the stash browser ADR 0079, with tiered
+confirmations + snapshot pairing test-pinned throughout. Remaining engine work:
+stacked-branch restack (ADR 0051), message-editing inside plans, the Revert verb,
+cherry-pick/tag flows. The rest of M5 is rendering.)* RebaseInteractive task window,
+cherry-pick, revert, tag, stash flows. Tiered confirmations (ADR 0033) firing correctly
+per destructiveness level. Interactive rebase produces identical history vs.
+`git rebase -i` for 50 scripted scenarios (the ADR 0083 engine defers to
+`git rebase -i` itself, so this gate is about the *plan construction + UI*, not replay
+fidelity).
 
 ## M6 — Submodules + LFS first-class
 
-**Outline.** SubmoduleManager task window, submodule badges + right-click actions, LFS detection + install flow (Homebrew + fallback), `git subtree` import wizard. Nested submodule fixtures (3 levels deep) render correctly. LFS install completes in <30 s on a fresh macOS VM and a fresh Windows VM.
+**Outline.** *(2026-06-11 note: engine surfaces exist — `sprigctl submodule`/`lfs`
+commands, LFS-aware conflict classification; M6 is the task-window + install-flow
+milestone.)* SubmoduleManager task window, submodule badges + right-click actions, LFS detection + install flow (Homebrew + fallback), `git subtree` import wizard. Nested submodule fixtures (3 levels deep) render correctly. LFS install completes in <30 s on a fresh macOS VM and a fresh Windows VM.
 
 ## M7 — AI integration
 

@@ -10,11 +10,11 @@ informed: —
 
 ## Context
 
-See the master plan at `/home/bill/.claude/plans/please-switch-to-plan-glittery-corbato.md`, §3 (Decision Log) for the rationale, alternatives, and consequences that produced this ADR.
+See [`docs/planning/master-plan.md`](../planning/master-plan.md) §3 (Decision Log) for where the rationale, alternatives, and consequences that produced this ADR now live. (The original out-of-repo plan file was lost; the vendored plan records what survives and where.)
 
 ## Decision
 
-Captured in the plan. This file exists as the canonical ADR location for linking from PRs, CHANGELOG entries, and code comments. The decision summary in the plan is the source of truth until this file is expanded.
+Captured at scaffolding time; the title states the decision. This file is the canonical ADR location for linking from PRs, CHANGELOG entries, and code comments. Expand it in place when it becomes load-bearing for new work (see master-plan.md §3) — as was done for ADR 0051.
 
 ## Consequences
 

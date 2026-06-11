@@ -73,7 +73,9 @@ AI features (merge conflict suggestions, commit message drafting, PR description
 - Snapshot tests in `tests/snapshots/` cover diff and merge rendering.
 - AI evaluation tests in `tests/ai-evals/` run the held-out conflict corpus against every configured provider.
 - Benchmarks in `tests/benchmarks/` gate the 100k-file performance budget (<2% CPU steady, <150 MB RAM, <100 ms badge latency).
-- **No E2E suite today.** XCUITest-driven end-to-end testing of the macOS shell needs a self-hosted macOS-arm64 runner (real Finder + signing cert + notarization), which we don't have. When that runner is provisioned, the suite gets re-introduced under `tests/e2e/` with a matching workflow; until then we rely on integration tests + snapshot tests for the surfaces we can cover on hosted CI.
+- **Undo round-trip rule (ratified 2026-06-11):** no destructive verb ships without a test that performs the operation and then restores through the real Recover path, asserting the original state SHA-/byte-exactly. Snapshot-minting alone is not proof — the restore must be exercised (this rule caught the same-second restore-ref collision and the stash-drop `store`-vs-`reset` semantics).
+- **Per-slice gate:** every engine slice runs the full gate in [`docs/ci/slice-gate.md`](docs/ci/slice-gate.md) — format, lint, full local suite, full Windows-VM sweep, and the adjusted-gate receipt protocol for the known environmental members (tracked as `VM-ENV-1` in `docs/planning/audit-followups.md`).
+- **No E2E suite today.** XCUITest-driven end-to-end testing of the macOS shell needs a self-hosted macOS-arm64 runner (real Finder + signing cert + notarization). **Mac hardware is expected imminently (2026-06)**; provisioning that runner is the first M2-Mac precursor task, and the suite gets re-introduced under `tests/e2e/` with a matching workflow when it lands. Until then we rely on integration tests + snapshot tests for the surfaces we can cover on hosted CI.
 
 ### Disabled CI tests must be tracked and re-enabled ASAP
 
@@ -99,13 +101,15 @@ When the fix lands, the closing PR removes the in-code TODO markers and moves th
 
 ## Plan file (source of truth)
 
-The approved plan lives at `/home/bill/.claude/plans/please-switch-to-plan-glittery-corbato.md`. When in doubt, consult it. The plan is the union of all ratified ADRs and the roadmap.
+The approved plan lives **in the repository** at [`docs/planning/master-plan.md`](docs/planning/master-plan.md). When in doubt, consult it. The plan is the union of all ratified ADRs and the roadmap. (It previously lived at a machine-local `~/.claude/plans/` path and was lost — never keep the source of truth outside the repo.)
 
 ## Further reading
 
+- `docs/planning/master-plan.md` — the plan: thesis, principles, §10 verb surface, §11 interventions
 - `docs/architecture/overview.md` — component diagram and data flow
 - `docs/architecture/cross-platform.md` — port guide for Windows/Linux
 - `docs/decisions/README.md` — ADR index
 - `docs/planning/roadmap.md` — milestones M0–M9
+- `docs/ci/slice-gate.md` — the per-slice verification gate (incl. the Windows-VM receipt protocol)
 - `docs/research/git-feature-inventory.md` — what git commands Sprig surfaces at each tier
 - `docs/research/git-best-practices.md` — defaults and interventions

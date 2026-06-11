@@ -6,6 +6,17 @@ The format is loosely modeled on `docs/planning/disabled-tests.md`: a single gre
 
 ## Pending
 
+### `VM-ENV-1` — Two environmental test members fail every full Windows-VM sweep under load; gate adjusted with isolated receipts
+
+- **Origin:** Not an internal audit — an environmental failure mode of the local Windows test VM (`dockur/windows` Server 2022, mirroring the GitHub `windows-2022` runner), ratified into an adjusted gate by the maintainer (2026-06, in-session). Tracked here because the discipline fits and the ratification previously lived only in conversation — exactly the scattered-state this tracker exists to prevent.
+- **Where:** `PreferencesViewModelTests` "save() writes JSON, subsequent load() reads it back" and `MergeConflictResolverPerRegionTests` "text(regions:) with [.ours, .theirs] splices each region". `RepoAgentAutoBackupTests` "agent with AutoBackupStartup backs up a dirty tree on its tick" joined the family once (2026-06-11) — on the watch list, same treatment. Linux-local cousin, also watch-listed (one occurrence, 2026-06-11): `SprigctlAgentTests/socketServesSubscriber` (the two-process UDS e2e) once saw `subscriptionEnded(agent_shutdown)` instead of `badgeChanged` under full-suite load — the agent's `--duration` expired before the event propagated; 3× isolated passes at ~8 s on the same tree.
+- **Symptom:** Under full-suite load (~1,180 tests, the suites in question landing 100+ seconds into the run), file writes become invisible to subsequent reads/subprocesses for 60–90+ s (ERROR_SHARING_VIOLATION retry ladders, `waitForFile` expiring). The same tests pass **isolated in 0.1–4 s, every time** — dozens of receipts on record. Hosted Windows CI (different load profile, more cores) has never shown the signature. Distinct from the *deterministic* CRLF class (quirk G1): this one is load-dependent; that one fails isolated too.
+- **Adjusted gate (the ratified protocol, also in `docs/ci/slice-gate.md`):** a full-VM sweep whose only failures are these members is treated as green **if and only if** each failing member then passes an isolated `--filter` run on the same tree (the receipt). Any *other* failure, or an isolated-run failure, is a real regression — the stash-browser CRLF bug was caught precisely because it failed the isolated run.
+- **Why not fix the tests:** `PreferencesViewModelTests` already polls with `waitForFile`; the pathological window under load exceeds any reasonable budget. Loosening further would blunt the tests on the platforms where they're sharp. The VM's I/O starvation is the cause, not the assertions.
+- **Trigger to close:** whichever comes first — (a) the VM gains cores/IO headroom and three consecutive full sweeps run clean, (b) hosted Windows CI ever reproduces the signature (then it's a real bug investigation, not an environmental note), or (c) the slice gate moves to changed-target sweeps (master-plan §12 suite-growth threshold), making the full-sweep receipt moot.
+- **Owner:** me (receipts per slice), maintainer (VM sizing).
+- **Severity:** Low (verification overhead only; no shipped-code risk — hosted CI is authoritative and green).
+
 ### `UP-5472` — Re-pin Linux toolchain to a stable release once one ships the upstream `Process.run()` fix
 
 - **Origin:** Not an internal audit — an upstream swift-corelibs-foundation bug ([swiftlang/swift-corelibs-foundation#5472](https://github.com/swiftlang/swift-corelibs-foundation/issues/5472)) tracked here because the discipline fits: temporary pin now, durable removal trigger.

@@ -1,6 +1,6 @@
 # Git best practices Sprig adopts or promotes
 
-The full text — ~60 interventions tagged by intervention level — lives in **§11 of the master plan** at `/home/bill/.claude/plans/please-switch-to-plan-glittery-corbato.md`. This file is a brief index against that.
+The full text — ~60 interventions tagged by intervention level — lived in **§11 of the original master plan**, which was lost; the surviving structure is mirrored in [`master-plan.md`](../planning/master-plan.md) §11 and THIS file is now the maintained index.
 
 ## Intervention levels
 
@@ -31,7 +31,7 @@ Approximate counts (master plan §11.13): **~30 (a), ~12 (b), ~6 (c), ~8 (d), ~2
 
 ## What this file becomes
 
-When M2/M3 land and these defaults are actually being written by Sprig at runtime, this file gets **per-default verification text**: "What does the user see in Settings? What's the override path? What test covers it?" Until then, the master plan §11 is the source.
+When M2/M3 land and these defaults are actually being written by Sprig at runtime, this file gets **per-default verification text**: "What does the user see in Settings? What's the override path? What test covers it?" Until then, master-plan.md §11 + the cited ADRs are the source.
 
 ## Source list (master plan §11.13)
 

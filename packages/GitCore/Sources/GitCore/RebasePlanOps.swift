@@ -187,31 +187,20 @@ public struct RebasePlanOps: Sendable {
     // worktree-touching replay needs)
 
     private func guardRefusal() async throws -> RebasePlanOutcome? {
-        let onBranch = try await runner.run(
-            ["symbolic-ref", "--quiet", "HEAD"],
-            throwOnNonZero: false
+        let common = try await HistoryRewriteGuards(runner: runner).firstRefusal(
+            requireExistingHEAD: false,
+            refuseDirtyWorktree: true
         )
-        guard onBranch.exitCode == 0 else { return .refusedDetachedHEAD }
-
-        let worktree = runner.defaultWorkingDirectory
-            ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        let gitDir = try GitMetadataPaths.resolveGitDir(forWorktree: worktree)
-        guard MidstreamOperation.detectFromMarkers(gitDirURL: gitDir) == .none else {
-            return .refusedMidstream
+        switch common {
+        case .detachedHEAD: return .refusedDetachedHEAD
+        case .midstream: return .refusedMidstream
+        case .stagedChanges: return .refusedStagedChanges
+        case .dirtyWorktree: return .refusedDirtyWorktree
+        // Unborn HEAD surfaces as an empty unpushed range
+        // (refusedNothingToRebase) — not requested here.
+        case .noCommits: return .refusedNothingToRebase
+        case nil: return nil
         }
-
-        let staged = try await runner.run(
-            ["diff", "--cached", "--quiet"],
-            throwOnNonZero: false
-        )
-        guard staged.exitCode == 0 else { return .refusedStagedChanges }
-
-        let dirty = try await runner.run(
-            ["diff", "--quiet"],
-            throwOnNonZero: false
-        )
-        guard dirty.exitCode == 0 else { return .refusedDirtyWorktree }
-        return nil
     }
 
     private func resolves(_ rev: String) async throws -> Bool {
