@@ -165,5 +165,25 @@ struct StatusViewModelTests {
         await vm.fetchNow()
         let after = try await summary(of: vm)
         #expect(after.currentBranchState?.behind == 1, "Fetch now refreshed the tracking ref")
+        // ADR 0077: the same fetch answers "what changed?".
+        let digests = try #require(after.fetchDigests)
+        #expect(digests.count == 1)
+        #expect(digests.first?.ref == "origin/main")
+        #expect(digests.first?.commitCount == 1)
+        #expect(digests.first?.authorCount == 1)
+    }
+
+    @Test("the summary carries HEAD's committer date for the stale-work nudge")
+    func lastCommitDateSurfaces() async throws {
+        let (dir, runner) = try await makeRepo("staleness")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let vm = StatusViewModel(repoURL: dir, runner: runner)
+        await vm.refresh()
+
+        let date = try #require(try await summary(of: vm).lastCommitDate)
+        // The seed commit just happened; sanity-bound the parse
+        // rather than pinning a clock we don't control.
+        #expect(abs(date.timeIntervalSinceNow) < 600)
     }
 }
