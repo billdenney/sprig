@@ -147,7 +147,8 @@ struct VocabularyParentheticalPolicyTests {
         let warnings: [PreflightWarning] = [
             .committingToDefaultBranch(branch: "main", upstream: "origin/main"),
             .detachedHEAD(oid: sha), // ✓ detached
-            .largeStagedFileWithoutLFS(path: "big.bin", sizeBytes: 60_000_000, thresholdBytes: 52_428_800)
+            .largeStagedFileWithoutLFS(path: "big.bin", sizeBytes: 60_000_000, thresholdBytes: 52_428_800),
+            .switchingAwayFromUnpushed(branch: "feature/x", unpushedCount: 2)
         ]
         let stales = [
             StaleBranch(

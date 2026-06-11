@@ -74,15 +74,30 @@ public actor BranchSwitcherViewModel {
     /// that banner instead of silently "succeeding".
     public private(set) var setAsideOutcome: SetAsideOutcome?
 
+    /// ADR 0070 switch-time rails from the most recent ``refresh()``
+    /// — today the single switching-away-from-unpushed informational
+    /// (the commits stay on the branch; beginners often read
+    /// "switched away" as "lost"). Never blocks anything.
+    public private(set) var preflightWarnings: [PreflightWarning] = []
+
     /// `Runner` configured against ``repoURL``. Injected for tests.
     private let runner: Runner
+
+    /// ADR 0070 evaluator (suppression-aware). Injected so shells
+    /// pass the user's `suppressedGuardRails`.
+    private let preflight: PreflightChecks
 
     /// In-flight switch Task, retained so ``cancel`` can interrupt it.
     private var runningTask: Task<Void, Never>?
 
-    public init(repoURL: URL, runner: Runner) {
+    public init(
+        repoURL: URL,
+        runner: Runner,
+        preflight: PreflightChecks = PreflightChecks()
+    ) {
         self.repoURL = repoURL
         self.runner = runner
+        self.preflight = preflight
     }
 
     // MARK: - Inventory + selection
@@ -105,9 +120,15 @@ public actor BranchSwitcherViewModel {
             if let sel = selection, !inventory.contains(where: { $0.shortName == sel }) {
                 selection = nil
             }
+            // Switch-time informational (ADR 0070 amendment): is the
+            // branch the user is standing on ahead of its upstream?
+            // One for-each-ref pass; best-effort like the other rails.
+            let states = await (try? SyncOps(runner: runner).branchSyncStates()) ?? []
+            preflightWarnings = preflight.switchAwayWarnings(states: states)
         } catch {
             inventory = []
             selection = nil
+            preflightWarnings = []
             state = .failure(.init(from: error))
         }
     }

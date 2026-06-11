@@ -315,3 +315,52 @@ struct BranchSwitcherViewModelTests {
         #expect(await vm.selection == "feature/x")
     }
 }
+
+// MARK: - Switch-time rail (ADR 0070 amendment)
+
+extension BranchSwitcherViewModelTests {
+    @Test("refresh() surfaces the switch-away rail when the current branch has unpushed commits")
+    func switchAwayRailSurfaces() async throws {
+        // Bare origin so the current branch HAS an upstream to be
+        // ahead of; one local commit makes it ahead by 1.
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("sprig-switchrail-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rootRunner = Runner(defaultWorkingDirectory: root)
+        let origin = root.appendingPathComponent("origin.git")
+        _ = try await rootRunner.run(["init", "--bare", "-b", "main", origin.path])
+        let work = root.appendingPathComponent("work")
+        _ = try await rootRunner.run(["clone", origin.path, work.path])
+        let runner = Runner(defaultWorkingDirectory: work)
+        _ = try await runner.run(["config", "user.email", "test@sprig.app"])
+        _ = try await runner.run(["config", "user.name", "Sprig Test"])
+        _ = try await runner.run(["config", "commit.gpgsign", "false"])
+        try Data("seed\n".utf8).write(to: work.appendingPathComponent("a.txt"))
+        _ = try await runner.run(["add", "a.txt"])
+        _ = try await runner.run(["commit", "-m", "seed"])
+        _ = try await runner.run(["push", "-u", "origin", "main"])
+
+        let vm = BranchSwitcherViewModel(repoURL: work, runner: runner)
+        await vm.refresh()
+        #expect(await vm.preflightWarnings.isEmpty, "in sync — no rail")
+
+        try Data("local\n".utf8).write(to: work.appendingPathComponent("b.txt"))
+        _ = try await runner.run(["add", "b.txt"])
+        _ = try await runner.run(["commit", "-m", "unpushed"])
+        await vm.refresh()
+        #expect(
+            await vm.preflightWarnings
+                == [.switchingAwayFromUnpushed(branch: "main", unpushedCount: 1)]
+        )
+
+        // Suppression flows through like every other rail.
+        let suppressed = BranchSwitcherViewModel(
+            repoURL: work,
+            runner: runner,
+            preflight: PreflightChecks(suppressedRails: ["switching-away-from-unpushed"])
+        )
+        await suppressed.refresh()
+        #expect(await suppressed.preflightWarnings.isEmpty)
+    }
+}

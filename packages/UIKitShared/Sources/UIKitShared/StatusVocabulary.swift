@@ -219,6 +219,8 @@ public enum StatusVocabulary {
             "detached HEAD" + (oid.map { " at \(String($0.prefix(8)))" } ?? "")
         case let .largeStagedFileWithoutLFS(path, size, threshold):
             "\(path): \(size) bytes exceeds \(threshold); not LFS-tracked"
+        case let .switchingAwayFromUnpushed(branch, count):
+            "\(branch): \(count) unpushed commit(s) — they stay on the branch"
         }
     }
 
@@ -233,6 +235,9 @@ public enum StatusVocabulary {
         case let .largeStagedFileWithoutLFS(path, size, threshold):
             "\(path) is \(Self.byteSize(size)) — over the \(Self.byteSize(threshold)) limit; "
                 + "track it with LFS so clones stay fast"
+        case let .switchingAwayFromUnpushed(branch, count):
+            "\(branch) has \(count) commit(s) not on the server yet — "
+                + "they stay safely on the branch; push to share them"
         }
     }
 

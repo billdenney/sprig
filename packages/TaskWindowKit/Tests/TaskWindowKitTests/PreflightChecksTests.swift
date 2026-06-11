@@ -70,9 +70,59 @@ struct PreflightBranchChecksTests {
         let large = PreflightWarning.largeStagedFileWithoutLFS(
             path: "big.bin", sizeBytes: 1, thresholdBytes: 1
         )
+        let switching = PreflightWarning.switchingAwayFromUnpushed(
+            branch: "feature/x", unpushedCount: 2
+        )
         #expect(defaultBranch.railID == "committing-to-default-branch")
         #expect(detached.railID == "detached-head")
         #expect(large.railID == "large-staged-file-without-lfs")
+        #expect(switching.railID == "switching-away-from-unpushed")
+    }
+
+    private func syncState(
+        name: String = "feature/x",
+        upstream: String? = "origin/feature/x",
+        ahead: Int = 0,
+        gone: Bool = false,
+        isCurrent: Bool = true
+    ) -> BranchSyncState {
+        BranchSyncState(
+            name: name,
+            sha: String(repeating: "a", count: 40),
+            upstreamFullRef: upstream.map { "refs/remotes/\($0)" },
+            upstreamShort: upstream,
+            ahead: ahead,
+            behind: 0,
+            upstreamGone: gone,
+            isCurrent: isCurrent
+        )
+    }
+
+    @Test("switch-away rail fires only for the CURRENT branch with unpushed commits")
+    func switchAwayRail() {
+        let checks = PreflightChecks()
+        #expect(
+            checks.switchAwayWarnings(states: [syncState(ahead: 2)])
+                == [.switchingAwayFromUnpushed(branch: "feature/x", unpushedCount: 2)]
+        )
+        #expect(
+            checks.switchAwayWarnings(states: [syncState(ahead: 0)]).isEmpty,
+            "in-sync branch is quiet"
+        )
+        #expect(
+            checks.switchAwayWarnings(states: [syncState(upstream: nil, ahead: 3)]).isEmpty,
+            "no upstream — nothing to be 'not on'"
+        )
+        #expect(
+            checks.switchAwayWarnings(states: [syncState(ahead: 3, gone: true)]).isEmpty,
+            "gone upstream belongs to the cleanup banner"
+        )
+        #expect(
+            checks.switchAwayWarnings(states: [syncState(ahead: 3, isCurrent: false)]).isEmpty,
+            "only where the user is standing"
+        )
+        let suppressed = PreflightChecks(suppressedRails: ["switching-away-from-unpushed"])
+        #expect(suppressed.switchAwayWarnings(states: [syncState(ahead: 2)]).isEmpty)
     }
 
     @Test("a suppressed rail no longer fires; the others still do")

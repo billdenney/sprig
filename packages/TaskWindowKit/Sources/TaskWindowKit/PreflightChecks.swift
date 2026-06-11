@@ -43,6 +43,12 @@ public enum PreflightWarning: Sendable, Equatable {
     /// One-click remedy: ADR 0029's "track with LFS" flow.
     case largeStagedFileWithoutLFS(path: String, sizeBytes: Int64, thresholdBytes: Int64)
 
+    /// The CURRENT branch has commits its upstream doesn't — shown at
+    /// switch time. Purely informational: the commits stay safely on
+    /// the branch, but beginners often read "switched away" as
+    /// "lost". One-click remedy: push before switching.
+    case switchingAwayFromUnpushed(branch: String, unpushedCount: Int)
+
     /// Stable per-rail identifier — the value the shells' "never
     /// show this again" checkbox writes into
     /// `AppPreferences.suppressedGuardRails` (ADR 0070 amendment)
@@ -53,6 +59,7 @@ public enum PreflightWarning: Sendable, Equatable {
         case .committingToDefaultBranch: "committing-to-default-branch"
         case .detachedHEAD: "detached-head"
         case .largeStagedFileWithoutLFS: "large-staged-file-without-lfs"
+        case .switchingAwayFromUnpushed: "switching-away-from-unpushed"
         }
     }
 }
@@ -110,6 +117,26 @@ public struct PreflightChecks: Sendable {
 
     private func notSuppressed(_ warning: PreflightWarning) -> Bool {
         !suppressedRails.contains(warning.railID)
+    }
+
+    /// Switch-time informational (the 2.3 remainder): the checked-out
+    /// branch is ahead of its upstream. Pure read of already-fetched
+    /// sync states — no git invocation here; the VM passes the
+    /// `branchSyncStates()` it computes anyway. Quiet with no
+    /// upstream (nothing to be "not on") and on a gone upstream
+    /// (the ADR 0073 cleanup banner owns that story).
+    public func switchAwayWarnings(states: [BranchSyncState]) -> [PreflightWarning] {
+        guard let current = states.first(where: \.isCurrent),
+              current.upstreamShort != nil,
+              !current.upstreamGone,
+              current.ahead > 0
+        else { return [] }
+        return [
+            PreflightWarning.switchingAwayFromUnpushed(
+                branch: current.name,
+                unpushedCount: current.ahead
+            )
+        ].filter(notSuppressed)
     }
 
     /// Large-staged-file check: stat each staged path on disk, then
