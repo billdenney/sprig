@@ -74,6 +74,16 @@ and Preferences toggles for individual rails (ADR 0019's reveal level is the lik
 - The worktree size is a proxy for the staged blob's size; the rare stage-then-truncate
   divergence costs a spurious/missed warning, not correctness.
 
+## Amendment — the switch-time rail (2026-06-11, the deferred 2.3 remainder)
+
+`switchingAwayFromUnpushed` (railID `switching-away-from-unpushed`, suppressible like every
+rail): shown by the BranchSwitcher when the branch the user is STANDING ON is ahead of its
+upstream. Purely informational — the commits stay safely on the branch — but beginners often
+read "switched away" as "lost"; the line says they're safe and the remedy is one push. Pure
+read of the `branchSyncStates()` pass; quiet with no upstream (nothing to be "not on") and
+on a gone upstream (the ADR 0073 cleanup banner owns that story). Push-time rails remain
+deferred.
+
 ## Amendment — per-rail opt-out + .gitignore suggestion (maintainer-ratified 2026-06-11)
 
 **Per-rail "never show this again."** The maintainer ratified keeping the default-branch

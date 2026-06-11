@@ -92,10 +92,10 @@ banners carry one-click remedies. **Amendment (shipped):** every rail carries a 
 `railID` and the banner offers "never show this again" →
 `AppPreferences.suppressedGuardRails` → `PreflightChecks(suppressedRails:)`; plus the
 suggest-only `.gitignore` affordance (`GitignoreSuggestion` detect/append — consent-gated,
-header-once, dedup, never rewrites) for untracked files matching the junk rules. **Still
-proposed:** `git switch` away from a branch with unpushed commits (informational;
-BranchSwitcher has the ahead/behind data via `SyncOps` when its UI wants it) and push-time
-rails.
+header-once, dedup, never rewrites) for untracked files matching the junk rules. **Switch-time
+rail (shipped):** `switchingAwayFromUnpushed` — BranchSwitcher surfaces "N commits not on
+the server yet — they stay safely on the branch" when the current branch is ahead,
+suppressible like every rail. **Still proposed:** push-time rails.
 
 ### 2.4 Branch-hygiene automation — `ratified + shipped` (ADR 0073)
 After fetch prunes a deleted upstream, offer "This branch was merged on the server — clean
