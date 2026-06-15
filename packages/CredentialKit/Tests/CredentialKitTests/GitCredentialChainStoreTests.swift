@@ -15,10 +15,15 @@
 //   - wire-format injection (newlines in any field) is rejected
 //     before anything spawns.
 //
-// Every fixture RESETS the helper chain (`credential.helper=""`)
-// before adding its own helper: CI hosts and the Windows VM have
-// system-wide helpers (Git Credential Manager, osxkeychain) that
-// would otherwise intercept fills and make results machine-dependent.
+// Every fixture ISOLATES the helper chain at the ENVIRONMENT level
+// (`GIT_CONFIG_NOSYSTEM=1` + the global config redirected to the
+// null device): CI hosts and the Windows VM have system-wide helpers
+// (Git Credential Manager, osxkeychain) that would otherwise
+// intercept fills and make results machine-dependent. The
+// `credential.helper=""` chain-reset idiom is NOT used — git 2.54's
+// Windows build no longer honors it (quirk G2 in
+// cross-platform-quirks.md; empirically pinned), and on hosted
+// windows-2022 that leaked stored secrets across fixtures.
 
 @testable import CredentialKit
 import Foundation
@@ -27,24 +32,61 @@ import Testing
 
 @Suite("GitCredentialChainStore — git credential chain (real git)", .serialized)
 struct GitCredentialChainStoreTests {
-    /// A repo whose LOCAL config pins the helper chain to exactly
-    /// one `store --file=<repo>/creds.txt` helper (the "" entry
-    /// resets any system/global helpers first).
+    /// The null device path for `GIT_CONFIG_GLOBAL` redirection.
+    private var nullDevice: String {
+        #if os(Windows)
+            "NUL"
+        #else
+            "/dev/null"
+        #endif
+    }
+
+    /// A repo whose effective helper chain is EXACTLY its local
+    /// config: system + ProgramData scopes disabled via
+    /// `GIT_CONFIG_NOSYSTEM`, global redirected to the null device
+    /// (`Runner.environmentOverrides` apply after its env scrub, so
+    /// both stick).
     private func makeRepo(_ label: String, withStoreHelper: Bool = true) async throws -> (URL, Runner) {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sprig-credchain-\(label)-\(UUID().uuidString)")
             .standardized
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let runner = Runner(defaultWorkingDirectory: dir)
+        var runner = Runner(defaultWorkingDirectory: dir)
+        runner.environmentOverrides["GIT_CONFIG_NOSYSTEM"] = "1"
+        runner.environmentOverrides["GIT_CONFIG_GLOBAL"] = nullDevice
         _ = try await runner.run(["init", "-b", "main"])
-        _ = try await runner.run(["config", "credential.helper", ""])
         if withStoreHelper {
             _ = try await runner.run([
-                "config", "--add", "credential.helper",
+                "config", "credential.helper",
                 "store --file=\(credsFile(dir).path.replacingOccurrences(of: "\\", with: "/"))"
             ])
         }
         return (dir, runner)
+    }
+
+    @Test("fixture isolation: the effective helper chain is exactly the local entry")
+    func fixtureChainIsExactlyLocal() async throws {
+        let (dir, runner) = try await makeRepo("chainpin")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let listing = try await runner.run(
+            ["config", "--show-origin", "--get-all", "credential.helper"]
+        )
+        let lines = listing.stdoutString.split(separator: "\n")
+        #expect(lines.count == 1, "ambient system/global helpers must be invisible")
+        #expect(lines.first?.contains(".git/config") == true)
+        #expect(lines.first?.contains("store --file=") == true)
+
+        let (helperlessDir, helperlessRunner) = try await makeRepo(
+            "chainpin-empty",
+            withStoreHelper: false
+        )
+        defer { try? FileManager.default.removeItem(at: helperlessDir) }
+        let empty = try await helperlessRunner.run(
+            ["config", "--show-origin", "--get-all", "credential.helper"],
+            throwOnNonZero: false
+        )
+        #expect(empty.stdoutString.isEmpty, "the helperless fixture must see NO helpers")
     }
 
     private func credsFile(_ dir: URL) -> URL {

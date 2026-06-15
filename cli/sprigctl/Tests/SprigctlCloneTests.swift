@@ -118,17 +118,21 @@ struct SprigctlCloneTests {
 
     @Test("--browse without a stored token names both connect paths")
     func browseWithoutTokenGuides() async throws {
-        // cwd is a repo whose helper chain is reset + empty, so the
-        // token lookup is deterministically nil regardless of any
-        // machine-wide credential helper.
+        // The spawned sprigctl's git is environment-isolated from
+        // every ambient credential helper (quirk G2 — the
+        // `credential.helper=""` reset idiom is not honored by
+        // git 2.54's Windows build), so the token lookup is
+        // deterministically nil and NO network is ever reached.
         let repo = try Sprigctl.mkRepo("clone-notoken")
         defer { try? FileManager.default.removeItem(at: repo) }
         try await Sprigctl.initRepo(at: repo)
-        try await Sprigctl.spawnGit(["config", "credential.helper", ""], cwd: repo)
+        let home = repo.appendingPathComponent("fixture-home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
         let out = try await Sprigctl.run(
             ["clone", "--browse", "--provider", "github"],
-            cwd: repo
+            cwd: repo,
+            environment: Sprigctl.credentialIsolationEnvironment(home: home)
         )
         #expect(out.exitCode != 0)
         #expect(out.stderr.contains("not connected to github"))

@@ -54,12 +54,43 @@ enum Sprigctl {
     /// also drained via async tasks BEFORE the wait; doing it after
     /// (the previous code) risks a separate pipe-buffer deadlock when
     /// stdout/stderr exceeds ~64 KB and the child blocks writing.
-    static func run(_ args: [String], cwd: URL? = nil, stdin: Data? = nil) async throws -> Captured {
+    /// Environment that makes a spawned sprigctl's git see ONLY the
+    /// fixture repo's local config: `GIT_CONFIG_NOSYSTEM` disables
+    /// the system + ProgramData scopes (where Git Credential Manager
+    /// lives on Windows hosts), and the HOME/XDG redirects move the
+    /// global config to an empty directory. Needed because the
+    /// `credential.helper=""` chain-reset idiom is not honored by
+    /// git 2.54's Windows build (quirk G2) — without this, hosted
+    /// CI's GCM leaks stored secrets across credential fixtures.
+    ///
+    /// USERPROFILE is deliberately NOT redirected: Git for Windows
+    /// prefers HOME when set (verified on git 2.54 — the effective
+    /// chain is exactly the local entry), and redirecting
+    /// USERPROFILE breaks the spawned process's own runtime
+    /// (FoundationNetworking init died silently in `forge login`).
+    static func credentialIsolationEnvironment(home: URL) -> [String: String] {
+        [
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "HOME": home.path,
+            "XDG_CONFIG_HOME": home.path
+        ]
+    }
+
+    static func run(
+        _ args: [String],
+        cwd: URL? = nil,
+        stdin: Data? = nil,
+        environment: [String: String]? = nil
+    ) async throws -> Captured {
         let binary = try locateBinary()
         let process = Process()
         process.executableURL = binary
         process.arguments = args
         process.currentDirectoryURL = cwd
+        if let environment {
+            process.environment = ProcessInfo.processInfo.environment
+                .merging(environment) { _, override in override }
+        }
         let outPipe = Pipe()
         let errPipe = Pipe()
         process.standardOutput = outPipe
