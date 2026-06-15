@@ -152,6 +152,15 @@ public enum TaskWindowVocabulary {
     public static let rebaseDirtyWorktree =
         "You have unsaved changes — commit or set them aside first."
 
+    // MARK: - Revert (ADR 0084)
+
+    public static let revertConflicted =
+        "Undoing that commit hit conflicts — resolve them in the Conflicts window, or abort the revert to put everything back."
+
+    public static let revertMergeCommit = "That's a merge commit — undoing it isn't offered yet."
+
+    public static let revertUnknownCommit = "That commit isn't in this repository."
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the
