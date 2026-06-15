@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
 
+# Cancel a superseded run when a newer commit lands on the same ref
+# (a PR push or a main push). Keyed on workflow + ref, so the three
+# OS jobs (Linux/macOS/Windows) never cancel each other — only a
+# prior run of THIS workflow on THIS branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-portable:
     runs-on: ubuntu-24.04
