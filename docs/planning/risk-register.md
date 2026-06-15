@@ -6,7 +6,16 @@ Severity = likelihood × impact, both 1 (low) – 5 (high). 25 = existential, 1 
 
 ## Active risks
 
-### R1 — swift-cross-ui maturity (severity 12)
+### R1 — swift-cross-ui maturity (severity 12 → 8, spike 2026-06-11)
+
+> **Spike result (`docs/research/swift-cross-ui-spike-2026-06.md`):** the compile half
+> is retired — SwiftCrossUI + WinUIBackend build clean on our exact Windows snapshot
+> toolchain (774 s cold, zero errors), and the actor-VM binding shape compiles (R16's
+> compile half). Remaining exposure: runtime behavior (state propagation, widget
+> coverage, WindowsAppRuntime packaging) — verified at the interactive M3-Win spike on
+> a desktop session. ADR 0055's WinUI 3 fallback trigger is now runtime/maturity
+> findings, not compile risk.
+
 
 - **Likelihood:** 3. The framework is younger than SwiftUI on macOS; gaps and rough edges surface as M3-Win begins.
 - **Impact:** 4. Worst case forces Sprig to fall back to native WinUI 3 in C++/WinRT (per ADR 0055), which loses the view-model code-share win and stretches the calendar.
@@ -106,8 +115,9 @@ Severity = likelihood × impact, both 1 (low) – 5 (high). 25 = existential, 1 
 - **Mitigation:** 24-hour recovery target (`docs/ci/self-hosted.md`). Fallback path: temporary build on maintainer's primary Mac. Keychain backup procedure with annual restore drill.
 - **Owner:** maintainer.
 
-### R16 — Actor-VM ↔ shell binding ergonomics unproven (severity 9) *(added 2026-06-11)*
+### R16 — Actor-VM ↔ shell binding ergonomics unproven (severity 9) *(added 2026-06-11; compile half cleared same day)*
 
+- **Spike note (2026-06-11):** the swift-cross-ui compile half is cleared — `Button { Task { await actorVM.verb() } }` builds clean on Windows (`docs/research/swift-cross-ui-spike-2026-06.md`). The open half is **runtime**: state propagation back into the view and main-thread semantics, on both shells — still gated by the M3 spike-first rule below.
 - **Likelihood:** 3. All 14 `TaskWindowKit` view models are Swift actors; the documented consumption pattern ("SwiftUI wraps reads in `Task` from `@MainActor`") is plausible but has never been exercised against a real shell. swift-cross-ui's story is even less proven. If the pattern is wrong (e.g. shells want `@Observable` main-actor façades), every VM shares the flaw.
 - **Impact:** 3. A pattern rework across 14 VMs mid-M3, or — worse — per-window ad-hoc workarounds that diverge the two shells.
 - **Mitigation:** the M3 **spike-first gate** (`milestones.md`): one real window bound to one existing VM per shell *before* mass window-building; any pattern change lands once, as an ADR, while it's cheap. The swift-cross-ui half runs early on the existing Windows VM rig.
