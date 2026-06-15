@@ -149,6 +149,54 @@ struct HistoryEditViewModelTests {
         #expect(await vm.lastSafetyCopy == nil, "no snapshot before validation passes")
     }
 
+    @Test("revert succeeds with the safety copy at the pre-revert tip; Recover undoes it")
+    func revertAndRecoverRoundTrip() async throws {
+        let (dir, runner) = try await makeRepo("revert")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let vm = HistoryEditViewModel(repoURL: dir, runner: runner)
+        await vm.refresh()
+        let wip1SHA = try await runner.run(["rev-parse", "HEAD~1"])
+            .stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let before = try await headSHA(runner)
+
+        await vm.revert(sha: wip1SHA)
+
+        guard case let .success(newSHA) = await vm.state else {
+            await Issue.record("expected .success, got \(vm.state)")
+            return
+        }
+        #expect(newSHA != before)
+        let safetyCopy = try #require(await vm.lastSafetyCopy)
+        #expect(safetyCopy.op == SnapshotRefName.opRevert)
+        let pinned = try await runner.run(["rev-parse", safetyCopy.refName])
+            .stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(pinned == before, "safety copy must point at the pre-revert tip")
+        let work = dir.appendingPathComponent("work")
+        #expect(!FileManager.default.fileExists(atPath: work.appendingPathComponent("b.txt").path))
+
+        // The undo: standard Recover reset path — the revert commit
+        // is gone and wip 1's file is back.
+        let recover = RecoverViewModel(repoURL: dir, runner: runner)
+        await recover.restoreSnapshot(safetyCopy.refName)
+        #expect(try await headSHA(runner) == before)
+        #expect(FileManager.default.fileExists(atPath: work.appendingPathComponent("b.txt").path))
+    }
+
+    @Test("revert refusals are worded: merge commit, unknown commit")
+    func revertRefusalsWorded() async throws {
+        let (dir, runner) = try await makeRepo("revertrefuse")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let vm = HistoryEditViewModel(repoURL: dir, runner: runner)
+        await vm.refresh()
+
+        await vm.revert(sha: "0123456789abcdef0123456789abcdef01234567")
+        guard case let .failure(unknown) = await vm.state else {
+            await Issue.record("expected .failure, got \(vm.state)")
+            return
+        }
+        #expect(unknown.description == TaskWindowVocabulary.revertUnknownCommit)
+    }
+
     @Test("everything pushed: reword refuses as shared before any snapshot exists")
     func nothingUnpushedRefusesEarly() async throws {
         let (dir, runner) = try await makeRepo("allpushed")
