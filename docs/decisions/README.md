@@ -93,6 +93,7 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0081 | Forge sign-in — OAuth device flow, client ids injected                     | accepted |
 | 0082 | History editing — unpushed-only, snapshot-first (reword + squash)          | accepted |
 | 0083 | Interactive-rebase engine — printf todo over git's own sequencer           | accepted |
+| 0085 | Stacked-branch restack engine — frozen fork-point over git's rebase        | accepted |
 
 ADRs 0001–0053 were ratified simultaneously in the initial scaffolding, based on the planning dialogue captured in the master plan file. Subsequent ADRs (0054+) follow the normal one-per-PR cadence.
 

@@ -8,6 +8,9 @@ pointer (the ADR carries the detail — see CONTRIBUTING).
 
 ## [Unreleased]
 
+### Added
+- **Stacked-branch restack engine (new ADR 0085, ADR 0051 substrate)** — `GitCore.StackOps` replays a stacked child onto its moved parent via `git rebase --onto` over a **frozen recorded fork-point** (`branch.<child>.sprigBase`, re-frozen after each restack); spike-pinned to survive parent rewrites where a live merge-base spuriously conflicts. Conflicts park git's rebase for the resolver (branch-tagged); `StackRestackViewModel` snapshots the child's pre-restack tip (medium tier, only on state-changing outcomes) and restores the user's branch. Single-child v1; the multi-branch walk is deferred (needs the `SnapshotWriter` collision uniquifier). Per ADR 0051's ratified safety amendment, restack is **trunk-immutable** — it rewrites the author-owned child (pushed or not), never the parent/trunk, and never auto-pushes. 17 new tests.
+
 ### Changed
 - **Plan vendored + planning docs realigned (M2.5 checkpoint)** — the master plan now lives in-repo (`docs/planning/master-plan.md`) after the original's loss; 53 stub ADRs re-pointed; ADR 0051 expanded in place; M2.5 checkpoint + re-scoped M3 in roadmap/milestones; slice gate codified (`docs/ci/slice-gate.md`); `VM-ENV-1` filed; R14 reframed/R16 added. Force-push stays in v1 behind the full high tier (master-plan §2.5/§10).
 

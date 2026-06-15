@@ -49,6 +49,11 @@ struct TaskWindowVocabularyTests {
             TaskWindowVocabulary.invalidRebasePlan,
             TaskWindowVocabulary.rebaseConflictHandoff,
             TaskWindowVocabulary.rebaseDirtyWorktree,
+            TaskWindowVocabulary.restackNothingToRestack,
+            TaskWindowVocabulary.restackNoParentRecorded,
+            TaskWindowVocabulary.restackForkPointDiverged,
+            TaskWindowVocabulary.restackStackCycle,
+            TaskWindowVocabulary.restackNotCheckedOut,
             TaskWindowVocabulary.cancelled("Clone"),
             TaskWindowVocabulary.cancelled()
         ]
