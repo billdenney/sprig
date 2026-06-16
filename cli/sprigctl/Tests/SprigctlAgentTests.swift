@@ -39,17 +39,16 @@ struct SprigctlAgentTests {
         // diff that the broadcaster fans out as one envelope.
         try Sprigctl.write("v2\n", to: repo.appendingPathComponent("a.txt"))
 
-        // `--duration 2.5` rather than something tighter so this test
-        // is robust to Windows's ~2 s filesystem-propagation latency.
-        // On Windows, the `v2\n` write above may not be visible to the
-        // `git status` subprocess that `RepoAgent` spawns until ~2 s
-        // after the write returns; the agent must keep running long
-        // enough for the polling watcher to observe the change after
-        // it propagates. macOS/Linux see the change instantly so the
-        // 2.5 s budget is just slack on those platforms.
+        // `--duration 8` is a safety cap, not a tight deadline. It must
+        // cover Windows's ~2 s filesystem-propagation latency (the
+        // `v2\n` write may not be visible to the agent's `git status`
+        // subprocess until ~2 s later) AND a loaded hosted runner's slow
+        // agent-process spawn + first git status — on macos-15 under
+        // full-suite load the prior 2.5 s budget left too little margin.
+        // A healthy run emits the badge in well under a second.
         let out = try await Sprigctl.run([
             "agent",
-            "--duration", "2.5",
+            "--duration", "8",
             "--polling-interval", "0.1",
             repo.path
         ])
@@ -261,15 +260,17 @@ struct SprigctlAgentTests {
             to: prefsURL
         )
 
-        // `--duration 4.0`: the fire-on-start fetch is a local-file
-        // remote and completes in milliseconds on macOS/Linux; the
-        // budget is for the Windows VM's process-spawn + filesystem
-        // latency (quirk-C class, ~2 s worst case).
+        // `--duration 10`: the fire-on-start fetch is a local-file
+        // remote and completes in milliseconds on macOS/Linux, but the
+        // duration is a safety cap that must outlast the slowest case —
+        // the Windows VM's process-spawn + filesystem latency (quirk-C
+        // class) AND a loaded hosted macos-15 runner's slow agent spawn.
+        // A healthy run lands the fetch in well under a second.
         let out = try await Sprigctl.run([
             "agent",
             "--polling",
             "--polling-interval", "0.5",
-            "--duration", "4.0",
+            "--duration", "10",
             "--preferences", prefsURL.path,
             subscriber.path
         ])
