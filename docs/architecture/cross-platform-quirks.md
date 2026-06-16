@@ -270,6 +270,31 @@ These are cases where the same Swift source code compiles on one platform's tool
 - **Where in the repo** — `packages/GitCore/Sources/GitCore/ProcessExit.swift`; used by `cli/sprigctl/Tests/SprigctlSupport.swift` and `packages/GitCore/Sources/GitCore/Runner.swift`.
 - **U:** Pre-existing Foundation issue; `ProcessTerminationGate` is the standard workaround pattern in Swift-on-server ecosystems.
 
+### E6. `shutdown(2)` on a LISTENING socket wakes `accept(2)` on Linux but NOT on Darwin
+
+- **Symptom** — both `lint-build-test (macos-14)` and `(macos-15)` froze ~30 s into `swift test` and were hard-killed by the 780 s watchdog (job then times out at `timeout-minutes: 15`). Red on `main`, identically, for every commit once the UDS server-close tests landed — not attributable to any one PR. The watchdog's `sample` dumps showed threads parked in `__accept` (`UnixSocketServer.startAcceptThread`, `UnixSocketServer.swift:144`); ~1166/1172 tests had closed, then the log stopped advancing because a couple of tests were `await`-parked forever (a parked async task occupies no thread — *not* an fd/CPU exhaustion signature; lsof showed a flat ~30 fds throughout).
+- **Root cause** — `UnixSocketServer` runs a *detached* accept thread blocked in `accept(2)`, and `close()` woke it by calling `shutdown(listenFD, SHUT_RDWR)`. On **Linux** that unblocks the parked `accept()` (it returns `EINVAL`). On **Darwin** `shutdown()` on a *listening* (non-connected) socket fails `ENOTCONN` and leaves `accept()` parked. So on macOS `close()` never stopped the accept thread, the `connections` `AsyncStream` never `finish()`ed, and any test doing `await connections.next() == nil` (`serverCloseSemantics`, `rejectedPeerNeverServed`, the agent UDS teardown) parked forever — and since Swift Testing waits for *all* tests, the whole run hung. (`shutdown()` on a *connected* socket DOES wake a blocked `read(2)` on both platforms, so `UnixSocketTransport`'s reader close was fine — only the listening `accept` diverged.)
+- **Fix pattern** — don't block in `accept()` and depend on a wake at all. Make the listen fd **non-blocking** and `poll(2)` it with a timeout, re-checking a `closed` flag each tick; `close()` just flips the flag (+ unlinks):
+  ```swift
+  // init: fcntl(listenFD, F_SETFL, ... | O_NONBLOCK)
+  // accept loop:
+  while true {
+      if self?.isClosed != false { return }
+      var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+      let ready = poll(&pfd, 1, 250 /* ms */)
+      if ready <= 0 { if ready < 0, errno != EINTR { return }; continue }
+      let client = accept(fd, nil, nil)
+      if self?.isClosed != false { if client >= 0 { _ = systemClose(client) }; return }
+      if client < 0 { if [EAGAIN, EWOULDBLOCK, EINTR, ECONNABORTED].contains(errno) { continue }; return }
+      // … peer policy + yield
+  }
+  // close()/deinit: markClosed(); unlink(socketPath)   // no wake syscall, no fd alloc
+  ```
+  A self-connection wake also works portably but allocates a fresh fd at `close()` time, which can fail under the very fd pressure teardown must survive — the poll-timeout needs nothing at close but the flag flip. The mechanism has no Linux/macOS divergence, so the Linux regression test exercises exactly what macOS runs.
+  - **Sub-gotcha the non-blocking listener forces:** on **BSD/Darwin, `accept(2)` INHERITS the listener's `O_NONBLOCK`** (Linux does not), so each accepted fd must be set back to blocking (`fcntl(client, F_SETFL, flags & ~O_NONBLOCK)`) — otherwise the accepted transport's reader `read(2)` returns `EAGAIN` immediately and the connection closes the instant it opens (surfaced macOS-only as `Caught error: closed` across the round-trip tests + the agent UDS e2e). This is invisible on Linux, so the only proof is hosted-macOS CI.
+- **Where in the repo** — `packages/TransportKit/Sources/Linux/UnixSocketServer.swift` (`O_NONBLOCK` listen fd + the `poll`-timeout accept loop); regression tests in `UnixSocketTransportTests.swift` ("a server dropped without close() finishes connections …").
+- **U:** Well-documented BSD-vs-Linux divergence, not an upstream bug. Relying on `shutdown(listenfd)` to wake a listening `accept()` is a Linux-ism; the portable answers are a `poll`-with-timeout loop (used here) or a self-pipe/self-connection wake. Mirror this for any future listening-socket loop.
+
 ---
 
 ## F. Known upstream bugs we work around
