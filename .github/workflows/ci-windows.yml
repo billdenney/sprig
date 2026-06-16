@@ -48,6 +48,32 @@ jobs:
           git --version
           echo "git resolved to: $(which git)"
 
+      - name: Scope Defender off the work + temp dirs (+ diagnose scanner state)
+        # PreferencesViewModelTests' atomic rename intermittently hits
+        # ERROR_SHARING_VIOLATION under ~1000-test parallel churn, expiring
+        # its waitForFile budget (the hosted-Windows flake). A Foundation
+        # Process child does NOT inherit the file handle — refuted by a
+        # Windows-VM probe (2026-06-16, see audit-followups VM-ENV-1) — so
+        # the holder is an external scanner/FS, with the real-time scanner
+        # the leading candidate. Adding work/temp exclusions is low-risk on
+        # an ephemeral CI runner; whether it HELPS depends on the holder.
+        # The diagnostic block below resolves that empirically: it prints
+        # the scanner's pre-existing state + exclusions BEFORE we touch
+        # anything, so the next red/green tells us if the scanner was even
+        # active (a prior note claimed hosted runners already ship
+        # exclusions — this confirms or refutes it). Best-effort; never
+        # fails the job.
+        shell: pwsh
+        run: |
+          Write-Host "== Defender state BEFORE our changes =="
+          try { Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, AntivirusEnabled, AMRunningMode | Format-List } catch { Write-Host "Get-MpComputerStatus unavailable: $_" }
+          try { (Get-MpPreference).ExclusionPath | ForEach-Object { Write-Host "pre-existing ExclusionPath: $_" } } catch {}
+          try {
+            Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, $env:TMP -ErrorAction SilentlyContinue
+            Add-MpPreference -ExclusionProcess 'swift.exe','swiftc.exe','git.exe' -ErrorAction SilentlyContinue
+            Write-Host "applied work/temp/process exclusions"
+          } catch { Write-Host "Defender exclusion not applied: $_" }
+
       - name: Build packages
         run: swift build
 
