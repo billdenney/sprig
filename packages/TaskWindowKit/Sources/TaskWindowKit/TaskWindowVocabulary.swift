@@ -161,6 +161,23 @@ public enum TaskWindowVocabulary {
 
     public static let revertUnknownCommit = "That commit isn't in this repository."
 
+    // MARK: - Stacked restack (ADR 0085)
+
+    public static let restackNothingToRestack =
+        "This branch is already on top of its parent — nothing to replay."
+
+    public static let restackNoParentRecorded =
+        "Record which branch this one is stacked on before restacking."
+
+    public static let restackForkPointDiverged =
+        "This branch has moved away from where it was stacked — re-record its parent before restacking."
+
+    public static let restackStackCycle =
+        "These branches are stacked in a loop — fix the recorded parents first."
+
+    public static let restackNotCheckedOut =
+        "Switch to that branch before restacking it."
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the

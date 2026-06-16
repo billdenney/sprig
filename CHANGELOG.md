@@ -9,6 +9,7 @@ pointer (the ADR carries the detail — see CONTRIBUTING).
 ## [Unreleased]
 
 ### Added
+- **Stacked-branch restack engine (new ADR 0085, ADR 0051 substrate)** — `GitCore.StackOps` replays a stacked child onto its moved parent via `git rebase --onto` over a **frozen recorded fork-point** (`branch.<child>.sprigBase`, re-frozen after each restack, with a `sprigPendingBase` self-heal across the conflict-resolve path); spike-pinned to survive parent rewrites where a live merge-base spuriously conflicts. Conflicts park git's rebase for the resolver (branch-tagged); `StackRestackViewModel` restacks the checked-out branch only and snapshots its pre-restack tip (medium tier, only on state-changing outcomes). Single-child v1; the multi-branch walk is deferred (needs the `SnapshotWriter` collision uniquifier). Per ADR 0051's ratified safety amendment, restack is **trunk-immutable** — it rewrites the author-owned child (pushed or not), never the parent/trunk, and never auto-pushes. Adversarially reviewed (caught two real bugs the passing tests missed). 19 new tests.
 - **Revert verb (new ADR 0084)** — `HistoryOps.revert(sha:)`: forward-fix a commit with `git revert --no-edit`; conflicts park `REVERT_HEAD` for the resolver, merge commits and unknown SHAs are typed refusals. `HistoryEditViewModel.revert(sha:)` pairs the medium-tier snapshot; Recover round-trip pinned. 6 new tests.
 
 ### Changed

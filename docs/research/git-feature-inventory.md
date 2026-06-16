@@ -46,6 +46,14 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 
 - `git clone [--recurse-submodules] [--depth N] <source> <target>` — argv built by `CloneRequest.gitArguments()` (unit-pinned); submodule recursion defaults on per master plan §10. Note: local-path clones ignore `--depth`; the `file://` transport honors it (test-pinned).
 
+### Stacked-branch restack (ADR 0085) — engine invocations
+
+`GitCore.StackOps` + `TaskWindowKit.StackRestackViewModel`:
+
+- `git config branch.<child>.sprigParent <parent>` / `branch.<child>.sprigBase <fork-sha>` — the recorded stack link (local scope; sprigBase frozen at `git merge-base <parent> <child>`, re-frozen to the parent tip after each restack). Read via `config --get`; the parent-graph inversion uses `config --get-regexp ^branch\..*\.sprigparent$` (git lowercases the variable name in output).
+- `git merge-base --is-ancestor <recordedSprigBase> <child>` — the fork-point staleness guard; non-ancestor → `.refusedForkPointDiverged`.
+- `git rebase --onto <parentCurrentTip> <recordedSprigBase> <child>` — the replay; the frozen fork survives parent rewrites where a live merge-base would replay orphaned parent commits (ADR 0085 rejected options, spike-pinned). Conflict discrimination reuses the rebase-marker + `ls-files -u -z` pattern; `git rebase --abort` is the parked-state undo.
+
 ### Rebase plan (ADR 0083) — engine invocations
 
 `GitCore.RebasePlanOps` + `TaskWindowKit.RebasePlanViewModel`:

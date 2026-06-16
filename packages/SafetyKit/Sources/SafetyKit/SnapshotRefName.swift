@@ -115,6 +115,10 @@ public struct SnapshotRefName: Equatable, Hashable, Sendable {
     public static let opReword = "reword"
     /// Combining the last N commits into one (ADR 0082).
     public static let opSquash = "squash"
+    /// Replaying a stacked child branch onto its moved parent
+    /// (`git rebase --onto`, ADR 0085). One snapshot per replayed
+    /// child, at the child's pre-restack tip.
+    public static let opRestack = "restack"
 
     // MARK: - Format internals (exposed for tests)
 

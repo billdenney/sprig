@@ -46,11 +46,31 @@ restacked with one verb.** The committed scope, in dependency order:
 `rebase.updateRefs=true` (ADR 0049's defaults) does part of the local job on new-enough
 git; Sprig's restack verb subsumes it where unavailable and adds the safety pairing.
 
+## Safety model (amended 2026-06-11, maintainer-ratified)
+
+The original sketch said the restack verb carried "unpushed-only protection for any
+commit already on a remote." That wording is **superseded**: a stacked PR's branches are
+pushed by definition, so unpushed-only protection would forbid the feature entirely.
+The correct, ratified model is **trunk/parent-immutability**:
+
+- Restack **never rewrites the parent or trunk** — they are read-only inputs to
+  `git rebase --onto`. The only ref that moves is the **author-owned child** branch,
+  advancing through its own commits onto the parent's new tip.
+- Rewriting the child is the legitimate stacked-PR operation; the child is expected to be
+  force-pushed afterward (the stacked-PR contract). **Restack itself emits no push** —
+  publishing the rewritten child is the separate **high-tier force-push verb** (typed
+  phrase, snapshot, persistent banner, always `--force-with-lease --force-if-includes`).
+- Restack is therefore ADR 0033 **medium tier** (snapshot per branch + 24 h undo), and
+  the shared-history `branch -r --contains` guard (ADR 0082/0083) is deliberately omitted
+  — it would block the feature's purpose. This preserves master-plan §2.5's "shared
+  history immutable" by reading it as **trunk-immutability**, which restack honors by
+  construction.
+
 ## Consequences
 
-- ADR 0083 (2026-06-11) ships the substrate: plan-driven rebase with conflict parking
-  and snapshot pairing. The restack verb is "that engine, different base, applied down
-  the stack" — the next engine slice on this track.
+- ADR 0083 (2026-06-11) ships the rebase substrate; **ADR 0085 (2026-06-11) ships the
+  restack engine** — `git rebase --onto` over a frozen recorded fork-point, single-child
+  v1. The multi-branch depth-first walk is the next slice on this track.
 - Stack state lives in git config, not Sprig-private files — portable, inspectable,
   and survives Sprig being uninstalled.
 - Forge retargeting requires the PR-verbs half of ForgeKit (list/edit), which is also

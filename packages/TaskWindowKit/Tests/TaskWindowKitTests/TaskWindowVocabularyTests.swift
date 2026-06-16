@@ -52,6 +52,11 @@ struct TaskWindowVocabularyTests {
             TaskWindowVocabulary.revertConflicted,
             TaskWindowVocabulary.revertMergeCommit,
             TaskWindowVocabulary.revertUnknownCommit,
+            TaskWindowVocabulary.restackNothingToRestack,
+            TaskWindowVocabulary.restackNoParentRecorded,
+            TaskWindowVocabulary.restackForkPointDiverged,
+            TaskWindowVocabulary.restackStackCycle,
+            TaskWindowVocabulary.restackNotCheckedOut,
             TaskWindowVocabulary.cancelled("Clone"),
             TaskWindowVocabulary.cancelled()
         ]
