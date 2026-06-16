@@ -74,6 +74,11 @@
                 guard listen(fd, 16) == 0 else {
                     throw TransportError.sendFailed(reason: "listen: errno \(errno)")
                 }
+                // Non-blocking so the accept loop can poll(2) with a
+                // timeout and never park in accept() — see
+                // startAcceptThread() for why we don't block-and-wake.
+                let flags = fcntl(fd, F_GETFL, 0)
+                if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
             } catch {
                 _ = systemClose(fd)
                 throw error
@@ -86,22 +91,41 @@
             startAcceptThread()
         }
 
-        /// Stop accepting: wakes the accept loop (which closes the
-        /// listening fd on exit), finishes ``connections``, and
-        /// removes the socket file. Already-yielded transports stay
+        /// How long the accept loop blocks in `poll(2)` before
+        /// re-checking ``closed``. This is the worst-case latency for
+        /// ``close()`` to retire the accept thread; idle cost is one
+        /// wakeup per tick (negligible).
+        private static let acceptPollTimeoutMillis: Int32 = 250
+
+        /// Stop accepting: the accept loop observes ``closed`` on its
+        /// next `poll(2)` tick (≤ ``acceptPollTimeoutMillis`` later),
+        /// finishes ``connections``, and closes the listening fd; this
+        /// also unlinks the socket file. Already-yielded transports stay
         /// usable. Idempotent.
         public func close() {
-            lock.lock()
-            let alreadyClosed = closed
-            closed = true
-            lock.unlock()
-            guard !alreadyClosed else { return }
-            // shutdown(2) on a listening socket wakes a blocked
-            // accept(2) on both Linux (EINVAL) and Darwin
-            // (ECONNABORTED) — closing the fd out from under a
-            // blocked syscall would race fd reuse instead.
-            _ = shutdown(listenFD, Int32(SHUT_RDWR))
+            guard markClosed() else { return }
             _ = unlink(socketPath)
+        }
+
+        deinit {
+            // Safety net for a server dropped WITHOUT `close()`: flipping
+            // the flag the accept loop polls is enough for its detached
+            // thread to exit instead of parking forever; also drop the
+            // socket file. (No fd allocation here — see startAcceptThread.)
+            if markClosed() {
+                _ = unlink(socketPath)
+            }
+        }
+
+        /// Idempotent closed-flag transition. Returns true only for the
+        /// call that performed it, so exactly one of close()/deinit
+        /// unlinks the socket file.
+        private func markClosed() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if closed { return false }
+            closed = true
+            return true
         }
 
         private func startAcceptThread() {
@@ -112,17 +136,49 @@
                     continuation.finish()
                     _ = systemClose(fd)
                 }
+                // We poll(2) with a timeout instead of blocking in
+                // accept(2) and relying on a wake. No portable signal
+                // reliably unblocks a parked listening accept(): on Darwin
+                // shutdown(2) on a listening socket fails ENOTCONN and
+                // leaves accept() parked (only Linux wakes it, with
+                // EINVAL) — that stranded the accept thread on macOS, so
+                // `connections` never finished and the suite hung. A
+                // self-connection wake would work but needs a fresh fd at
+                // close() time, which fails under fd pressure. Polling a
+                // non-blocking listen fd needs nothing at close() but the
+                // `closed` flip, which this loop notices within one tick.
                 while true {
+                    if self?.isClosed != false { return }
+                    var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                    let ready = poll(&pfd, 1, UnixSocketServer.acceptPollTimeoutMillis)
+                    if ready <= 0 {
+                        // 0 = timeout (re-check closed); <0 = EINTR/error.
+                        if ready < 0, errno != EINTR { return }
+                        continue
+                    }
                     let client = accept(fd, nil, nil)
-                    if client < 0 {
-                        if errno == EINTR { continue }
-                        // EINVAL / ECONNABORTED / EBADF: close() shut
-                        // the listener down (or a transient abort on
-                        // a dying connection — either way, if we're
-                        // closed, exit).
-                        if self?.isClosed != false { return }
-                        if errno == ECONNABORTED { continue }
+                    // Retired (or deallocated) while we polled? Drop
+                    // whatever we accepted and exit.
+                    if self?.isClosed != false {
+                        if client >= 0 { _ = systemClose(client) }
                         return
+                    }
+                    if client < 0 {
+                        // EAGAIN/EWOULDBLOCK: spurious readiness on the
+                        // non-blocking fd (a peer aborted before accept).
+                        // EINTR/ECONNABORTED: transient. All → re-poll.
+                        if errno == EAGAIN || errno == EWOULDBLOCK
+                            || errno == EINTR || errno == ECONNABORTED { continue }
+                        return
+                    }
+                    // Clear O_NONBLOCK on the accepted fd. On BSD/Darwin
+                    // accept(2) INHERITS the listening socket's
+                    // non-blocking flag (Linux does not); without this the
+                    // accepted UnixSocketTransport's reader read(2) returns
+                    // EAGAIN at once and the transport closes immediately.
+                    let clientFlags = fcntl(client, F_GETFL, 0)
+                    if clientFlags >= 0 {
+                        _ = fcntl(client, F_SETFL, clientFlags & ~O_NONBLOCK)
                     }
                     #if !canImport(Glibc)
                         var one: Int32 = 1

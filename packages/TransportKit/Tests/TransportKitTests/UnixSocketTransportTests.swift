@@ -238,5 +238,84 @@
             #expect(await accepted.next() == nil, "no transport for a rejected peer")
             await client.close()
         }
+
+        // MARK: - Leak safety nets (the macos-14/15 CI hang)
+
+        //
+        // A transport/server dropped WITHOUT close() must still wake and
+        // retire its detached reader/accept thread, or the parked thread
+        // strands its fd open. macOS caps a process at 256 fds, so a few
+        // dozen leaks across the suite exhaust descriptors and wedge the
+        // whole async runtime — which is exactly what froze macos-14/15
+        // ~30 s into the run until the watchdog hard-killed it. These two
+        // tests reproduce the leak deterministically (they time out
+        // before the deinit safety nets exist) and pin the fix.
+
+        /// True if `work` runs to completion before the deadline. On
+        /// timeout the work task is cancelled — an AsyncStream drain
+        /// ends cleanly on cancellation, so this never strands a task.
+        private func completesWithin(
+            seconds: Double,
+            _ work: @escaping @Sendable () async -> Void
+        ) async -> Bool {
+            await withTaskGroup(of: Bool.self) { group in
+                group.addTask { await work(); return true }
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    return false
+                }
+                let result = await group.next() ?? false
+                group.cancelAll()
+                return result
+            }
+        }
+
+        @Test("a transport dropped without close() shuts down its socket so the peer sees EOF")
+        func droppedTransportReleasesReader() async throws {
+            let path = makeSocketPath("drop-transport")
+            let server = try UnixSocketServer(socketPath: path)
+            defer { server.close() }
+            var accepted = server.connections.makeAsyncIterator()
+
+            let agentSide: UnixSocketTransport
+            do {
+                let client = try UnixSocketTransport.connect(path: path)
+                guard let a = await accepted.next() else {
+                    throw TransportError.sendFailed(reason: "accept produced no connection")
+                }
+                agentSide = a
+                // Keep `client` alive through accept, then let it drop at
+                // the end of this scope WITHOUT close(): deinit must
+                // shutdown its fd, which the kernel delivers as EOF to
+                // the agent side.
+                withExtendedLifetime(client) {}
+            }
+
+            let sawEOF = await completesWithin(seconds: 10) {
+                for await _ in agentSide.messages() {}
+            }
+            #expect(sawEOF, "dropping a client transport without close() must EOF the peer (deinit safety net)")
+            await agentSide.close()
+        }
+
+        @Test("a server dropped without close() finishes connections and unlinks the socket")
+        func droppedServerReleasesAcceptThread() async throws {
+            let path = makeSocketPath("drop-server")
+            let connections: AsyncStream<UnixSocketTransport>
+            do {
+                let server = try UnixSocketServer(socketPath: path)
+                connections = server.connections
+                withExtendedLifetime(server) {}
+            } // server drops here WITHOUT close()
+
+            let finished = await completesWithin(seconds: 10) {
+                for await _ in connections {}
+            }
+            #expect(finished, "dropping a server without close() must finish connections (deinit safety net)")
+            #expect(
+                !FileManager.default.fileExists(atPath: path),
+                "deinit must unlink the socket file"
+            )
+        }
     }
 #endif
