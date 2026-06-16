@@ -107,6 +107,23 @@
             _ = shutdown(fd, Int32(SHUT_RDWR))
         }
 
+        deinit {
+            // Safety net for a transport dropped WITHOUT `close()`: its
+            // detached reader thread would otherwise stay parked forever
+            // in read(2), holding the fd open (the reader is the sole
+            // owner of the close, and only EOF or shutdown(2) wakes it).
+            // macOS caps a process at 256 fds by default, so a suite that
+            // leaks a few dozen of these exhausts descriptors and wedges
+            // the whole process — this was the macos-14/15 CI hang. Wake
+            // the reader exactly as close() does, but only when neither
+            // close() nor a reader-exit has already retired the transport
+            // (markClosed() returns false then) — otherwise we could
+            // shutdown a descriptor number the kernel has since reused.
+            if markClosed() {
+                _ = shutdown(fd, Int32(SHUT_RDWR))
+            }
+        }
+
         /// Synchronous closed-flag transition (NSLock's lock()/unlock()
         /// are unavailable in async contexts on the snapshot
         /// toolchain — quirk-C class). Returns true when this call

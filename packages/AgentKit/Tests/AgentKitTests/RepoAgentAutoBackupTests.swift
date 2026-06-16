@@ -52,8 +52,15 @@ struct RepoAgentAutoBackupTests {
         try await agent.start()
 
         // Await the backup ref within a generous Windows-friendly budget.
+        // 60 s, not 30 s: this is a live background loop (the agent's
+        // 50 ms backup tick spawns git per attempt) asserted under the
+        // full parallel suite on a 2-core hosted Windows runner. The
+        // tick *is* firing — it's CPU/process-spawn contention that can
+        // starve it past a tighter budget (VM-ENV-1 environmental flake
+        // class). The wait only bounds failure; a healthy run breaks the
+        // instant the ref appears.
         let backup = WorktreeBackup(runner: runner)
-        let deadline = Date().addingTimeInterval(30)
+        let deadline = Date().addingTimeInterval(60)
         var entries: [WorktreeBackupEntry] = []
         while Date() < deadline {
             entries = await (try? backup.backups()) ?? []

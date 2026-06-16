@@ -71,9 +71,18 @@ struct EndToEndAgentLoopTests {
         case unknown(kind: String)
     }
 
+    /// 30 s, not 5 s: the badge step exercises the whole live pipeline
+    /// (watcher → driver → refresher → store → broadcaster → sink →
+    /// transport), all async on the cooperative pool. On a 2-core hosted
+    /// Windows runner under the full parallel suite that chain can take
+    /// well over 5 s, which flaked this as `awaitInbound → nil` on CI
+    /// even though the transport itself works (the subscribeAck arrives
+    /// promptly). The budget only bounds the *failure* wait; a healthy
+    /// run returns the instant the event lands. Matches the 30 s
+    /// Windows-friendly budgets in RepoAgentAutoSync/AutoBackup tests.
     private func awaitInbound(
         on client: any Transport,
-        timeout: Duration = .seconds(5)
+        timeout: Duration = .seconds(30)
     ) async -> Inbound? {
         await withTaskGroup(of: Inbound?.self) { group in
             group.addTask {

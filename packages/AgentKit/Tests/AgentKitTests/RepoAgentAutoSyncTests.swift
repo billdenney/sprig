@@ -151,11 +151,21 @@ struct RepoAgentAutoSyncTests {
         }
         #expect(pulled, "auto-pull should fast-forward main and materialize incoming.txt")
 
+        // Poll for the fast-forward to become observable rather than
+        // reading once: on Windows the just-updated `refs/heads/main`
+        // can read stale from a fresh `git` process for up to ~2 s after
+        // the pull (kernel ref-cache flush — cross-platform-quirks E3),
+        // so a one-shot behind-check raced the pull and flaked on hosted
+        // Windows CI. `incoming.txt` already materialized (`pulled`), so
+        // the ff-pull happened; this only waits for the ref read to catch up.
         let sync = SyncOps(runner: runner)
-        let states = try await sync.branchSyncStates()
-        let main = try #require(states.first { $0.name == "main" })
-        #expect(main.behind == 0)
-        #expect(main.ahead == 0)
+        let synced = try await eventually {
+            guard let main = try await sync.branchSyncStates()
+                .first(where: { $0.name == "main" })
+            else { return false }
+            return main.behind == 0 && main.ahead == 0
+        }
+        #expect(synced, "auto-pull should fast-forward main to the remote tip (behind 0, ahead 0)")
         await agent.stop()
     }
 }

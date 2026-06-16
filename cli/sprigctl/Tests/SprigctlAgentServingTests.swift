@@ -28,13 +28,22 @@ extension SprigctlAgentTests {
             try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
             let socketPath = "/tmp/sprig-agent-e2e-\(UUID().uuidString.prefix(8)).sock"
 
-            // Agent process runs concurrently; generous duration so the
-            // whole handshake fits, but it exits on its own regardless.
+            // Agent process runs concurrently; the duration is a safety
+            // cap, not a tight deadline. 25 s, not 8: on a loaded
+            // hosted macos-15 runner the agent's own process spawn +
+            // UDS-server bring-up can eat several seconds before the
+            // client's connect-retry even succeeds, leaving too little
+            // of an 8 s life for the subscribe → dirty → poll →
+            // badgeChanged round-trip — the agent shut down first and
+            // the subscriber saw `subscriptionEnded(agent_shutdown)`
+            // instead (flaked macos-15 on PR #156 CI). The agent still
+            // exits on its own; a healthy run finishes the handshake in
+            // a few seconds regardless of the cap.
             let agentRun = Task {
                 try await Sprigctl.run([
                     "agent",
                     "--polling", "--polling-interval", "0.2",
-                    "--duration", "8",
+                    "--duration", "25",
                     "--socket", socketPath,
                     repo.path
                 ])
