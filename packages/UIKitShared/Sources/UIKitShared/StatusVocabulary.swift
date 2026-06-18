@@ -229,6 +229,8 @@ public enum StatusVocabulary {
             "\(branch) diverged: \(ahead) ahead, \(behind) behind"
         case let .secretInOutgoingCommits(path, rule, line):
             "\(path):\(line): possible \(rule) in outgoing commits"
+        case let .binaryTypeWithoutLFS(path, pattern):
+            "\(path): binary type (\(pattern)) not LFS-tracked"
         }
     }
 
@@ -259,6 +261,8 @@ public enum StatusVocabulary {
         case let .secretInOutgoingCommits(path, rule, line):
             "\(path) line \(line) in a commit you're about to push looks like a \(rule) — "
                 + "if it's real, rotate it now; removing it from a pushed commit doesn't un-leak it"
+        case let .binaryTypeWithoutLFS(path, pattern):
+            "\(path) is a binary type that bloats git history; track \(pattern) with LFS to keep clones fast"
         }
     }
 

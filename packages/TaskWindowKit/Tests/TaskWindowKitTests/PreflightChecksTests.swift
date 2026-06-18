@@ -81,6 +81,7 @@ struct PreflightBranchChecksTests {
         let outgoingSecret = PreflightWarning.secretInOutgoingCommits(
             path: "config.py", rule: "AWS Access Key ID", line: 3
         )
+        let binaryType = PreflightWarning.binaryTypeWithoutLFS(path: "art.psd", suggestedPattern: "*.psd")
         #expect(defaultBranch.railID == "committing-to-default-branch")
         #expect(detached.railID == "detached-head")
         #expect(large.railID == "large-staged-file-without-lfs")
@@ -89,6 +90,7 @@ struct PreflightBranchChecksTests {
         #expect(protectedBranch.railID == "pushing-to-protected-branch")
         #expect(forceConsequence.railID == "force-push-consequence")
         #expect(outgoingSecret.railID == "secret-in-outgoing-commits")
+        #expect(binaryType.railID == "binary-type-without-lfs")
     }
 
     private func syncState(
@@ -182,6 +184,38 @@ struct PreflightIntegrationTests {
 
     /// Threshold of 64 bytes so a ~100-byte file is "large".
     private let tinyThreshold = PreflightChecks(largeFileThresholdBytes: 64)
+
+    @Test("binary-type rail: fires on an untracked binary; quiet when suppressed / over-threshold / LFS-tracked")
+    func binaryTypeRail() async throws {
+        let (dir, runner) = try await makeRepo("binary-type")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data(repeating: 0x42, count: 100).write(to: dir.appendingPathComponent("art.psd"))
+        _ = try await runner.run(["add", "art.psd"])
+
+        let warnings = await PreflightChecks().binaryTypeWarnings(
+            stagedPaths: ["art.psd"], repoURL: dir, runner: runner
+        )
+        #expect(warnings == [.binaryTypeWithoutLFS(path: "art.psd", suggestedPattern: "*.psd")])
+
+        let suppressed = await PreflightChecks(suppressedRails: ["binary-type-without-lfs"])
+            .binaryTypeWarnings(stagedPaths: ["art.psd"], repoURL: dir, runner: runner)
+        #expect(suppressed.isEmpty, "suppressed rail stays quiet")
+
+        // An over-threshold binary is the size rail's, not double-warned.
+        try Data(repeating: 0x42, count: 100).write(to: dir.appendingPathComponent("clip.mp4"))
+        _ = try await runner.run(["add", "clip.mp4"])
+        let overThreshold = await tinyThreshold
+            .binaryTypeWarnings(stagedPaths: ["clip.mp4"], repoURL: dir, runner: runner)
+        #expect(overThreshold.isEmpty, "over-threshold binary belongs to the size rail")
+
+        // An LFS-tracked pattern silences it (uncommitted .gitattributes is honored by check-attr).
+        try Data("*.psd filter=lfs diff=lfs merge=lfs -text\n".utf8)
+            .write(to: dir.appendingPathComponent(".gitattributes"))
+        let tracked = await PreflightChecks().binaryTypeWarnings(
+            stagedPaths: ["art.psd"], repoURL: dir, runner: runner
+        )
+        #expect(tracked.isEmpty, "LFS-tracked binary type doesn't warn")
+    }
 
     @Test("staged secret fires the staged-secret rail; suppression and allowlist silence it")
     func stagedSecretRail() async throws {
