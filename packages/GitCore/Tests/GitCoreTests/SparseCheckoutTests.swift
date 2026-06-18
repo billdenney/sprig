@@ -174,24 +174,27 @@ struct SparseCheckoutTests {
         #expect(plan.blockedDrops.first?.reasons.contains(.stagedChange) == true)
     }
 
-    // Not on Windows: `git mv <dir> <Dir>` (a case-only *directory*
-    // rename) fails with EPERM on the Windows VM's filesystem — Windows
-    // can't rename a directory to a case-variant of itself in one step,
-    // so the on-disk case divergence this test needs can't be set up
-    // there. The case-fold logic under test is platform-independent
-    // (pure string folding gated on `core.ignorecase`) and the
-    // production fix protects Windows (NTFS, case-insensitive) users all
-    // the same; only this setup mechanism is Linux/macOS-only.
-    #if !os(Windows)
+    // Linux only: this test needs an on-disk folder whose dirent casing
+    // diverges from its committed casing, set up via `git mv beta Beta`
+    // — a case-only *directory* rename. That only works on a genuinely
+    // case-SENSITIVE filesystem; on case-insensitive macOS (APFS) and
+    // Windows (NTFS) the source and dest resolve to the same directory
+    // and `git mv` fails (EINVAL on macOS, EPERM on Windows). We force
+    // `core.ignorecase=true` on Linux to MODEL the case-insensitive
+    // behavior over a case-sensitive FS. The logic under test is plain
+    // string folding gated on `core.ignorecase`, identical on every
+    // platform, so Linux coverage validates the fix for the macOS/Windows
+    // users it actually protects (where a Finder/Explorer case rename can
+    // trigger the same divergence a test's `git mv` cannot).
+    #if os(Linux)
         @Test("planChange folds casing so a case-only rename in a dropped folder still blocks")
         func planChangeFoldsCaseRename() async throws {
             let (dir, runner) = try await makeRepo("casefold")
             defer { try? FileManager.default.removeItem(at: dir) }
-            // Model a case-insensitive filesystem (macOS/Windows default):
-            // a case-only rename makes `git status` report the on-disk
+            _ = try await runner.run(["config", "core.ignorecase", "true"])
+            // A case-only rename makes `git status` report the on-disk
             // dirent casing ("Beta/…") while `ls-tree` keeps the index
             // casing ("beta") — a case-sensitive guard would miss it.
-            _ = try await runner.run(["config", "core.ignorecase", "true"])
             _ = try await runner.run(["mv", "beta", "Beta"])
 
             let plan = try await SparseCheckout(runner: runner).planChange(to: ["alpha", "gamma"])
