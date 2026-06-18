@@ -138,6 +138,11 @@ Three warn-and-proceed rails evaluated in `SyncViewModel`'s push leg from the po
 - `pushingToProtectedBranch` / `forcePushConsequence` — **no new spawn**: pure reads of `SyncOps.branchSyncStates()` (the `for-each-ref` upstream/track parse the Sync verb already runs), keyed on the current branch name being a default branch and on `ahead>0 && behind>0` respectively.
 - `secretInOutgoingCommits` — reuses the `GitCore.SecretScan` outgoing-range scan above (`git diff --unified=0 --no-color @{u}..HEAD`), run only when there's an upstream and outgoing commits.
 
+### Type-aware LFS rail + Track-with-LFS (ADR 0091) — engine invocations
+
+- `binaryTypeWithoutLFS` rail (`LFSKit.LFSBinaryTypes`): for staged files whose extension is in the curated binary set and that are under the size threshold, `git check-attr -z --stdin filter` (via `LFSKit.LFSAttributeChecker`, same call the size rail uses) decides which aren't LFS-tracked. The extension match itself is a pure read of the porcelain paths — no spawn.
+- `LFSKit.LFSTrack.track(pattern:)` (the "Track with LFS" remedy): `git lfs version` (via `LFSInstall.probe`) to detect git-lfs — a typed `gitLFSNotAvailable` refusal if absent (never a silent install) — then `git lfs track <pattern>`, which edits `.gitattributes` (and does **not** run `git lfs install`).
+
 ## Newer-git features Sprig explicitly takes advantage of
 
 Master plan §10 has a per-version (2.40 → 2.46) breakdown. Highlights:

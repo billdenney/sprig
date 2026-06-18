@@ -76,6 +76,13 @@ public enum PreflightWarning: Sendable, Equatable {
     /// ``GitCore/SecretScan``). Carries file/rule/line, never the value.
     case secretInOutgoingCommits(path: String, rule: String, line: Int)
 
+    /// A staged file whose *type* (curated binary extension) warrants LFS
+    /// but isn't LFS-tracked — regardless of size (ADR 0091). The sibling
+    /// of ``largeStagedFileWithoutLFS``, covering the small-to-medium
+    /// binaries (`.psd`, `.docx`, short `.mp4`) the size rail misses.
+    /// One-click remedy: ADR 0029's "Track with LFS" for `suggestedPattern`.
+    case binaryTypeWithoutLFS(path: String, suggestedPattern: String)
+
     /// Stable per-rail identifier — the value the shells' "never
     /// show this again" checkbox writes into
     /// `AppPreferences.suppressedGuardRails` (ADR 0070 amendment)
@@ -91,6 +98,7 @@ public enum PreflightWarning: Sendable, Equatable {
         case .pushingToProtectedBranch: "pushing-to-protected-branch"
         case .forcePushConsequence: "force-push-consequence"
         case .secretInOutgoingCommits: "secret-in-outgoing-commits"
+        case .binaryTypeWithoutLFS: "binary-type-without-lfs"
         }
     }
 }
@@ -209,6 +217,43 @@ public struct PreflightChecks: Sendable {
                 sizeBytes: $0.size,
                 thresholdBytes: largeFileThresholdBytes
             ) }
+    }
+
+    /// Type-aware LFS check (ADR 0091): staged files whose curated binary
+    /// *type* warrants LFS but that aren't LFS-tracked — the small-to-medium
+    /// binaries (`.psd`, `.docx`, short `.mp4`) the size rail
+    /// (``largeStagedFileWithoutLFS``) misses. Files at or over the size
+    /// threshold are left to that rail, so a file never gets two banners.
+    /// Best-effort; skipped when suppressed or nothing is staged.
+    public func binaryTypeWarnings(
+        stagedPaths: [String],
+        repoURL: URL,
+        runner: Runner,
+        binaryTypes: LFSBinaryTypes = LFSBinaryTypes()
+    ) async -> [PreflightWarning] {
+        guard !suppressedRails.contains("binary-type-without-lfs"), !stagedPaths.isEmpty else { return [] }
+        let candidates: [(path: String, pattern: String)] = stagedPaths.compactMap { path in
+            guard binaryTypes.matches(path: path),
+                  let pattern = binaryTypes.suggestedPattern(for: path)
+            else { return nil }
+            // Over-threshold binaries are the size rail's; skip them here.
+            let url = repoURL.appendingPathComponent(path)
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path))
+                .flatMap { ($0[.size] as? NSNumber)?.int64Value }
+            if let size, size > largeFileThresholdBytes { return nil }
+            return (path, pattern)
+        }
+        guard !candidates.isEmpty else { return [] }
+
+        guard let results = try? await LFSAttributeChecker.check(
+            paths: candidates.map(\.path),
+            runner: runner
+        ) else { return [] }
+        let lfsTracked = Set(results.filter(\.isLFS).map(\.path))
+
+        return candidates
+            .filter { !lfsTracked.contains($0.path) }
+            .map { .binaryTypeWithoutLFS(path: $0.path, suggestedPattern: $0.pattern) }
     }
 
     /// Staged-secret check (ADR 0092): run ``GitCore/SecretScan`` over

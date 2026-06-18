@@ -134,6 +134,17 @@ All warn-and-proceed with per-rail suppression. Protected-branch and force are p
 `SyncOps.branchSyncStates`; the outgoing scan runs only when there's an upstream + outgoing commits.
 Full rationale in ADR 0093.
 
+## Amendment — type-aware LFS rail (ADR 0091, 2026-06-18)
+
+The commit-time set gains a sibling to the size rail: `binaryTypeWithoutLFS` (railID
+`binary-type-without-lfs`). It fires on a staged file whose *type* (a curated binary extension —
+`.psd`, `.docx`, short `.mp4`, …, via `LFSKit.LFSBinaryTypes`, injectable) warrants LFS but that
+isn't LFS-tracked, *regardless of size* — closing the small-to-medium-binary gap the > 50 MiB size
+rail misses. To avoid double-banners, it skips files at or over the size threshold (those are the
+size rail's). Remedy = the new `LFSKit.LFSTrack` "Track with LFS" action (probe `git-lfs`, refuse
+if absent per ADR 0029, then `git lfs track <pattern>`; never a silent install). Suggest-only and
+suppressible like every rail. Full rationale in ADR 0091.
+
 ## Links
 
 - Implements `docs/research/git-beginner-affordances.md` item 2.3 (commit-time set).

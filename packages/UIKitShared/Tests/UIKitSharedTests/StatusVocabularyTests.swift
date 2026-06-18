@@ -152,7 +152,8 @@ struct VocabularyParentheticalPolicyTests {
             .stagedSecretDetected(path: "a.env", rule: "AWS Access Key ID", line: 1),
             .pushingToProtectedBranch(branch: "main"),
             .forcePushConsequence(branch: "main", ahead: 1, behind: 2),
-            .secretInOutgoingCommits(path: "a.env", rule: "AWS Access Key ID", line: 1)
+            .secretInOutgoingCommits(path: "a.env", rule: "AWS Access Key ID", line: 1),
+            .binaryTypeWithoutLFS(path: "art.psd", suggestedPattern: "*.psd")
         ]
         let stales = [
             StaleBranch(

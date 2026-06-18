@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-06-18
 deciders: maintainer
 consulted: —
@@ -42,6 +42,17 @@ already has; the heuristic samples the tracked set, it does not walk full histor
 **Negative / trade-offs**
 - A curated extension list is a maintenance item (audit periodically, like the defaults bundle).
 - LFS still requires `git-lfs` on PATH (ADR 0029 detect-and-prompt; never silent install).
+
+## Implementation status (2026-06-18)
+
+- **Shipped:** `binaryTypeWithoutLFS` rail + `LFSKit.LFSBinaryTypes` (the curated, injectable
+  type set) + `LFSKit.LFSTrack` (the "Track with LFS" write action — probes `git-lfs`, refuses
+  with a typed error if absent per ADR 0029, then `git lfs track <pattern>`; never a silent
+  install). The rail fires on a curated-binary staged file that isn't LFS-tracked and is *under*
+  the size threshold, so a file never gets both this and the size rail's banner.
+- **Follow-up:** `DocumentStoreHeuristic` (the one-time, repo-level "this looks like a document
+  store — set up LFS?" offer) is tracked separately. The shared `LFSTrack` action it needs is
+  already in place.
 
 ## Links
 
