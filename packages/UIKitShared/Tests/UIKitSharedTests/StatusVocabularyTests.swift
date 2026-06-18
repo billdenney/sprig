@@ -331,6 +331,21 @@ struct VocabularyWarningTests {
         #expect(detachedShort == "detached HEAD at cccccccc")
     }
 
+    @Test("staged-secret rail names the file, line, rule, and both remedies in plain copy")
+    func stagedSecretCopy() {
+        let warning = PreflightWarning.stagedSecretDetected(
+            path: "app/config.py", rule: "AWS Access Key ID", line: 12
+        )
+        let plain = StatusVocabulary.describe(warning, register: .plain)
+        #expect(plain.contains("app/config.py"))
+        #expect(plain.contains("AWS Access Key ID"))
+        #expect(plain.contains("line 12"))
+        #expect(plain.contains(".gitignore"))
+        #expect(plain.contains("rotate"), "plain copy carries the revocation-first remedy")
+        let git = StatusVocabulary.describe(warning, register: .git)
+        #expect(git.contains("app/config.py:12"))
+    }
+
     @Test("set-aside outcomes format in both registers")
     func setAsideCoverage() {
         #expect(

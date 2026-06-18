@@ -180,6 +180,11 @@ public actor CommitComposerViewModel {
                 repoURL: repoURL,
                 runner: runner
             )
+            warnings += await preflight.stagedSecretWarnings(
+                stagedPaths: staged,
+                repoURL: repoURL,
+                runner: runner
+            )
             preflightWarnings = warnings
         } catch {
             staged = []

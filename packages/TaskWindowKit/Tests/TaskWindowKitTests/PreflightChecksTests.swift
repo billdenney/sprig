@@ -73,10 +73,14 @@ struct PreflightBranchChecksTests {
         let switching = PreflightWarning.switchingAwayFromUnpushed(
             branch: "feature/x", unpushedCount: 2
         )
+        let secret = PreflightWarning.stagedSecretDetected(
+            path: "config.py", rule: "AWS Access Key ID", line: 3
+        )
         #expect(defaultBranch.railID == "committing-to-default-branch")
         #expect(detached.railID == "detached-head")
         #expect(large.railID == "large-staged-file-without-lfs")
         #expect(switching.railID == "switching-away-from-unpushed")
+        #expect(secret.railID == "staged-secret")
     }
 
     private func syncState(
@@ -170,6 +174,52 @@ struct PreflightIntegrationTests {
 
     /// Threshold of 64 bytes so a ~100-byte file is "large".
     private let tinyThreshold = PreflightChecks(largeFileThresholdBytes: 64)
+
+    @Test("staged secret fires the staged-secret rail; suppression and allowlist silence it")
+    func stagedSecretRail() async throws {
+        let (dir, runner) = try await makeRepo("secret")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data("ok = 1\nAWS_KEY = \"AKIAIOSFODNN7EXAMPLE\"\n".utf8)
+            .write(to: dir.appendingPathComponent("config.py"))
+        _ = try await runner.run(["add", "config.py"])
+
+        let warnings = await PreflightChecks().stagedSecretWarnings(
+            stagedPaths: ["config.py"],
+            repoURL: dir,
+            runner: runner
+        )
+        #expect(warnings == [.stagedSecretDetected(
+            path: "config.py",
+            rule: "AWS Access Key ID",
+            line: 2
+        )])
+
+        // Suppressing the rail skips the scan entirely.
+        let suppressed = await PreflightChecks(suppressedRails: ["staged-secret"])
+            .stagedSecretWarnings(stagedPaths: ["config.py"], repoURL: dir, runner: runner)
+        #expect(suppressed.isEmpty)
+
+        // The .sprig/secret-allow allowlist silences a known-safe finding.
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent(".sprig"), withIntermediateDirectories: true
+        )
+        try Data("config.py:aws-access-key-id\n".utf8)
+            .write(to: dir.appendingPathComponent(".sprig/secret-allow"))
+        let allowlisted = await PreflightChecks().stagedSecretWarnings(
+            stagedPaths: ["config.py"], repoURL: dir, runner: runner
+        )
+        #expect(allowlisted.isEmpty)
+    }
+
+    @Test("staged-secret rail adds no scan when nothing is staged")
+    func stagedSecretRailNoStagedPaths() async throws {
+        let (dir, runner) = try await makeRepo("secret-empty")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let warnings = await PreflightChecks().stagedSecretWarnings(
+            stagedPaths: [], repoURL: dir, runner: runner
+        )
+        #expect(warnings.isEmpty)
+    }
 
     @Test("staged over-threshold file without an LFS rule warns")
     func largeStagedFileWarns() async throws {

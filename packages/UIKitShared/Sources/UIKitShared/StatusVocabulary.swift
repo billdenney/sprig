@@ -221,6 +221,8 @@ public enum StatusVocabulary {
             "\(path): \(size) bytes exceeds \(threshold); not LFS-tracked"
         case let .switchingAwayFromUnpushed(branch, count):
             "\(branch): \(count) unpushed commit(s) — they stay on the branch"
+        case let .stagedSecretDetected(path, rule, line):
+            "\(path):\(line): possible \(rule) in staged changes"
         }
     }
 
@@ -238,6 +240,9 @@ public enum StatusVocabulary {
         case let .switchingAwayFromUnpushed(branch, count):
             "\(branch) has \(count) commit(s) not on the server yet — "
                 + "they stay safely on the branch; push to share them"
+        case let .stagedSecretDetected(path, rule, line):
+            "\(path) line \(line) looks like a \(rule) — keep secrets out of git; "
+                + "add the file to .gitignore, and rotate it if it already reached a remote"
         }
     }
 

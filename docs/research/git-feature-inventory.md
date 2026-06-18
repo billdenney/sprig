@@ -123,6 +123,14 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 
 - `git config --get core.excludesFile` — resolution across all scopes, exactly like git's own excludes lookup; unset falls back to the documented `$XDG_CONFIG_HOME/git/ignore` default, so provisioning never writes config.
 
+### Secret-scan rail (ADR 0092) — engine invocations
+
+`GitCore.SecretScan` (a default-on `stagedSecretDetected` pre-flight rail in the ADR 0070 family; feeds the ADR 0093 push-time secret rail):
+
+- `git diff --cached --unified=0 --no-color` — added staged lines scanned against a vendored regex + entropy ruleset (no bundled binary). Only the `+` side is scanned; removed lines are never flagged. Gated on there being staged paths, so it adds no spawn when nothing is staged.
+- `git diff --unified=0 --no-color <range>` — the ADR 0093 push-time variant scans the outgoing commit range (`@{u}..HEAD`), catching a secret committed in an earlier commit, not just the staged tree.
+- `.sprig/secret-allow` (read, not a git invocation) — per-finding allowlist (`<matched-value>` or `<path>:<ruleID>`) suppresses known-safe matches without disabling the rail.
+
 ## Newer-git features Sprig explicitly takes advantage of
 
 Master plan §10 has a per-version (2.40 → 2.46) breakdown. Highlights:

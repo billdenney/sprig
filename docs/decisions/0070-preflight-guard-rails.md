@@ -107,6 +107,20 @@ existing repos alike. This pairs with the ADR 0075 backup deny-list: a file the 
 deliberately skips is exactly a file the user should hear about once, with a one-click
 durable fix.
 
+## Amendment — staged-secret rail (ADR 0092, 2026-06-18)
+
+The commit-time rail set gains a default-on `stagedSecretDetected` rail (railID
+`staged-secret`), promoted from M6 (`security.md` #5 / `git-best-practices.md` §11.11). It runs
+`GitCore.SecretScan` (a vendored regex + entropy ruleset; no bundled binary) over the staged
+hunks and warns — never blocks — when an added line looks like an API key, token, or private
+key, naming the file + line + rule and offering two remedies: add the file to `.gitignore`
+(reuse `GitignoreSuggestion`) and a revocation-first reminder (rotate if it already reached a
+remote). False positives are handled without disabling the rail via a per-finding allowlist
+(`.sprig/secret-allow`, entries `<matched-value>` or `<path>:<ruleID>`); per-rail suppression
+(`suppressedGuardRails`) remains the blunt instrument. The check is gated on there being staged
+paths, so it adds no git spawn in the common "nothing staged" case. The same engine seeds the
+push-time secret rail (ADR 0093, scanning `@{u}..HEAD`). Full rationale in ADR 0092.
+
 ## Links
 
 - Implements `docs/research/git-beginner-affordances.md` item 2.3 (commit-time set).

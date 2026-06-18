@@ -9,7 +9,9 @@
 //     remote — most teams want a feature branch;
 //   * detached HEAD — work here can be lost without a branch;
 //   * a staged file over the size threshold that isn't LFS-tracked —
-//     offer ADR 0029's LFS flow before the push gets painful.
+//     offer ADR 0029's LFS flow before the push gets painful;
+//   * a staged hunk that looks like a secret — an API key, token, or
+//     private key (ADR 0092), via the vendored `GitCore.SecretScan`.
 //
 // Design constraints:
 //   - **Warnings, not errors.** Nothing here blocks `commit()`; the
@@ -49,6 +51,14 @@ public enum PreflightWarning: Sendable, Equatable {
     /// "lost". One-click remedy: push before switching.
     case switchingAwayFromUnpushed(branch: String, unpushedCount: Int)
 
+    /// A staged hunk contains what looks like a secret — an API key,
+    /// token, or private key (ADR 0092). Warn-and-proceed: the banner
+    /// offers "Add to `.gitignore`" (reuse ``GitignoreSuggestion``) and a
+    /// revocation-first reminder (if the secret already reached a remote,
+    /// rotating it matters more than removing it). Carries only the file,
+    /// the matched rule's title, and the line — never the secret value.
+    case stagedSecretDetected(path: String, rule: String, line: Int)
+
     /// Stable per-rail identifier — the value the shells' "never
     /// show this again" checkbox writes into
     /// `AppPreferences.suppressedGuardRails` (ADR 0070 amendment)
@@ -60,6 +70,7 @@ public enum PreflightWarning: Sendable, Equatable {
         case .detachedHEAD: "detached-head"
         case .largeStagedFileWithoutLFS: "large-staged-file-without-lfs"
         case .switchingAwayFromUnpushed: "switching-away-from-unpushed"
+        case .stagedSecretDetected: "staged-secret"
         }
     }
 }
@@ -178,5 +189,39 @@ public struct PreflightChecks: Sendable {
                 sizeBytes: $0.size,
                 thresholdBytes: largeFileThresholdBytes
             ) }
+    }
+
+    /// Staged-secret check (ADR 0092): run ``GitCore/SecretScan`` over
+    /// the staged hunks (`git diff --cached`) against the vendored
+    /// ruleset, honoring the repo's `.sprig/secret-allow` allowlist. One
+    /// warning per distinct (path, rule, line). Best-effort: a scan
+    /// failure drops the check rather than failing the refresh.
+    ///
+    /// Gated on `stagedPaths` being non-empty so it adds **no** git spawn
+    /// in the common "nothing staged" case (ADR 0070's no-extra-spawns
+    /// principle); skipped entirely when the rail is suppressed.
+    public func stagedSecretWarnings(
+        stagedPaths: [String],
+        repoURL: URL,
+        runner: Runner,
+        scanner: SecretScan = SecretScan()
+    ) async -> [PreflightWarning] {
+        guard !suppressedRails.contains("staged-secret"), !stagedPaths.isEmpty else { return [] }
+        let allowlist = SecretScan.loadAllowlist(repoURL: repoURL)
+        guard let findings = try? await scanner.scanStaged(runner: runner, allowlist: allowlist) else {
+            return []
+        }
+        var seen: Set<String> = []
+        var warnings: [PreflightWarning] = []
+        for finding in findings {
+            let key = "\(finding.path)\u{0}\(finding.ruleID)\u{0}\(finding.line)"
+            guard seen.insert(key).inserted else { continue }
+            warnings.append(.stagedSecretDetected(
+                path: finding.path,
+                rule: finding.ruleTitle,
+                line: finding.line
+            ))
+        }
+        return warnings
     }
 }
