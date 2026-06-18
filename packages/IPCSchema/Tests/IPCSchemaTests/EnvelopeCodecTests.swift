@@ -48,7 +48,7 @@ struct EnvelopeCodecTests {
 
     @Test("encoded bytes are valid UTF-8 JSON")
     func encodedBytesAreUTF8() throws {
-        let envelope = try Envelope(
+        let envelope = Envelope(
             message: ClientRequest.subscribe(SubscribePayload(roots: ["/a", "/b"]))
         )
         let data = try EnvelopeCodec.encode(envelope)
@@ -62,7 +62,7 @@ struct EnvelopeCodecTests {
 
     @Test("peek extracts kind without committing to a Message type")
     func peekKindFromBadgeReply() throws {
-        let envelope = try Envelope(
+        let envelope = Envelope(
             message: AgentResponse.badgeReply(BadgeReplyPayload(badge: "modified"))
         )
         let data = try EnvelopeCodec.encode(envelope)
@@ -71,7 +71,7 @@ struct EnvelopeCodecTests {
 
     @Test("peek extracts kind for an AgentEvent")
     func peekKindFromBadgeChanged() throws {
-        let envelope = try Envelope(
+        let envelope = Envelope(
             message: AgentEvent.badgeChanged(BadgeChangedPayload(
                 subscriptionId: UUID(),
                 path: "/r/f",
@@ -85,7 +85,7 @@ struct EnvelopeCodecTests {
     @Test("peek extracts id (for request-response correlation)")
     func peekId() throws {
         let want = try uuid("DEADBEEF-DEAD-BEEF-DEAD-BEEFDEADBEEF")
-        let envelope = try Envelope(
+        let envelope = Envelope(
             id: want,
             message: AgentResponse.badgeReply(BadgeReplyPayload(badge: nil))
         )
@@ -95,7 +95,7 @@ struct EnvelopeCodecTests {
 
     @Test("peek extracts schemaVersion")
     func peekSchemaVersion() throws {
-        let envelope = try Envelope(
+        let envelope = Envelope(
             schemaVersion: 1,
             message: ClientRequest.badgeQuery(BadgeQueryPayload(path: "/f"))
         )
@@ -106,7 +106,7 @@ struct EnvelopeCodecTests {
     @Test("peek.outer extracts all three fields in one parse")
     func peekOuter() throws {
         let id = try uuid("12345678-1234-1234-1234-123456789012")
-        let envelope = try Envelope(
+        let envelope = Envelope(
             id: id,
             message: ClientRequest.subscribe(SubscribePayload(roots: ["/r"]))
         )
@@ -122,10 +122,10 @@ struct EnvelopeCodecTests {
     @Test("typical client-side dispatch: peek the kind, route to AgentResponse vs AgentEvent decoder")
     func peekThenDispatch() throws {
         // Two envelopes the client might receive over the same channel:
-        let response = try Envelope(
+        let response = Envelope(
             message: AgentResponse.badgeReply(BadgeReplyPayload(badge: "modified"))
         )
-        let event = try Envelope(
+        let event = Envelope(
             message: AgentEvent.badgeChanged(BadgeChangedPayload(
                 subscriptionId: UUID(),
                 path: "/r/f",

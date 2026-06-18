@@ -108,7 +108,7 @@ struct ForgeDeviceFlowTests {
         let auth = try await ForgeDeviceFlow(client: fake).begin(
             provider: .gitlab,
             clientID: "appid",
-            baseURL: #require(URL(string: "https://git.example.org"))
+            baseURL: forgeTestURL("https://git.example.org")
         )
 
         let request = try #require(fake.lastRequest)

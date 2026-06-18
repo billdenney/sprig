@@ -105,7 +105,7 @@ struct ForgeRepoBrowserTests {
         _ = try await ForgeRepoBrowser(client: fake).listRepos(
             provider: .github,
             token: "t",
-            baseURL: #require(URL(string: "https://github.example.com/api/v3"))
+            baseURL: forgeTestURL("https://github.example.com/api/v3")
         )
         let url = try #require(fake.lastRequest?.url?.absoluteString)
         #expect(url.hasPrefix("https://github.example.com/api/v3/user/repos?"))
@@ -163,7 +163,7 @@ struct ForgeRepoBrowserTests {
         _ = try await ForgeRepoBrowser(client: hosted).listRepos(
             provider: .gitlab,
             token: "t",
-            baseURL: #require(URL(string: "https://git.example.com"))
+            baseURL: forgeTestURL("https://git.example.com")
         )
         let hostedURL = try #require(hosted.lastRequest?.url?.absoluteString)
         #expect(hostedURL.hasPrefix("https://git.example.com/api/v4/projects?"))
