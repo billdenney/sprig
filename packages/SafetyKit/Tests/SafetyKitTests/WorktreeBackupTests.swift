@@ -200,6 +200,48 @@ struct WorktreeBackupTests {
         #expect(restored == "precious\n")
     }
 
+    @Test("same-second backup whose base ref is already taken advances atomically — neither clobbered")
+    func sameSecondBaseRefTakenAdvancesWithoutClobber() async throws {
+        let (dir, runner) = try await makeRepo("atomic-create")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // FROZEN clock: the new backup wants exactly the second another
+        // writer already occupies.
+        let frozen = Date(timeIntervalSince1970: 1_760_000_000)
+        let backup = WorktreeBackup(runner: runner, clock: { frozen })
+
+        // Stand in for a concurrent writer (the agent's auto-backup, or a
+        // restore's fail-closed pre-backup) that already took THIS
+        // second's base ref pointing at HEAD — the residual TOCTOU the
+        // atomic `create` closes: with the old probe-then-write the
+        // second writer could find the name vacant and blind-overwrite
+        // the first. Pre-creating the ref forces the `create` to lose,
+        // deterministically, the way it would lose the lock under a real
+        // race.
+        let headSHA = try await runner.run(["rev-parse", "HEAD"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseRef = "refs/sprig/backup/\(SnapshotRefName.formatTimestamp(frozen))/main"
+        _ = try await runner.run(["update-ref", baseRef, headSHA])
+
+        // A genuinely different dirty tree now wants a backup this same
+        // second.
+        try Data("precious\n".utf8).write(to: dir.appendingPathComponent("a.txt"))
+        let ref = try #require(try await backup.createBackupIfDirty())
+
+        // The new backup advanced to the +1 s slot…
+        let bumped = "refs/sprig/backup/\(SnapshotRefName.formatTimestamp(frozen.addingTimeInterval(1)))/main"
+        #expect(ref.refName == bumped)
+        // …the already-taken base ref is byte-preserved (NOT overwritten
+        // with the new commit)…
+        let baseAfter = try await runner.run(["rev-parse", baseRef]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(baseAfter == headSHA, "the already-taken base ref must not be clobbered")
+        // …and both refs coexist, the new one carrying the precious tree.
+        let all = try await backup.backups()
+        #expect(all.count == 2, "both the pre-existing backup and the new one survive")
+        let newEntry = try #require(all.first { $0.ref == ref })
+        #expect(try await runner.run(["show", "\(newEntry.sha):a.txt"]).stdoutString == "precious\n")
+    }
+
     @Test("junk files (secrets + temporaries) are excluded from the backup tree at any depth")
     func junkFilesExcluded() async throws {
         let (dir, runner) = try await makeRepo("denylist")
