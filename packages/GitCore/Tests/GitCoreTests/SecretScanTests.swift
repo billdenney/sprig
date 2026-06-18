@@ -113,7 +113,7 @@ struct SecretScanTests {
         """
         let findings = scan.scan(unifiedDiff: diff)
         #expect(findings.count == 1)
-        let f = try? #require(findings.first)
+        let f = findings.first
         #expect(f?.path == "app/config.py")
         #expect(f?.ruleID == "aws-access-key-id")
         #expect(f?.line == 5, "should report the new-side hunk start line")

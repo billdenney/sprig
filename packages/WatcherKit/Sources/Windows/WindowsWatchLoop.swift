@@ -185,7 +185,7 @@
                     && offset + 12 + nameLengthBytes <= byteCount
                 if hasParseableName {
                     let nameStart = recordPtr.advanced(by: 12)
-                    var chars = [UInt16](repeating: 0, count: nameWordCount + 1)
+                    var chars = [UInt16](repeating: 0, count: nameWordCount)
                     chars.withUnsafeMutableBufferPointer { dst in
                         if let base = dst.baseAddress {
                             base.update(
@@ -194,9 +194,9 @@
                             )
                         }
                     }
-                    // chars[nameWordCount] stays 0 — null terminator
-                    // for `String(decodingCString:)`.
-                    let relativeBackslashed = String(decodingCString: chars, as: UTF16.self)
+                    // Decode exactly the name's code units — no null
+                    // terminator needed (vs. the deprecated decodingCString).
+                    let relativeBackslashed = String(decoding: chars, as: UTF16.self)
                     let relativeForward = relativeBackslashed.replacingOccurrences(
                         of: "\\",
                         with: "/"

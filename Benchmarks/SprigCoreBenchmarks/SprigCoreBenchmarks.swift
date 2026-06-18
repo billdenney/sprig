@@ -200,7 +200,7 @@ private func synthesizeTree(fileCount: Int, dirsPerLevel: Int = 32) -> URL {
             try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             for fileIndex in 0 ..< filesPerLeaf {
                 let file = dir.appendingPathComponent("f\(fileIndex).txt")
-                FileManager.default.createFile(atPath: file.path, contents: nil)
+                _ = FileManager.default.createFile(atPath: file.path, contents: nil)
                 written += 1
                 if written >= fileCount { break outer }
             }

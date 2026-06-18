@@ -184,7 +184,7 @@
 
             // …and the refusal case: a regular file at the path.
             let filePath = makeSocketPath("not-a-socket")
-            FileManager.default.createFile(atPath: filePath, contents: Data("data".utf8))
+            _ = FileManager.default.createFile(atPath: filePath, contents: Data("data".utf8))
             defer { try? FileManager.default.removeItem(atPath: filePath) }
             #expect(throws: TransportError.self) {
                 _ = try UnixSocketServer(socketPath: filePath)

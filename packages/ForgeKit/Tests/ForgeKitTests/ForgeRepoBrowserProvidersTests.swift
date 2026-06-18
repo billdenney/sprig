@@ -147,7 +147,7 @@ struct ForgeRepoBrowserProvidersTests {
         _ = try await ForgeRepoBrowser(client: hosted).listRepos(
             provider: .gitea,
             token: "t",
-            baseURL: #require(URL(string: "https://code.example.org"))
+            baseURL: forgeTestURL("https://code.example.org")
         )
         let hostedURL = try #require(hosted.lastRequest?.url?.absoluteString)
         #expect(hostedURL.hasPrefix("https://code.example.org/api/v1/user/repos?"))

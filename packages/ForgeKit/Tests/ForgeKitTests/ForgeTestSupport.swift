@@ -10,6 +10,17 @@ import Foundation
     import FoundationNetworking
 #endif
 
+/// A non-optional `URL` from a known-valid literal for tests. Avoids
+/// `#require(URL(string: literal))` — the testing macro flags a literal
+/// URL as never-nil, so the `#require` is "redundant" — without a force
+/// unwrap (forbidden in tests).
+func forgeTestURL(_ string: String) -> URL {
+    guard let url = URL(string: string) else {
+        fatalError("invalid ForgeKit test URL literal: \(string)")
+    }
+    return url
+}
+
 final class FakeForgeHTTPClient: ForgeHTTPClient, @unchecked Sendable {
     struct Canned {
         let status: Int
