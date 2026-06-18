@@ -143,6 +143,38 @@ struct StashViewModelTests {
         #expect(headBefore == headAfter, "stash-drop restore must not move HEAD")
     }
 
+    @Test("Recover routes a uniquified stash-drop-2 safety copy to stash-store, not reset --hard")
+    func recoverUniquifiedStashDropStoresEntry() async throws {
+        let (dir, runner) = try await makeRepo("stashdrop2")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try await seedTwoStashes(dir, runner)
+
+        // The stash COMMIT a same-second second drop would snapshot,
+        // minted under the `-2` uniquifier. (StashViewModel's writer uses
+        // the wall clock and can't be forced into a same-second collision
+        // from here, so mint the ref directly — the exact shape
+        // createSnapshot produces on a same-second same-op collision.)
+        let victimSHA = try await runner.run(["rev-parse", "refs/stash"])
+            .stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ref = "refs/sprig/snapshots/20260506T040000Z/stash-drop-2"
+        _ = try await runner.run(["update-ref", ref, victimSHA])
+        _ = try await runner.run(["stash", "drop"])
+        let headBefore = try await runner.run(["rev-parse", "HEAD"]).stdoutString
+
+        let recover = RecoverViewModel(repoURL: dir, runner: runner)
+        await recover.restoreSnapshot(ref)
+
+        // Must take the stash-store path (HEAD untouched), NOT `reset
+        // --hard` onto the stash commit — the bug the op-suffix uniquifier
+        // would otherwise expose through the exact-string op match.
+        #expect(await recover.state == .success(.restoredStashEntry(refName: ref)))
+        let restoredSHA = try await runner.run(["rev-parse", "refs/stash"])
+            .stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(restoredSHA == victimSHA)
+        let headAfter = try await runner.run(["rev-parse", "HEAD"]).stdoutString
+        #expect(headBefore == headAfter, "a stash-drop restore must never move HEAD")
+    }
+
     @Test("a list gone stale behind the VM's back still acts on the RIGHT entry")
     func staleIndicesStillResolveBySHA() async throws {
         let (dir, runner) = try await makeRepo("stale")

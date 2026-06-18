@@ -76,6 +76,37 @@ struct SnapshotRefNameTests {
         }
     }
 
+    @Test("uniquifier op suffixes (merge-2, reset-hard-3) are valid and round-trip")
+    func uniquifierSuffixesRoundTrip() throws {
+        // SnapshotWriter's same-second collision handling appends -2/-3/…
+        // to the op segment; those names must stay valid ops and survive
+        // a parse round trip so the read path can enumerate them.
+        for op in ["merge-2", "merge-3", "reset-hard-2", "force-push-10"] {
+            #expect(SnapshotRefName.isValidOp(op), "\(op) is the documented uniquifier shape")
+            let ref = try #require(SnapshotRefName(timestamp: Self.referenceDate, op: op))
+            let parsed = try #require(SnapshotRefName.parse(ref.refName))
+            #expect(parsed.op == op)
+        }
+    }
+
+    @Test("baseOp strips a trailing -<digits> uniquifier but leaves real ops intact")
+    func baseOpStripsUniquifier() throws {
+        func op(_ s: String) throws -> SnapshotRefName {
+            try #require(SnapshotRefName(timestamp: Self.referenceDate, op: s))
+        }
+        // Uniquified ops collapse to their base (the Recover classifier
+        // relies on this to route stash-drop-2 like stash-drop).
+        #expect(try op("stash-drop-2").baseOp == "stash-drop")
+        #expect(try op("merge-2").baseOp == "merge")
+        #expect(try op("merge-10").baseOp == "merge")
+        // Real ops that contain a dash but no numeric suffix are untouched.
+        #expect(try op("merge").baseOp == "merge")
+        #expect(try op("reset-hard").baseOp == "reset-hard")
+        #expect(try op("force-push").baseOp == "force-push")
+        #expect(try op("branch-delete").baseOp == "branch-delete")
+        #expect(try op("checkout-dirty").baseOp == "checkout-dirty")
+    }
+
     @Test("two snapshots one second apart sort lexicographically by time")
     func lexicographicOrderMatchesChronological() throws {
         let earlier = Self.referenceDate

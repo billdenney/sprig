@@ -134,9 +134,9 @@ struct SnapshotWriterTests {
 
         let writer = SnapshotWriter(runner: runner, clock: Self.fixedClock)
 
-        // A non-existent revspec — git update-ref exits non-zero with
-        // a clear "not a valid SHA1" message; Runner translates that
-        // into a GitError.nonZeroExit.
+        // A non-existent revspec — git rev-parse --verify (the target
+        // pin) exits non-zero before any ref is written; Runner
+        // translates that into a GitError.nonZeroExit.
         await #expect(throws: GitError.self) {
             try await writer.createSnapshot(
                 op: SnapshotRefName.opMerge,
@@ -166,9 +166,9 @@ struct SnapshotWriterTests {
         #expect(firstSHA == secondSHA, "both refs point at HEAD, so SHAs match")
     }
 
-    @Test("same-second + same-op writes overwrite the first ref (documented limitation)")
-    func sameSecondSameOpOverwrites() async throws {
-        let (repo, runner) = try await mkRepo("overwrite")
+    @Test("same-second + same-op snapshots get a -2 uniquifier (both survive)")
+    func sameSecondSameOpUniquifies() async throws {
+        let (repo, runner) = try await mkRepo("uniquify")
         defer { try? FileManager.default.removeItem(at: repo) }
         try await seedCommit(at: repo, runner: runner)
 
@@ -179,6 +179,9 @@ struct SnapshotWriterTests {
         let secondSHA = try #require(try await revParse("HEAD", runner: runner))
         #expect(firstSHA != secondSHA)
 
+        // Same fixed clock => same <ts>; same op => the base name is
+        // taken, so the second snapshot is uniquified to "merge-2"
+        // instead of clobbering the first (the old behavior).
         let writer = SnapshotWriter(runner: runner, clock: Self.fixedClock)
         let firstSnap = try await writer.createSnapshot(
             op: SnapshotRefName.opMerge,
@@ -188,11 +191,96 @@ struct SnapshotWriterTests {
             op: SnapshotRefName.opMerge,
             target: secondSHA
         )
-        #expect(firstSnap.refName == secondSnap.refName)
+        #expect(firstSnap.refName == "refs/sprig/snapshots/20260506T031234Z/merge")
+        #expect(secondSnap.refName == "refs/sprig/snapshots/20260506T031234Z/merge-2")
+        #expect(firstSnap.refName != secondSnap.refName)
 
-        // The ref now points at the second target — first snapshot lost.
-        let resolved = try await revParse(firstSnap.refName, runner: runner)
-        #expect(resolved == secondSHA)
+        // BOTH refs survive, each pointing at its own target — the first
+        // snapshot is not clobbered. This is the round-trip guarantee:
+        // the earlier snapshot remains recoverable.
+        #expect(try await revParse(firstSnap.refName, runner: runner) == firstSHA)
+        #expect(try await revParse(secondSnap.refName, runner: runner) == secondSHA)
+    }
+
+    @Test("a third same-second same-op snapshot gets a -3 suffix")
+    func sameSecondThirdSnapshotGetsDashThree() async throws {
+        let (repo, runner) = try await mkRepo("uniquify-3")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await seedCommit(at: repo, runner: runner)
+
+        let writer = SnapshotWriter(runner: runner, clock: Self.fixedClock)
+        let s1 = try await writer.createSnapshot(op: SnapshotRefName.opMerge)
+        let s2 = try await writer.createSnapshot(op: SnapshotRefName.opMerge)
+        let s3 = try await writer.createSnapshot(op: SnapshotRefName.opMerge)
+
+        #expect(s1.refName == "refs/sprig/snapshots/20260506T031234Z/merge")
+        #expect(s2.refName == "refs/sprig/snapshots/20260506T031234Z/merge-2")
+        #expect(s3.refName == "refs/sprig/snapshots/20260506T031234Z/merge-3")
+
+        // All three refs exist on disk simultaneously.
+        #expect(try await revParse(s1.refName, runner: runner) != nil)
+        #expect(try await revParse(s2.refName, runner: runner) != nil)
+        #expect(try await revParse(s3.refName, runner: runner) != nil)
+    }
+
+    @Test("createSnapshot uniquifies around a ref another writer already created (no clobber)")
+    func uniquifiesAroundForeignRef() async throws {
+        let (repo, runner) = try await mkRepo("foreign-ref")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await seedCommit(at: repo, runner: runner)
+        let headSHA = try #require(try await revParse("HEAD", runner: runner))
+
+        // Simulate a concurrent writer that already took the base name
+        // this second — the race the atomic `create` write must not
+        // clobber. (createSnapshot's own `create` will fail on this name
+        // and fall through to the -2 suffix.)
+        let baseRef = "refs/sprig/snapshots/20260506T031234Z/merge"
+        _ = try await runner.run(["update-ref", baseRef, headSHA])
+
+        let writer = SnapshotWriter(runner: runner, clock: Self.fixedClock)
+        let snap = try await writer.createSnapshot(op: SnapshotRefName.opMerge)
+
+        // The pre-existing ref must NOT be overwritten; we uniquify to -2.
+        #expect(snap.refName == "refs/sprig/snapshots/20260506T031234Z/merge-2")
+        #expect(try await revParse(baseRef, runner: runner) == headSHA)
+    }
+
+    @Test("a uniquified snapshot ref round-trips through SnapshotRefName.parse")
+    func uniquifiedRefRoundTrips() async throws {
+        let (repo, runner) = try await mkRepo("uniquify-parse")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await seedCommit(at: repo, runner: runner)
+
+        let writer = SnapshotWriter(runner: runner, clock: Self.fixedClock)
+        _ = try await writer.createSnapshot(op: SnapshotRefName.opMerge)
+        let second = try await writer.createSnapshot(op: SnapshotRefName.opMerge)
+
+        // The wire format must survive a round trip so the read path
+        // (SnapshotIndex / Recover) can enumerate the uniquified ref.
+        let parsed = try #require(SnapshotRefName.parse(second.refName))
+        #expect(parsed == second)
+        #expect(parsed.op == "merge-2")
+    }
+
+    @Test("createSnapshot throws collisionLimitExceeded when the suffix overflows the op cap")
+    func collisionLimitExceededOnOverflow() async throws {
+        let (repo, runner) = try await mkRepo("collision-overflow")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try await seedCommit(at: repo, runner: runner)
+
+        // A 64-char op is the longest isValidOp allows. The first
+        // snapshot takes "<op>"; a same-second second would need
+        // "<op>-2" (66 chars), which SnapshotRefName rejects — so there
+        // is no vacant slot and createSnapshot must fail closed rather
+        // than silently overwrite.
+        let maxOp = String(repeating: "a", count: 64)
+        #expect(SnapshotRefName.isValidOp(maxOp))
+
+        let writer = SnapshotWriter(runner: runner, clock: Self.fixedClock)
+        _ = try await writer.createSnapshot(op: maxOp)
+        await #expect(throws: SnapshotWriterError.collisionLimitExceeded(op: maxOp)) {
+            try await writer.createSnapshot(op: maxOp)
+        }
     }
 }
 

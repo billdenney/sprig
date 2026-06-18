@@ -161,8 +161,10 @@ struct RecoverCommand: AsyncParsableCommand {
         // stash COMMIT, not a repo state — `reset --hard` would
         // wrongly move the branch onto it. Restore = put the entry
         // back in the stash list; worktree and HEAD untouched, so no
-        // insurance refs are needed.
-        if parsed.op == SnapshotRefName.opStashDrop {
+        // insurance refs are needed. Match the op family (`baseOp`),
+        // not the raw op: a same-second second drop is minted as
+        // `stash-drop-2` and must take this path too.
+        if parsed.baseOp == SnapshotRefName.opStashDrop {
             try await restoreStashEntry(ref: ref, sha: targetSHA, runner: runner)
             return
         }
