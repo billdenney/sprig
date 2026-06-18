@@ -9,7 +9,9 @@
 //     remote — most teams want a feature branch;
 //   * detached HEAD — work here can be lost without a branch;
 //   * a staged file over the size threshold that isn't LFS-tracked —
-//     offer ADR 0029's LFS flow before the push gets painful.
+//     offer ADR 0029's LFS flow before the push gets painful;
+//   * a staged hunk that looks like a secret — an API key, token, or
+//     private key (ADR 0092), via the vendored `GitCore.SecretScan`.
 //
 // Design constraints:
 //   - **Warnings, not errors.** Nothing here blocks `commit()`; the
@@ -49,6 +51,31 @@ public enum PreflightWarning: Sendable, Equatable {
     /// "lost". One-click remedy: push before switching.
     case switchingAwayFromUnpushed(branch: String, unpushedCount: Int)
 
+    /// A staged hunk contains what looks like a secret — an API key,
+    /// token, or private key (ADR 0092). Warn-and-proceed: the banner
+    /// offers "Add to `.gitignore`" (reuse ``GitignoreSuggestion``) and a
+    /// revocation-first reminder (if the secret already reached a remote,
+    /// rotating it matters more than removing it). Carries only the file,
+    /// the matched rule's title, and the line — never the secret value.
+    case stagedSecretDetected(path: String, rule: String, line: Int)
+
+    /// The push target is the forge default / protected branch
+    /// (main/master heuristic; ADR 0063 can refine with forge metadata).
+    /// Pushing straight to it is what most teams gate behind review (ADR 0093).
+    case pushingToProtectedBranch(branch: String)
+
+    /// The current branch has diverged from its upstream (`ahead` local
+    /// commits, `behind` remote commits), so a plain push is rejected and
+    /// only a force could publish it — which rewrites history collaborators
+    /// may have. Sprig routes to fetch + resolve, never an auto-force
+    /// (ADR 0052/0093).
+    case forcePushConsequence(branch: String, ahead: Int, behind: Int)
+
+    /// A commit in the outgoing range (`@{u}..HEAD`) — not just the staged
+    /// tree — contains what looks like a secret (ADR 0093, via the ADR 0092
+    /// ``GitCore/SecretScan``). Carries file/rule/line, never the value.
+    case secretInOutgoingCommits(path: String, rule: String, line: Int)
+
     /// Stable per-rail identifier — the value the shells' "never
     /// show this again" checkbox writes into
     /// `AppPreferences.suppressedGuardRails` (ADR 0070 amendment)
@@ -60,6 +87,10 @@ public enum PreflightWarning: Sendable, Equatable {
         case .detachedHEAD: "detached-head"
         case .largeStagedFileWithoutLFS: "large-staged-file-without-lfs"
         case .switchingAwayFromUnpushed: "switching-away-from-unpushed"
+        case .stagedSecretDetected: "staged-secret"
+        case .pushingToProtectedBranch: "pushing-to-protected-branch"
+        case .forcePushConsequence: "force-push-consequence"
+        case .secretInOutgoingCommits: "secret-in-outgoing-commits"
         }
     }
 }
@@ -178,5 +209,82 @@ public struct PreflightChecks: Sendable {
                 sizeBytes: $0.size,
                 thresholdBytes: largeFileThresholdBytes
             ) }
+    }
+
+    /// Staged-secret check (ADR 0092): run ``GitCore/SecretScan`` over
+    /// the staged hunks (`git diff --cached`) against the vendored
+    /// ruleset, honoring the repo's `.sprig/secret-allow` allowlist. One
+    /// warning per distinct (path, rule, line). Best-effort: a scan
+    /// failure drops the check rather than failing the refresh.
+    ///
+    /// Gated on `stagedPaths` being non-empty so it adds **no** git spawn
+    /// in the common "nothing staged" case (ADR 0070's no-extra-spawns
+    /// principle); skipped entirely when the rail is suppressed.
+    public func stagedSecretWarnings(
+        stagedPaths: [String],
+        repoURL: URL,
+        runner: Runner,
+        scanner: SecretScan = SecretScan()
+    ) async -> [PreflightWarning] {
+        guard !suppressedRails.contains("staged-secret"), !stagedPaths.isEmpty else { return [] }
+        let allowlist = SecretScan.loadAllowlist(repoURL: repoURL)
+        guard let findings = try? await scanner.scanStaged(runner: runner, allowlist: allowlist) else {
+            return []
+        }
+        var seen: Set<String> = []
+        var warnings: [PreflightWarning] = []
+        for finding in findings {
+            let key = "\(finding.path)\u{0}\(finding.ruleID)\u{0}\(finding.line)"
+            guard seen.insert(key).inserted else { continue }
+            warnings.append(.stagedSecretDetected(
+                path: finding.path,
+                rule: finding.ruleTitle,
+                line: finding.line
+            ))
+        }
+        return warnings
+    }
+
+    /// Push-time rails (ADR 0093), evaluated from the post-fetch sync
+    /// `states` just before the push leg. All warn-and-proceed.
+    ///
+    /// Protected-branch and force-consequence are pure reads of `states`
+    /// (no spawn); the outgoing-commit secret scan runs only when there
+    /// is an upstream and outgoing commits, over the bounded `@{u}..HEAD`
+    /// range. Each rail is skipped when suppressed.
+    public func pushWarnings(
+        states: [BranchSyncState],
+        repoURL: URL,
+        runner: Runner,
+        scanner: SecretScan = SecretScan()
+    ) async -> [PreflightWarning] {
+        guard let current = states.first(where: \.isCurrent) else { return [] }
+        var warnings: [PreflightWarning] = []
+
+        // Single-line conditions (precomputed bools) avoid the
+        // SwiftFormat-vs-SwiftLint multiline-`if`-brace conflict.
+        let onProtected = current.upstreamShort != nil && defaultBranchNames.contains(current.name)
+        if onProtected, !suppressedRails.contains("pushing-to-protected-branch") {
+            warnings.append(.pushingToProtectedBranch(branch: current.name))
+        }
+
+        let diverged = !current.upstreamGone && current.ahead > 0 && current.behind > 0
+        if diverged, !suppressedRails.contains("force-push-consequence") {
+            warnings.append(.forcePushConsequence(branch: current.name, ahead: current.ahead, behind: current.behind))
+        }
+
+        let hasOutgoing = current.upstreamShort != nil && !current.upstreamGone && current.ahead > 0
+        if hasOutgoing, !suppressedRails.contains("secret-in-outgoing-commits") {
+            let allowlist = SecretScan.loadAllowlist(repoURL: repoURL)
+            if let findings = try? await scanner.scanRange("@{u}..HEAD", runner: runner, allowlist: allowlist) {
+                var seen: Set<String> = []
+                for finding in findings {
+                    let key = "\(finding.path)\u{0}\(finding.ruleID)\u{0}\(finding.line)"
+                    guard seen.insert(key).inserted else { continue }
+                    warnings.append(.secretInOutgoingCommits(path: finding.path, rule: finding.ruleTitle, line: finding.line))
+                }
+            }
+        }
+        return warnings
     }
 }

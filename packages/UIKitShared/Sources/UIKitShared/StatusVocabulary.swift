@@ -221,6 +221,14 @@ public enum StatusVocabulary {
             "\(path): \(size) bytes exceeds \(threshold); not LFS-tracked"
         case let .switchingAwayFromUnpushed(branch, count):
             "\(branch): \(count) unpushed commit(s) — they stay on the branch"
+        case let .stagedSecretDetected(path, rule, line):
+            "\(path):\(line): possible \(rule) in staged changes"
+        case let .pushingToProtectedBranch(branch):
+            "pushing to protected branch \(branch)"
+        case let .forcePushConsequence(branch, ahead, behind):
+            "\(branch) diverged: \(ahead) ahead, \(behind) behind"
+        case let .secretInOutgoingCommits(path, rule, line):
+            "\(path):\(line): possible \(rule) in outgoing commits"
         }
     }
 
@@ -238,6 +246,19 @@ public enum StatusVocabulary {
         case let .switchingAwayFromUnpushed(branch, count):
             "\(branch) has \(count) commit(s) not on the server yet — "
                 + "they stay safely on the branch; push to share them"
+        case let .stagedSecretDetected(path, rule, line):
+            "\(path) line \(line) looks like a \(rule) — keep secrets out of git; "
+                + "add the file to .gitignore, and rotate it if it already reached a remote"
+        case let .pushingToProtectedBranch(branch):
+            "you're pushing straight to \(branch), usually the shared branch — "
+                + "many teams push to a separate branch and open a pull request"
+        case let .forcePushConsequence(branch, ahead, behind):
+            "\(branch) and the server have both moved on — \(ahead) here, \(behind) there; "
+                + "a normal push is refused, and forcing would rewrite commits other people "
+                + "may have, so fetch and resolve instead"
+        case let .secretInOutgoingCommits(path, rule, line):
+            "\(path) line \(line) in a commit you're about to push looks like a \(rule) — "
+                + "if it's real, rotate it now; removing it from a pushed commit doesn't un-leak it"
         }
     }
 

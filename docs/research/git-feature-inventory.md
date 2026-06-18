@@ -123,6 +123,21 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 
 - `git config --get core.excludesFile` — resolution across all scopes, exactly like git's own excludes lookup; unset falls back to the documented `$XDG_CONFIG_HOME/git/ignore` default, so provisioning never writes config.
 
+### Secret-scan rail (ADR 0092) — engine invocations
+
+`GitCore.SecretScan` (a default-on `stagedSecretDetected` pre-flight rail in the ADR 0070 family; feeds the ADR 0093 push-time secret rail):
+
+- `git diff --cached --unified=0 --no-color` — added staged lines scanned against a vendored regex + entropy ruleset (no bundled binary). Only the `+` side is scanned; removed lines are never flagged. Gated on there being staged paths, so it adds no spawn when nothing is staged.
+- `git diff --unified=0 --no-color <range>` — the ADR 0093 push-time variant scans the outgoing commit range (`@{u}..HEAD`), catching a secret committed in an earlier commit, not just the staged tree.
+- `.sprig/secret-allow` (read, not a git invocation) — per-finding allowlist (`<matched-value>` or `<path>:<ruleID>`) suppresses known-safe matches without disabling the rail.
+
+### Push-time rails (ADR 0093) — engine invocations
+
+Three warn-and-proceed rails evaluated in `SyncViewModel`'s push leg from the post-fetch state:
+
+- `pushingToProtectedBranch` / `forcePushConsequence` — **no new spawn**: pure reads of `SyncOps.branchSyncStates()` (the `for-each-ref` upstream/track parse the Sync verb already runs), keyed on the current branch name being a default branch and on `ahead>0 && behind>0` respectively.
+- `secretInOutgoingCommits` — reuses the `GitCore.SecretScan` outgoing-range scan above (`git diff --unified=0 --no-color @{u}..HEAD`), run only when there's an upstream and outgoing commits.
+
 ## Newer-git features Sprig explicitly takes advantage of
 
 Master plan §10 has a per-version (2.40 → 2.46) breakdown. Highlights:

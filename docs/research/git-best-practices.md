@@ -26,7 +26,7 @@ Approximate counts (master plan §11.13): **~30 (a), ~12 (b), ~6 (c), ~8 (d), ~2
 - **§11.8** — Hooks. Default stance: no hooks unless user opts in. Sprig-managed hooks under `.sprig/hooks/` checked into the repo. Third-party hook trust prompts (ADR 0050).
 - **§11.9** — Git LFS. Detection + one-click install (ADR 0029). Migration warnings ("rewrites history"), bandwidth-awareness panel, LFS lock UX.
 - **§11.10** — Submodules, subtrees, monorepo. Discourage submodules for new projects; document the decision tree. Best-practice defaults for repos that already use them (`submodule.recurse=true`, `push.recurseSubmodules=check`).
-- **§11.11** — Secrets + safety. gitleaks-style pre-commit scan, global `.gitignore` populated with macOS noise (`.DS_Store`, `.AppleDouble`, etc.), "remove file from history" wizard with revocation-first emphasis.
+- **§11.11** — Secrets + safety. gitleaks-style staged-secret scan **(shipped: ADR 0092 `stagedSecretDetected` rail, `GitCore.SecretScan`)**, global `.gitignore` populated with macOS noise (`.DS_Store`, `.AppleDouble`, etc.), "remove file from history" wizard with revocation-first emphasis (pending).
 - **§11.12** — Collaboration hygiene. PR/MR integration with GitHub/GitLab/Bitbucket/Gitea. Stacked-PR detection (ADR 0051). Draft PRs as default for fresh branches.
 
 ## What this file becomes

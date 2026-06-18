@@ -95,6 +95,16 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0083 | Interactive-rebase engine — printf todo over git's own sequencer           | accepted |
 | 0084 | Revert verb — forward-fix, merge commits deferred                          | accepted |
 | 0085 | Stacked-branch restack engine — frozen fork-point over git's rebase        | accepted |
+| 0086 | Binary & visual diff/merge (image, PDF, notebook, CSV) + binary conflicts  | proposed |
+| 0087 | Forge release creation (tag + notes + assets)                              | proposed |
+| 0088 | Agent-review surface — review/stage/split external-agent commits           | proposed |
+| 0089 | Selective sync — beginner folder picker over sparse-checkout               | proposed |
+| 0090 | File version history & restore-previous-version                            | proposed |
+| 0091 | Type-aware LFS guidance + document-store offer                              | proposed |
+| 0092 | Secret-scan pre-flight rail — default-on, promoted from M6                  | accepted |
+| 0093 | Push-time pre-flight rails — protected-branch, force, secret-in-push        | accepted |
+| 0094 | Ambient multi-repo status surface — roll-up window + opt-in nudge           | proposed |
+| 0095 | Optional AI situation-explainer — "what should I do now?"                  | proposed |
 
 ADRs 0001–0053 were ratified simultaneously in the initial scaffolding, based on the planning dialogue captured in the master plan file. Subsequent ADRs (0054+) follow the normal one-per-PR cadence.
 

@@ -148,7 +148,11 @@ struct VocabularyParentheticalPolicyTests {
             .committingToDefaultBranch(branch: "main", upstream: "origin/main"),
             .detachedHEAD(oid: sha), // ✓ detached
             .largeStagedFileWithoutLFS(path: "big.bin", sizeBytes: 60_000_000, thresholdBytes: 52_428_800),
-            .switchingAwayFromUnpushed(branch: "feature/x", unpushedCount: 2)
+            .switchingAwayFromUnpushed(branch: "feature/x", unpushedCount: 2),
+            .stagedSecretDetected(path: "a.env", rule: "AWS Access Key ID", line: 1),
+            .pushingToProtectedBranch(branch: "main"),
+            .forcePushConsequence(branch: "main", ahead: 1, behind: 2),
+            .secretInOutgoingCommits(path: "a.env", rule: "AWS Access Key ID", line: 1)
         ]
         let stales = [
             StaleBranch(
@@ -329,6 +333,21 @@ struct VocabularyWarningTests {
             register: .git
         )
         #expect(detachedShort == "detached HEAD at cccccccc")
+    }
+
+    @Test("staged-secret rail names the file, line, rule, and both remedies in plain copy")
+    func stagedSecretCopy() {
+        let warning = PreflightWarning.stagedSecretDetected(
+            path: "app/config.py", rule: "AWS Access Key ID", line: 12
+        )
+        let plain = StatusVocabulary.describe(warning, register: .plain)
+        #expect(plain.contains("app/config.py"))
+        #expect(plain.contains("AWS Access Key ID"))
+        #expect(plain.contains("line 12"))
+        #expect(plain.contains(".gitignore"))
+        #expect(plain.contains("rotate"), "plain copy carries the revocation-first remedy")
+        let git = StatusVocabulary.describe(warning, register: .git)
+        #expect(git.contains("app/config.py:12"))
     }
 
     @Test("set-aside outcomes format in both registers")

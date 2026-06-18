@@ -54,13 +54,21 @@ public struct SyncReport: Sendable, Equatable {
     /// no rewrite was attempted.
     public var preRebaseSnapshot: SnapshotRefName?
 
+    /// ADR 0093 push-time guard-rail warnings, computed from the
+    /// post-fetch sync state before the push leg (protected branch,
+    /// force consequence, secret in the outgoing range). Warn-and-proceed:
+    /// the push still runs its safe plain shape; the UI renders these as
+    /// banners. Empty when no rail fired.
+    public var preflightWarnings: [PreflightWarning]
+
     public init(
         fetched: Bool = false,
         skippedMidOperation: Bool = false,
         currentBranchFastForward: FastForwardOutcome? = nil,
         push: PushOutcome? = nil,
         rebase: RebaseOutcome? = nil,
-        preRebaseSnapshot: SnapshotRefName? = nil
+        preRebaseSnapshot: SnapshotRefName? = nil,
+        preflightWarnings: [PreflightWarning] = []
     ) {
         self.fetched = fetched
         self.skippedMidOperation = skippedMidOperation
@@ -68,6 +76,7 @@ public struct SyncReport: Sendable, Equatable {
         self.push = push
         self.rebase = rebase
         self.preRebaseSnapshot = preRebaseSnapshot
+        self.preflightWarnings = preflightWarnings
     }
 }
 
@@ -97,6 +106,7 @@ public actor SyncViewModel {
 
     private let runner: Runner
     private let autostash: Bool
+    private let preflight: PreflightChecks
 
     /// - Parameters:
     ///   - repoURL: worktree root.
@@ -106,10 +116,18 @@ public actor SyncViewModel {
     ///     current branch's fast-forward). Default false — the verb
     ///     reports "skipped: uncommitted changes" and lets the UI
     ///     offer the ADR 0069 set-aside retry explicitly.
-    public init(repoURL: URL, runner: Runner, autostash: Bool = false) {
+    ///   - preflight: the ADR 0070/0093 rail evaluator; shells pass one
+    ///     carrying the user's `suppressedGuardRails`.
+    public init(
+        repoURL: URL,
+        runner: Runner,
+        autostash: Bool = false,
+        preflight: PreflightChecks = PreflightChecks()
+    ) {
         self.repoURL = repoURL
         self.runner = runner
         self.autostash = autostash
+        self.preflight = preflight
     }
 
     /// Run the composite. Re-entry while `.busy` is a no-op.
@@ -140,9 +158,7 @@ public actor SyncViewModel {
 
         // ADR 0056: never mutate a repo that's mid-operation —
         // active locks OR parked merge/rebase/… state.
-        let midOperation = (try? GitMetadataPaths.resolveGitDir(forWorktree: repoURL))
-            .map { GitMetadataPaths.repoIsMidOperation(gitDir: $0) } ?? false
-        if midOperation {
+        if isMidOperation() {
             report.skippedMidOperation = true
             stage = .finished
             state = .success(report)
@@ -150,11 +166,12 @@ public actor SyncViewModel {
         }
 
         stage = .fastForwarding
+        let states: [BranchSyncState]
         do {
             let results = try await sync.fastForwardLocalBranches(
                 options: FastForwardOptions(autostash: autostash)
             )
-            let states = try await sync.branchSyncStates()
+            states = try await sync.branchSyncStates()
             if let currentName = states.first(where: \.isCurrent)?.name {
                 report.currentBranchFastForward = results
                     .first { $0.branch == currentName }?
@@ -165,6 +182,11 @@ public actor SyncViewModel {
             state = .failure(.init(from: error))
             return
         }
+
+        // ADR 0093 push-time rails — computed from the post-fetch /
+        // post-FF state so divergence and the outgoing range are current,
+        // before the push leg. Warn-and-proceed: the push still runs.
+        report.preflightWarnings = await preflight.pushWarnings(states: states, repoURL: repoURL, runner: runner)
 
         stage = .pushing
         do {
@@ -199,9 +221,7 @@ public actor SyncViewModel {
         var report = SyncReport()
 
         // ADR 0056: a repo already mid-operation can't start a rebase.
-        let midOperation = (try? GitMetadataPaths.resolveGitDir(forWorktree: repoURL))
-            .map { GitMetadataPaths.repoIsMidOperation(gitDir: $0) } ?? false
-        if midOperation {
+        if isMidOperation() {
             report.skippedMidOperation = true
             stage = .finished
             state = .success(report)
@@ -246,6 +266,14 @@ public actor SyncViewModel {
 
         stage = .finished
         state = .success(report)
+    }
+
+    /// ADR 0056 mid-operation guard: an active lock OR a parked
+    /// merge/rebase/… state. Shared by ``run()`` and
+    /// ``rebaseDivergedThenPush()``.
+    private func isMidOperation() -> Bool {
+        (try? GitMetadataPaths.resolveGitDir(forWorktree: repoURL))
+            .map { GitMetadataPaths.repoIsMidOperation(gitDir: $0) } ?? false
     }
 
     /// Reset to ``Stage/idle`` / ``TaskWindowState/idle`` so the verb

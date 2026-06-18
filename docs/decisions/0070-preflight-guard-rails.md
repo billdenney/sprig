@@ -107,6 +107,33 @@ existing repos alike. This pairs with the ADR 0075 backup deny-list: a file the 
 deliberately skips is exactly a file the user should hear about once, with a one-click
 durable fix.
 
+## Amendment — staged-secret rail (ADR 0092, 2026-06-18)
+
+The commit-time rail set gains a default-on `stagedSecretDetected` rail (railID
+`staged-secret`), promoted from M6 (`security.md` #5 / `git-best-practices.md` §11.11). It runs
+`GitCore.SecretScan` (a vendored regex + entropy ruleset; no bundled binary) over the staged
+hunks and warns — never blocks — when an added line looks like an API key, token, or private
+key, naming the file + line + rule and offering two remedies: add the file to `.gitignore`
+(reuse `GitignoreSuggestion`) and a revocation-first reminder (rotate if it already reached a
+remote). False positives are handled without disabling the rail via a per-finding allowlist
+(`.sprig/secret-allow`, entries `<matched-value>` or `<path>:<ruleID>`); per-rail suppression
+(`suppressedGuardRails`) remains the blunt instrument. The check is gated on there being staged
+paths, so it adds no git spawn in the common "nothing staged" case. The same engine seeds the
+push-time secret rail (ADR 0093, scanning `@{u}..HEAD`). Full rationale in ADR 0092.
+
+## Amendment — push-time rails (ADR 0093, 2026-06-18)
+
+The push-time set this ADR originally deferred ("Push-time rails remain deferred") now lands as
+ADR 0093, evaluated in `SyncViewModel`'s push leg from the post-fetch sync state (so divergence
+and the outgoing range are current): `pushingToProtectedBranch` (railID `pushing-to-protected-branch`;
+main/master heuristic, ADR 0063 can refine), `forcePushConsequence` (`force-push-consequence`;
+fires when the branch diverged so only a force could publish — Sprig still routes to fetch+resolve,
+never auto-forces, ADR 0052), and `secretInOutgoingCommits` (`secret-in-outgoing-commits`; runs the
+ADR 0092 `SecretScan` over `@{u}..HEAD`, catching a secret committed earlier, not just staged).
+All warn-and-proceed with per-rail suppression. Protected-branch and force are pure reads of
+`SyncOps.branchSyncStates`; the outgoing scan runs only when there's an upstream + outgoing commits.
+Full rationale in ADR 0093.
+
 ## Links
 
 - Implements `docs/research/git-beginner-affordances.md` item 2.3 (commit-time set).
