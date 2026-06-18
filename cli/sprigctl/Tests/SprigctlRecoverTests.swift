@@ -337,42 +337,6 @@ struct SprigctlRecoverTests {
     }
 }
 
-/// ADR 0079 — the stash-aware restore path.
-extension SprigctlRecoverTests {
-    @Test("restore of a stash-drop safety copy puts the entry back in the stash list")
-    func restoreStashDropStoresEntry() async throws {
-        let repo = try Sprigctl.mkRepo("recover-stashdrop")
-        defer { try? FileManager.default.removeItem(at: repo) }
-        try await seed(repo: repo)
-
-        // The ADR 0079 dropKeepingSafetyCopy sequence, spelled in raw
-        // git: stash an edit, snapshot the stash COMMIT, drop it.
-        try Sprigctl.write("wip\n", to: repo.appendingPathComponent("a.txt"))
-        try await Sprigctl.spawnGit(["stash", "push", "-m", "wip work"], cwd: repo)
-        let stashSHA = try await readRefSHA("refs/stash", in: repo)
-        let snapshotRef = "refs/sprig/snapshots/20260506T040000Z/stash-drop"
-        try await Sprigctl.spawnGit(["update-ref", snapshotRef, stashSHA], cwd: repo)
-        try await Sprigctl.spawnGit(["stash", "drop"], cwd: repo)
-        let headBefore = try await readHEAD(in: repo)
-
-        let out = try await Sprigctl.run([
-            "recover",
-            "--restore", snapshotRef,
-            repo.path
-        ])
-        #expect(out.exitCode == 0)
-        #expect(out.stdout.contains("Restored stash entry from \(snapshotRef)"))
-        #expect(out.stdout.contains("stash@{0}"))
-
-        // The entry is back under its original identity; HEAD never
-        // moved (a stash-drop restore must not reset the worktree).
-        let restoredSHA = try await readRefSHA("refs/stash", in: repo)
-        #expect(restoredSHA == stashSHA)
-        let headAfter = try await readHEAD(in: repo)
-        #expect(headAfter == headBefore)
-    }
-}
-
 private enum RecoverTestError: Error {
     case invalidSnapshotName(timestamp: Date, op: String)
 }

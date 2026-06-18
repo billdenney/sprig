@@ -64,6 +64,27 @@ public struct SnapshotRefName: Equatable, Hashable, Sendable {
         "\(SnapshotRefName.prefix)\(SnapshotRefName.formatTimestamp(timestamp))/\(op)"
     }
 
+    /// The op tag with any same-second uniquifier suffix stripped.
+    ///
+    /// ``SnapshotWriter`` mints same-second collisions of one op as
+    /// `<op>-2`, `<op>-3`, … Consumers that classify a snapshot by
+    /// matching against a known op constant — e.g. the Recover surface,
+    /// which restores an ``opStashDrop`` snapshot with `git stash store`
+    /// rather than the `reset --hard` every other op uses — MUST compare
+    /// against `baseOp`, never the raw ``op``, or a uniquified ref
+    /// (`stash-drop-2`) is misclassified and gets the wrong, possibly
+    /// destructive, restore verb.
+    ///
+    /// No known op constant ends in `-<digits>`, so stripping a single
+    /// trailing `-<one-or-more-ASCII-digits>` recovers the base
+    /// unambiguously; an op without that suffix is returned unchanged.
+    public var baseOp: String {
+        guard let dashIndex = op.lastIndex(of: "-") else { return op }
+        let suffix = op[op.index(after: dashIndex)...]
+        guard !suffix.isEmpty, suffix.allSatisfy({ ("0" ... "9").contains($0) }) else { return op }
+        return String(op[..<dashIndex])
+    }
+
     /// Parse a `refs/sprig/snapshots/<ts>/<op>` ref name.
     ///
     /// Returns nil if the input doesn't have the canonical shape:

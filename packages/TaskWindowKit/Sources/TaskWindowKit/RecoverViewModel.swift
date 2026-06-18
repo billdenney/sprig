@@ -196,7 +196,11 @@ public actor RecoverViewModel {
             let targetSHA = exists.stdoutString
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            if parsed.op == SnapshotRefName.opStashDrop {
+            // Match the op family, not the raw op: a same-second second
+            // stash-drop is minted as `stash-drop-2`, which still points
+            // at a stash COMMIT and must take the stash-store path, never
+            // `reset --hard`. (`baseOp` strips the `-N` uniquifier.)
+            if parsed.baseOp == SnapshotRefName.opStashDrop {
                 try await restoreStashEntry(refName: refName, sha: targetSHA)
                 return
             }

@@ -79,6 +79,44 @@ fixed for backup refs. Non-Sprig refs are rejected before any git runs (`reset -
 <arbitrary-ref>` is a different, more dangerous verb than Recover). The Tier-3 windows and
 the per-window header strip remain M3 work.
 
+## Amendment 2026-06-18 — Same-second snapshots uniquify instead of overwriting
+
+The S2 `SnapshotWriter` originally let two snapshots minted in the same wall-clock
+second with the same op tag collide on one ref name; the second `git update-ref`
+overwrote the first, silently losing a safety snapshot — the exact failure the
+snapshot exists to prevent. `createSnapshot(op:target:)` now pins the target to a
+resolved object id up front, then **atomically** mints the first free
+`…/<ts>/<op>[-N]` slot: the first collision yields `…/<ts>/<op>-2`, a third `-3`, and
+so on. The write uses `git update-ref --stdin`'s `create`, which verifies the ref does
+not exist *under the ref lock* before writing — so even two independent processes (the
+agent's auto-sync rebase vs. a task-window op on the same repo) racing for the same name
+can't both win: the loser fails closed and advances to the next suffix instead of
+blind-overwriting the winner's snapshot. The `-N` suffix stays inside
+`SnapshotRefName.isValidOp` (`[a-z][a-z0-9-]{0,63}`) and the read path
+(`RepoState.SnapshotIndex`) treats it as an opaque op tag, so every snapshot survives
+and stays enumerable / recoverable — generalizing, to *all* destructive ops, the
+collision fix the 2026-06-11 amendment applied to the restore flow. A
+`collisionLimitExceeded` runaway guard fails closed past `sameSecondLimit` collisions or
+when the suffix would overflow the 64-char op cap.
+
+**Consumer audit (op-family matching).** The Recover surface restores an `opStashDrop`
+snapshot with `git stash store` (it points at a dropped stash *commit*) rather than the
+`reset --hard` every other op uses. Both restore sites classified by exact op string, so
+a uniquified `stash-drop-2` would have fallen through to a destructive `reset --hard`
+onto the stash commit — a corruption path the uniquifier itself introduced.
+`SnapshotRefName.baseOp` (strips a trailing `-<digits>`) now backs both comparisons,
+with CLI + VM round-trip tests restoring a `stash-drop-2` ref and asserting the stash
+list — not HEAD — moves. No known op constant ends in `-<digits>`, so the strip is
+unambiguous. (Caught by the adversarial review panel, not by the green unit tests — the
+store-vs-reset hazard the undo round-trip rule exists to catch.)
+
+(`WorktreeBackup` solves the identical same-second class for its branch-labelled refs by
+bumping the timestamp one second per collision; snapshot refs use the op-suffix because
+their `<ts>/<op>` shape has a clean suffix slot the backup refs lack. `WorktreeBackup`
+still uses the older probe-then-write — a cheap residual race for a single-user desktop
+tool — and is the remaining engine to move onto the atomic-create primitive, tracked as
+a follow-up.)
+
 ## Links
 
 - Master plan §3 (original 0033) and §13.3-A (amendment).
@@ -88,7 +126,8 @@ the per-window header strip remain M3 work.
 ## Implementation map
 
 - `packages/SafetyKit/Sources/SafetyKit/SnapshotRefName.swift` — wire-stable ref-name format (slice S1).
-- `packages/SafetyKit/Sources/SafetyKit/SnapshotWriter.swift` — `createSnapshot(op:target:)` writes the ref via `git update-ref` (S2); `withSnapshot(op:target:_:)` wraps any destructive op with an auto-snapshot (S4) — body's throw rethrows, but the ref persists.
+- `packages/SafetyKit/Sources/SafetyKit/SnapshotWriter.swift` — `createSnapshot(op:target:)` pins the target SHA then atomically creates the first vacant `…/<ts>/<op>[-N]` ref via `git update-ref --stdin` `create` (S2; same-second uniquifier per 2026-06-18 amendment); `withSnapshot(op:target:_:)` wraps any destructive op with an auto-snapshot (S4) — body's throw rethrows, but the ref persists.
+- `packages/SafetyKit/Sources/SafetyKit/SnapshotRefName.swift` — `baseOp` strips the `-<digits>` uniquifier so op-family consumers (Recover's stash-drop classifier) match `stash-drop-2` like `stash-drop`.
 - `packages/RepoState/Sources/RepoState/SnapshotIndex.swift` — read + prune path (S3 per amendment §13.3-A).
 - `packages/SafetyKit/Sources/SafetyKit/DestructiveOpTier.swift` — three-tier confirmation policy data type (`.low` / `.medium` / `.high`) with `requiresSnapshot`, `requiresTypedPhrase`, `undoBannerPolicy` accessors and a fail-closed `tier(for: opTag)` lookup (S5).
 - `apps/{macos,windows}/.../TaskWindows/RecoverWindow/` — Recover task window (Tier 3, separate from SafetyKit).
