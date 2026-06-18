@@ -178,6 +178,27 @@ public enum TaskWindowVocabulary {
     public static let restackNotCheckedOut =
         "Switch to that branch before restacking it."
 
+    // MARK: - Selective sync (ADR 0089)
+
+    /// The reassuring safety note shown in the folder picker.
+    public static let selectiveSyncSafetyNote =
+        "Unchecked folders are removed from this computer only — your history is "
+            + "untouched, and they come back when you re-check them."
+
+    /// Shown when the repo uses non-cone sparse-checkout patterns the
+    /// cone-only picker won't rewrite.
+    public static let selectiveSyncAdvancedPatterns =
+        "This repository uses advanced sparse-checkout patterns — change them with the git command line."
+
+    /// Fail-closed message: the named folders hold unsaved work and
+    /// can't be set aside cleanly.
+    public static func selectiveSyncBlocked(_ folders: [String]) -> String {
+        let list = folders.joined(separator: ", ")
+        return "These folders have unsaved work and can't be set aside cleanly: \(list). "
+            + "Save or set the work aside first, or remove the folders anyway — "
+            + "Sprig keeps a backup you can restore."
+    }
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the

@@ -143,6 +143,16 @@ Three warn-and-proceed rails evaluated in `SyncViewModel`'s push leg from the po
 - `binaryTypeWithoutLFS` rail (`LFSKit.LFSBinaryTypes`): for staged files whose extension is in the curated binary set and that are under the size threshold, `git check-attr -z --stdin filter` (via `LFSKit.LFSAttributeChecker`, same call the size rail uses) decides which aren't LFS-tracked. The extension match itself is a pure read of the porcelain paths — no spawn.
 - `LFSKit.LFSTrack.track(pattern:)` (the "Track with LFS" remedy): `git lfs version` (via `LFSInstall.probe`) to detect git-lfs — a typed `gitLFSNotAvailable` refusal if absent (never a silent install) — then `git lfs track <pattern>`, which edits `.gitattributes` (and does **not** run `git lfs install`).
 
+### Selective sync — sparse-checkout folder picker (ADR 0089) — engine invocations
+
+`GitCore.SparseCheckout` (cone-mode only; the beginner "Choose folders to keep on this Mac…" surface + `sprigctl sparse`):
+
+- `git ls-tree -z HEAD` — top-level folder candidates; the parser keeps only `tree` entries, so repo-root files (blobs) and submodule gitlinks (type `commit`) are excluded from the picker.
+- `git config --get core.sparseCheckout` + `git sparse-checkout list` — read the current selection (`.full` vs `.cone(dirs)`).
+- `git sparse-checkout init --cone` / `set <dirs>` / `add <dirs>` / `disable` — the write verbs; `set` materializes exactly the kept folders, `disable` restores the full worktree.
+- `git status --porcelain=v2 -z --untracked-files=all` — `planChange(to:)`'s dirty-folder guard: dropped folders holding uncommitted/untracked/staged work are reported as `blockedDrops` (sparse-checkout's "lossless" claim holds only for clean folders), so the surfaces fail closed.
+- Force path (after a fail-closed report, only with explicit confirmation): `SafetyKit.WorktreeBackup.createBackupIfDirty()` (captures tracked + untracked work) **first**, then per blocked folder `git restore --worktree --staged -- <dir>` + `git clean -fd -- <dir>` (no `-x`, so ignored files survive; no `-ff`, so nested repos survive), then `sparse-checkout set`. Recoverable via the Recover surface — never moves HEAD.
+
 ## Newer-git features Sprig explicitly takes advantage of
 
 Master plan §10 has a per-version (2.40 → 2.46) breakdown. Highlights:
