@@ -112,10 +112,16 @@ store-vs-reset hazard the undo round-trip rule exists to catch.)
 
 (`WorktreeBackup` solves the identical same-second class for its branch-labelled refs by
 bumping the timestamp one second per collision; snapshot refs use the op-suffix because
-their `<ts>/<op>` shape has a clean suffix slot the backup refs lack. `WorktreeBackup`
-still uses the older probe-then-write — a cheap residual race for a single-user desktop
-tool — and is the remaining engine to move onto the atomic-create primitive, tracked as
-a follow-up.)
+their `<ts>/<op>` shape has a clean suffix slot the backup refs lack. As of this
+amendment `WorktreeBackup.mintBackup` writes through the **same atomic
+`git update-ref --stdin` `create`** as `SnapshotWriter` — verifying non-existence under
+the ref lock and advancing the loser to the next second instead of overwriting — so the
+two engines are now consistent. This closes the former probe-then-write TOCTOU it left
+open: two same-second backups of one branch (the agent's auto-backup vs. a restore's
+fail-closed pre-backup) could both probe a name vacant and the second blind-overwrite
+the first, silently losing a backup. Low severity for a single-user desktop tool, but it
+was the last residual instance of the exact failure class this amendment exists to
+close.)
 
 ## Links
 
@@ -128,6 +134,7 @@ a follow-up.)
 - `packages/SafetyKit/Sources/SafetyKit/SnapshotRefName.swift` — wire-stable ref-name format (slice S1).
 - `packages/SafetyKit/Sources/SafetyKit/SnapshotWriter.swift` — `createSnapshot(op:target:)` pins the target SHA then atomically creates the first vacant `…/<ts>/<op>[-N]` ref via `git update-ref --stdin` `create` (S2; same-second uniquifier per 2026-06-18 amendment); `withSnapshot(op:target:_:)` wraps any destructive op with an auto-snapshot (S4) — body's throw rethrows, but the ref persists.
 - `packages/SafetyKit/Sources/SafetyKit/SnapshotRefName.swift` — `baseOp` strips the `-<digits>` uniquifier so op-family consumers (Recover's stash-drop classifier) match `stash-drop-2` like `stash-drop`.
+- `packages/SafetyKit/Sources/SafetyKit/WorktreeBackup.swift` — `mintBackup(commit:branch:startingAt:)` writes ADR 0075 backup refs through the same atomic `git update-ref --stdin` `create`, bumping the timestamp one second per collision (its analog of the op-suffix); per the 2026-06-18 amendment, closing the cross-engine TOCTOU gap.
 - `packages/RepoState/Sources/RepoState/SnapshotIndex.swift` — read + prune path (S3 per amendment §13.3-A).
 - `packages/SafetyKit/Sources/SafetyKit/DestructiveOpTier.swift` — three-tier confirmation policy data type (`.low` / `.medium` / `.high`) with `requiresSnapshot`, `requiresTypedPhrase`, `undoBannerPolicy` accessors and a fail-closed `tier(for: opTag)` lookup (S5).
 - `apps/{macos,windows}/.../TaskWindows/RecoverWindow/` — Recover task window (Tier 3, separate from SafetyKit).

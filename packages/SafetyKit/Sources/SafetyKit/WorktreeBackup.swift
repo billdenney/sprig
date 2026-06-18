@@ -16,7 +16,9 @@
 //   3. Identical-tree dedup: if the newest backup for this branch
 //      already has this exact tree, return it instead of minting a
 //      twin (a dirty-but-unchanged tree across ticks costs nothing).
-//   4. `commit-tree` (+ `-p HEAD` when HEAD exists) → `update-ref`.
+//   4. `commit-tree` (+ `-p HEAD` when HEAD exists) → atomic
+//      `update-ref --stdin` `create` (timestamp-bumped one second per
+//      same-second collision, so a concurrent backup can't clobber it).
 //
 // Restore is fail-closed: it FIRST backs up the current dirty state,
 // then `git restore --source=<backup> --worktree -- :/` — additive
@@ -167,19 +169,49 @@ public struct WorktreeBackup: Sendable {
         let commit = try await runner.run(commitArgs).stdoutString
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let ref = try await vacantRef(branch: branch, startingAt: clock())
-        _ = try await runner.run(["update-ref", ref.refName, commit])
-        return ref
+        return try await mintBackup(commit: commit, branch: branch, startingAt: clock())
     }
 
-    /// Mint a ref name that doesn't already point at a DIFFERENT
-    /// commit — two backups of the same branch within one second
-    /// must not clobber each other (restore's fail-closed pre-backup
-    /// runs moments after the backup being restored was read; an
-    /// overwrite there would destroy the restore source). Bumps the
-    /// timestamp by one second per collision, bounded.
-    private func vacantRef(branch: String, startingAt date: Date) async throws -> BackupRefName {
-        for offset in 0 ..< 16 {
+    /// Upper bound on same-second collisions before
+    /// ``mintBackup(commit:branch:startingAt:)`` fails closed. Each
+    /// collision bumps the timestamp one second, so — unlike
+    /// ``SnapshotWriter``'s op-suffix uniquifier, whose suffix space is
+    /// effectively unbounded — this advances the ref into a *future*
+    /// second. 16 keeps that future-stamping bounded while leaving ample
+    /// headroom past any realistic same-second contention (two writers,
+    /// not sixteen).
+    private static let sameSecondLimit = 16
+
+    /// Atomically write `commit` to the first vacant
+    /// `refs/sprig/backup/<ts>/<branch>` slot, bumping the timestamp one
+    /// second per collision. Two backups of the same branch within one
+    /// second must not clobber each other: restore's fail-closed
+    /// pre-backup runs moments after the backup being restored was read,
+    /// and the agent's periodic auto-backup can land in the same second
+    /// as a task-window restore on the same repo — an overwrite there
+    /// would destroy a backup the user may still need.
+    ///
+    /// The write uses `git update-ref --stdin`'s `create`, which verifies
+    /// the ref does **not** exist *under the ref lock* before writing, so
+    /// the loser of a race fails closed and advances to the next second
+    /// instead of blind-overwriting the winner's backup. (The old
+    /// probe-then-`update-ref` left a TOCTOU window: two writers could
+    /// both probe a name vacant and the second blind-overwrite the
+    /// first.) A failed `create` is classified by re-checking existence
+    /// (exit code, not git's version-/locale-dependent stderr): if the
+    /// name is now taken, advance to the next second; otherwise it is a
+    /// real git failure (lock contention, I/O) and surfaces as
+    /// ``GitError``. Mirrors ``SnapshotWriter``'s `mintUniqueSnapshot`,
+    /// differing only in the collision step (timestamp bump vs. op
+    /// suffix — backup refs carry a branch label where snapshot refs
+    /// carry an op tag, so the clean suffix slot lives in different
+    /// segments).
+    private func mintBackup(
+        commit: String,
+        branch: String,
+        startingAt date: Date
+    ) async throws -> BackupRefName {
+        for offset in 0 ..< Self.sameSecondLimit {
             guard let candidate = BackupRefName(
                 timestamp: date.addingTimeInterval(TimeInterval(offset)),
                 branchLabel: branch
@@ -189,14 +221,30 @@ public struct WorktreeBackup: Sendable {
                     rawSnippet: branch
                 )
             }
-            let probe = try await runner.run(
+            let create = try await runner.run(
+                ["update-ref", "--stdin"],
+                stdin: Data("create \(candidate.refName) \(commit)\n".utf8),
+                throwOnNonZero: false
+            )
+            if create.exitCode == 0 { return candidate }
+            // The create failed. If the name is already taken this
+            // second, advance to the next second; otherwise it is a
+            // genuine git failure, not a collision.
+            let exists = try await runner.run(
                 ["rev-parse", "--quiet", "--verify", candidate.refName],
                 throwOnNonZero: false
             )
-            if probe.exitCode != 0 { return candidate }
+            guard exists.exitCode == 0 else {
+                throw GitError.nonZeroExit(
+                    command: ["update-ref", "--stdin", "create", candidate.refName, commit],
+                    exitCode: create.exitCode,
+                    stderr: create.stderrString,
+                    stdout: create.stdoutString
+                )
+            }
         }
         throw GitError.parseFailure(
-            context: "could not find a vacant backup ref slot within 16 seconds of",
+            context: "could not find a vacant backup ref slot within \(Self.sameSecondLimit) seconds of",
             rawSnippet: BackupRefName(timestamp: date, branchLabel: branch)?.refName ?? branch
         )
     }
@@ -241,7 +289,8 @@ public struct WorktreeBackup: Sendable {
     ///
     /// The source is pinned to its commit SHA *before* the pre-restore
     /// backup runs, so the restore is immune to any ref movement in
-    /// between (belt to ``vacantRef``'s suspenders).
+    /// between (belt to ``mintBackup(commit:branch:startingAt:)``'s
+    /// suspenders).
     public func restore(_ refName: String) async throws -> WorktreeRestoreOutcome {
         guard let ref = BackupRefName.parse(refName) else {
             throw GitError.parseFailure(
