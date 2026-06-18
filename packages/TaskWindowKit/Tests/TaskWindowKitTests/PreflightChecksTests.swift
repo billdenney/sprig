@@ -76,11 +76,19 @@ struct PreflightBranchChecksTests {
         let secret = PreflightWarning.stagedSecretDetected(
             path: "config.py", rule: "AWS Access Key ID", line: 3
         )
+        let protectedBranch = PreflightWarning.pushingToProtectedBranch(branch: "main")
+        let forceConsequence = PreflightWarning.forcePushConsequence(branch: "main", ahead: 1, behind: 2)
+        let outgoingSecret = PreflightWarning.secretInOutgoingCommits(
+            path: "config.py", rule: "AWS Access Key ID", line: 3
+        )
         #expect(defaultBranch.railID == "committing-to-default-branch")
         #expect(detached.railID == "detached-head")
         #expect(large.railID == "large-staged-file-without-lfs")
         #expect(switching.railID == "switching-away-from-unpushed")
         #expect(secret.railID == "staged-secret")
+        #expect(protectedBranch.railID == "pushing-to-protected-branch")
+        #expect(forceConsequence.railID == "force-push-consequence")
+        #expect(outgoingSecret.railID == "secret-in-outgoing-commits")
     }
 
     private func syncState(

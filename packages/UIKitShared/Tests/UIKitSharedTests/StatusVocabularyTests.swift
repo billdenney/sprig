@@ -148,7 +148,11 @@ struct VocabularyParentheticalPolicyTests {
             .committingToDefaultBranch(branch: "main", upstream: "origin/main"),
             .detachedHEAD(oid: sha), // ✓ detached
             .largeStagedFileWithoutLFS(path: "big.bin", sizeBytes: 60_000_000, thresholdBytes: 52_428_800),
-            .switchingAwayFromUnpushed(branch: "feature/x", unpushedCount: 2)
+            .switchingAwayFromUnpushed(branch: "feature/x", unpushedCount: 2),
+            .stagedSecretDetected(path: "a.env", rule: "AWS Access Key ID", line: 1),
+            .pushingToProtectedBranch(branch: "main"),
+            .forcePushConsequence(branch: "main", ahead: 1, behind: 2),
+            .secretInOutgoingCommits(path: "a.env", rule: "AWS Access Key ID", line: 1)
         ]
         let stales = [
             StaleBranch(

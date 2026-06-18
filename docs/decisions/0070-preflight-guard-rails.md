@@ -121,6 +121,19 @@ remote). False positives are handled without disabling the rail via a per-findin
 paths, so it adds no git spawn in the common "nothing staged" case. The same engine seeds the
 push-time secret rail (ADR 0093, scanning `@{u}..HEAD`). Full rationale in ADR 0092.
 
+## Amendment — push-time rails (ADR 0093, 2026-06-18)
+
+The push-time set this ADR originally deferred ("Push-time rails remain deferred") now lands as
+ADR 0093, evaluated in `SyncViewModel`'s push leg from the post-fetch sync state (so divergence
+and the outgoing range are current): `pushingToProtectedBranch` (railID `pushing-to-protected-branch`;
+main/master heuristic, ADR 0063 can refine), `forcePushConsequence` (`force-push-consequence`;
+fires when the branch diverged so only a force could publish — Sprig still routes to fetch+resolve,
+never auto-forces, ADR 0052), and `secretInOutgoingCommits` (`secret-in-outgoing-commits`; runs the
+ADR 0092 `SecretScan` over `@{u}..HEAD`, catching a secret committed earlier, not just staged).
+All warn-and-proceed with per-rail suppression. Protected-branch and force are pure reads of
+`SyncOps.branchSyncStates`; the outgoing scan runs only when there's an upstream + outgoing commits.
+Full rationale in ADR 0093.
+
 ## Links
 
 - Implements `docs/research/git-beginner-affordances.md` item 2.3 (commit-time set).

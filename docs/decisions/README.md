@@ -102,7 +102,7 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0090 | File version history & restore-previous-version                            | proposed |
 | 0091 | Type-aware LFS guidance + document-store offer                              | proposed |
 | 0092 | Secret-scan pre-flight rail — default-on, promoted from M6                  | accepted |
-| 0093 | Push-time pre-flight rails — protected-branch, force, secret-in-push        | proposed |
+| 0093 | Push-time pre-flight rails — protected-branch, force, secret-in-push        | accepted |
 | 0094 | Ambient multi-repo status surface — roll-up window + opt-in nudge           | proposed |
 | 0095 | Optional AI situation-explainer — "what should I do now?"                  | proposed |
 
