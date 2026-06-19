@@ -88,6 +88,36 @@ After staging, the diff re-renders from the new index/working-tree state. The se
 - `git apply --cached --recount` requires the patch's hunk headers to be approximately right; the slicer must emit valid hunk-header counts. Edge cases: empty hunks (skip), empty selections (button disabled), selections crossing CRLF boundaries on Windows (test with `core.autocrlf=input` as default per ADR 0049).
 - Performance on very large diffs (>10k lines) needs profiling; benchmark gate adds `tests/benchmarks/CommitComposerStaging/` to ADR 0021's budget.
 
+## Implementation status
+
+Engine half shipped (the algorithmic core + CommitComposer wiring):
+
+- `GitCore.DiffPatchSlicer` — `slice(diff:selection:) -> SlicedPatch` (and the ADR's
+  `patch(from:selection:)` convenience). Pure, Tier 1. Parses unified `git diff`, carries each
+  file's header block **verbatim** (so new-file / deleted-file / rename / mode headers stage
+  correctly), and rewrites only hunk bodies: a selected `+`/`-` is kept, an unselected `+` is
+  dropped, an unselected `-` becomes context, `\ No newline` markers follow their line, and the
+  `@@` counts are re-derived (with `git apply --recount` as the safety net). A change-free
+  selection throws `noChangeSelected`. `SlicedPatch` also carries `addedLines` / `removedLines`
+  / `files` for the "Stage selection: N added, M removed in …" a11y affordance.
+  - **No-newline-at-EOF safety.** Splitting a change to a file's last line when that file has no
+    trailing newline is unrepresentable as a partial patch (the `\ No newline` state can't be
+    both kept and changed) — git would *silently* stage merged bytes. The slicer detects the
+    stranded marker and throws `cannotSplitEndOfFileChange` instead of emitting a corrupting
+    patch; the user stages the whole end-of-file change. (Confirmed by adversarial review.)
+  - **CRLF.** Line splitting runs over Unicode *scalars*, not Characters — Swift folds `\r\n`
+    into one grapheme cluster, so a Character-level newline scan would mis-parse every CRLF diff.
+- `TaskWindowKit.CommitComposerViewModel.stageSelection(in:selection:)` — slices then
+  `git apply --cached --recount -` (patch via stdin) and refreshes the partition. Index-only and
+  reversible (`git restore --staged`), so — like `stage(_:)` — it mints **no** snapshot.
+
+Verified by pure tests (exact emitted patch, so `--recount` can't mask a count bug) plus
+real-git round-trips that slice → `apply --cached` → assert the index byte-exactly (sub-hunk
+subset, stage-only-removal, stage-only-addition, multi-file, no-newline-at-EOF). The same
+`DiffPatchSlicer` is the reusable substrate for ADR 0088's "split a commit" (reset --soft +
+region staging). The Tier-3 selection UI (drag-select in the diff renderer, the floating
+"Stage selection" button, `⌘⇧S`) lands with the macOS shell.
+
 ## Links
 
 - Master plan §13.3-C.
