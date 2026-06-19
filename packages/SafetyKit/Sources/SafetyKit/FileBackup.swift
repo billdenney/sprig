@@ -227,7 +227,11 @@ public struct FileBackup: Sendable {
             at: absolute.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try bytes.write(to: absolute)
+        // Atomic-with-retry: a plain write would leave the worktree file
+        // torn if we crash or the disk fills mid-write — precisely the
+        // bytes `preRestore` just captured — and would fail on Windows
+        // when Defender or an editor holds a handle on the target.
+        try await AtomicWriteWithRetry.run(bytes, to: absolute)
         return FileRestoreOutcome(restoredFrom: ref, preRestoreBackup: preRestore)
     }
 

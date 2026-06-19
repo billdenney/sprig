@@ -75,9 +75,11 @@ struct SprigctlFileHistoryTests {
         }
 
         let list = try await Sprigctl.run(["file-history", "file.txt", "--repo", repo.path])
-        let firstChars = lines(list.stdout).compactMap { $0.first }
+        let firstChars = lines(list.stdout).compactMap(\.first)
         var counts: [Character: Int] = [:]
-        for char in firstChars { counts[char, default: 0] += 1 }
+        for char in firstChars {
+            counts[char, default: 0] += 1
+        }
         let ambiguous = try #require(counts.first { $0.value >= 2 }?.key)
 
         let out = try await Sprigctl.run(

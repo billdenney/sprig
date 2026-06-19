@@ -35,6 +35,7 @@
 //     becomes its own VM that wraps this one.
 
 import Foundation
+import SafetyKit
 
 /// User-editable Sprig preferences persisted as JSON.
 ///
@@ -283,7 +284,7 @@ public actor PreferencesViewModel {
                 // transient Windows file-sharing violations
                 // (Defender's real-time scanner, editors holding the
                 // prefs file open, etc.). Single attempt on macOS /
-                // Linux; up to ~3.1 s of retry on Windows.
+                // Linux; up to ~64 s of backoff retry on Windows.
                 try await AtomicWriteWithRetry.run(data, to: url)
                 await self?.recordSuccess(at: timestamp)
             } catch is CancellationError {

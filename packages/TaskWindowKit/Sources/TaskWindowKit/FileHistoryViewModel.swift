@@ -115,7 +115,12 @@ public actor FileHistoryViewModel {
                     at: target.deletingLastPathComponent(),
                     withIntermediateDirectories: true
                 )
-                try payload.content.write(to: target)
+                // Atomic-with-retry: the swap is all-or-nothing (no torn
+                // file if we crash mid-write — exactly the bytes the
+                // backup above is meant to protect) and it absorbs the
+                // transient Windows sharing violation when the editor the
+                // user just tweaked the file in still holds a handle.
+                try await AtomicWriteWithRetry.run(payload.content, to: target)
             } catch {
                 // The write failed after the backup was minted — delete
                 // the orphan ref so no phantom "undo" is offered.

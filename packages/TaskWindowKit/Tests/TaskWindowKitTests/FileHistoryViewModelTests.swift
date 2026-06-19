@@ -120,4 +120,30 @@ struct FileHistoryViewModelTests {
         await vm.showVersion(only)
         #expect(await vm.selectedContent?.isBinary == true)
     }
+
+    @Test("restoring a binary version writes its bytes back byte-for-byte (atomic write preserves NUL/high bytes)")
+    func restoreBinaryRoundTrips() async throws {
+        let (dir, runner) = try await makeRepo("binary-restore")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let original = Data([0x00, 0x01, 0xFF, 0x00, 0x80])
+        try original.write(to: dir.appendingPathComponent("blob.bin"))
+        _ = try await runner.run(["add", "blob.bin"])
+        _ = try await runner.run(["commit", "-m", "add binary v1"])
+        // A second, different binary version lands in the worktree + HEAD.
+        try Data([0x02, 0x00, 0x03]).write(to: dir.appendingPathComponent("blob.bin"))
+        _ = try await runner.run(["add", "blob.bin"])
+        _ = try await runner.run(["commit", "-m", "binary v2"])
+
+        let vm = FileHistoryViewModel(repoURL: dir, filePath: "blob.bin", runner: runner)
+        await vm.loadHistory()
+        let firstVersion = try #require(await vm.revisions.last)
+        await vm.restore(firstVersion)
+
+        #expect(await vm.state.successValue != nil)
+        // The on-disk bytes are the older version, exactly — the atomic
+        // write neither truncated at the embedded NUL nor left a torn tail.
+        let onDisk = try Data(contentsOf: dir.appendingPathComponent("blob.bin"))
+        #expect(onDisk == original)
+        #expect(await vm.lastSafetyBackup != nil)
+    }
 }

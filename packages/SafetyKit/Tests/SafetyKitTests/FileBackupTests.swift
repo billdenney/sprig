@@ -53,6 +53,23 @@ struct FileBackupTests {
         #expect(preBytes == "an older version\n")
     }
 
+    @Test("restore writes binary bytes back byte-for-byte (atomic write preserves NUL/high bytes)")
+    func restoreBinaryRoundTrips() async throws {
+        let (dir, runner) = try await makeRepo("binary")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let original = Data([0x00, 0x01, 0xFF, 0x00, 0x80])
+        try original.write(to: dir.appendingPathComponent("blob.bin"))
+        let backup = FileBackup(runner: runner)
+
+        let ref = try #require(try await backup.backupFile(at: "blob.bin"))
+        // Clobber with different bytes, then restore the captured backup.
+        try Data([0x02, 0x00, 0x03]).write(to: dir.appendingPathComponent("blob.bin"))
+        _ = try await backup.restore(ref.refName, to: "blob.bin")
+
+        let onDisk = try Data(contentsOf: dir.appendingPathComponent("blob.bin"))
+        #expect(onDisk == original)
+    }
+
     @Test("backupFile returns nil when the file does not exist")
     func backupMissingFileIsNil() async throws {
         let (dir, runner) = try await makeRepo("missing")
