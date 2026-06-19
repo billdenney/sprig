@@ -62,6 +62,22 @@ worktrees.
 - "Did Sprig author this?" needs a reliable provenance signal (e.g., tagging Sprig-initiated
   operations) so the heuristic doesn't flag the user's own GUI commits — call this out in impl.
 
+## Prerequisites status
+
+Both blockers are now built (the surface itself is still to come):
+
+- **Region staging (ADR 0061)** — `GitCore.DiffPatchSlicer`, the substrate for "split a commit"
+  (`reset --soft` + region staging). Shipped.
+- **Provenance signal** — `GitCore.OperationProvenance` answers "did Sprig author this commit?".
+  It records the SHAs Sprig's verbs create (`recordAuthored`) plus a `recordHeads` ref→sha
+  checkpoint, in a **file** at `<git-common-dir>/sprig/provenance.json` — local (never pushed),
+  repo-global across worktrees, and gc-neutral (a ref would *pin* the commit, the opposite of
+  what provenance wants). Consumers call `authoredCommits()` / `externalCommits(among:)` /
+  `lastKnownHeads()`. `CommitComposerViewModel` records every commit it makes; **wiring the
+  other commit-producing verbs (merge, rebase, squash, revert, restack, cherry-pick) is part of
+  this ADR's slice** — until then their commits would read as "external", so do that wiring
+  before the detection heuristic ships.
+
 ## Links
 
 - Builds on ADR 0056 (external-agent awareness), 0061 (region staging), 0033/0075

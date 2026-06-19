@@ -86,6 +86,13 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git diff` — the unstaged worktree-vs-index diff the UI renders and the user drag-selects in. `DiffPatchSlicer.slice(diff:selection:)` then rewrites that diff into a patch staging exactly the selected +/- lines (unselected `+` dropped, unselected `-` demoted to context, `@@` counts re-derived, per-file headers carried verbatim).
 - `git apply --cached --recount -` (patch on stdin) — applies the sliced patch to the index only. `--recount` lets git re-derive the hunk line counts, so a sub-hunk slice never needs byte-perfect `@@` headers. Index-only and reversible (`git restore --staged`), so no snapshot is minted — staging isn't a destructive op.
 
+### Operation provenance (ADR 0088 prerequisite) — engine invocations
+
+`GitCore.OperationProvenance` (the "did Sprig author this?" signal the agent-review surface consumes):
+
+- `git rev-parse --path-format=absolute --git-common-dir` — resolves the **common** git dir (shared by all linked worktrees) so the provenance store at `<common>/sprig/provenance.json` is repo-global: a commit authored in one worktree is recognized as Sprig-authored from any worktree. `--path-format=absolute` (git 2.31+) gives an absolute path even from the main worktree, where `--git-common-dir` alone returns a relative `.git`.
+- No other git invocation: provenance is a plain JSON file (authored-SHA set + a ref→sha checkpoint), local-only (never pushed) and gc-neutral (a ref pointing at the commit would *pin* it, defeating `git gc` — the file stores SHAs as text and pins nothing). The producer side is each commit-making verb calling `recordAuthored(<new-sha>)`; the consumer is ADR 0088's detector calling `externalCommits(among:)`.
+
 ### Sync verb (ADR 0071) — engine invocations
 
 `SyncOps.pushCurrentBranch` + `TaskWindowKit.SyncViewModel` (fetch and fast-forward legs reuse ADR 0068's invocations below):
