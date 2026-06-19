@@ -52,6 +52,21 @@ struct AgentCommand: AsyncParsableCommand {
     )
     var duration: Double?
 
+    @Flag(
+        name: .long,
+        help: ArgumentHelp(
+            "Exit when the last connected IPC client disconnects (with --socket/--pipe).",
+            discussion: "Decouples the agent's lifetime from --duration for "
+                + "short-lived diagnostic and test hosts: the agent shuts "
+                + "down cleanly the moment its last client closes, so "
+                + "--duration becomes a pure safety ceiling instead of the "
+                + "deadline the host races. The persistent platform hosts "
+                + "(macOS LaunchAgent, Windows Service) must serve future "
+                + "clients, so they omit this flag and keep running."
+        )
+    )
+    var exitOnLastClient: Bool = false
+
     @Option(
         name: .long,
         help: "Print one `# stats: {…}` JSON line on stderr every SECONDS. 0 (default) disables."
@@ -159,6 +174,15 @@ struct AgentCommand: AsyncParsableCommand {
 
         let stopTask = makeStopTask(agent: agent, sink: sink)
         defer { stopTask?.cancel() }
+
+        // Second, independent stop trigger (--exit-on-last-client):
+        // shut down when the serving layer reports its last client
+        // gone. No-op when serving is absent or the flag is off (the
+        // signal is an already-finished stream then). Whichever of
+        // this and the --duration timer fires first wins; both
+        // `agent.stop()` and `sink.finish()` are idempotent.
+        let lastClientTask = makeLastClientStopTask(serving: serving, agent: agent, sink: sink)
+        defer { lastClientTask?.cancel() }
 
         var err = StderrStream()
         print("# agent: watching \(rootURL.path)", to: &err)

@@ -48,10 +48,19 @@ public actor ClientRequestDispatcher {
     /// nil for every path (treats all paths as unbadged).
     public typealias BadgeResolver = @Sendable (URL) async -> String?
 
+    /// Invoked once when the inbound loop ends because the client
+    /// disconnected (its `transport.messages()` stream finished) — NOT
+    /// when ``stop()`` tears the dispatcher down. Lets a host count
+    /// live clients and react to the last one leaving (the
+    /// `sprigctl agent --exit-on-last-client` lifecycle). Default nil:
+    /// disconnects are unobserved, the historical behavior.
+    public typealias DisconnectHandler = @Sendable () async -> Void
+
     private let transport: any Transport
     private let registry: SubscriptionRegistry
     private let routes: SubscriptionTransportRoutes?
     private let badgeResolver: BadgeResolver
+    private let onDisconnect: DisconnectHandler?
 
     private var task: Task<Void, Never>?
     private var running = false
@@ -69,16 +78,22 @@ public actor ClientRequestDispatcher {
     ///     to the same transport via ``TransportBadgeEventSink``.
     ///   - badgeResolver: resolves a path → wire-stable badge string
     ///     for the synchronous `badgeQuery` path. Default returns nil.
+    ///   - onDisconnect: optional — fired once when the client
+    ///     disconnects (the inbound stream finishes on its own), so a
+    ///     multi-client host can track live connections. NOT fired by
+    ///     ``stop()`` (host teardown). Default nil.
     public init(
         transport: any Transport,
         registry: SubscriptionRegistry,
         routes: SubscriptionTransportRoutes? = nil,
-        badgeResolver: @escaping BadgeResolver = { _ in nil }
+        badgeResolver: @escaping BadgeResolver = { _ in nil },
+        onDisconnect: DisconnectHandler? = nil
     ) {
         self.transport = transport
         self.registry = registry
         self.routes = routes
         self.badgeResolver = badgeResolver
+        self.onDisconnect = onDisconnect
     }
 
     /// Begin draining `transport.messages()` and dispatching. Idempotent
@@ -90,6 +105,7 @@ public actor ClientRequestDispatcher {
         let registry = self.registry
         let routes = self.routes
         let resolver = self.badgeResolver
+        let onDisconnect = self.onDisconnect
         task = Task {
             for await data in transport.messages() {
                 if Task.isCancelled { break }
@@ -100,6 +116,14 @@ public actor ClientRequestDispatcher {
                     routes: routes,
                     resolver: resolver
                 )
+            }
+            // The inbound stream finished. Distinguish the two ways
+            // that happens: a real client disconnect (EOF closes
+            // `messages()`) vs. ``stop()`` cancelling this task during
+            // host teardown. Only the former is a client leaving, so
+            // only the former fires `onDisconnect`.
+            if !Task.isCancelled {
+                await onDisconnect?()
             }
         }
     }

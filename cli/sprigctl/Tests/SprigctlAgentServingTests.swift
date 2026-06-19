@@ -28,24 +28,24 @@ extension SprigctlAgentTests {
             try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
             let socketPath = "/tmp/sprig-agent-e2e-\(UUID().uuidString.prefix(8)).sock"
 
-            // Agent process runs concurrently; the duration is a safety
-            // cap, not a tight deadline. 60 s, not 8/25: on a loaded
-            // hosted macos-15 runner the agent's own process spawn +
-            // UDS-server bring-up can eat *tens* of seconds before the
-            // client's connect-retry even succeeds, leaving too little
-            // life for the subscribe → dirty → poll → badgeChanged
-            // round-trip — the agent shut down first and the subscriber
-            // saw `subscriptionEnded(agent_shutdown)` instead (flaked
-            // macos-15 at 8 s on PR #156, then *again* at 25 s on PR #162
-            // under heavier load — the agent exited at 25 s before the
-            // badge event arrived). The agent still exits on its own; a
-            // healthy run finishes the handshake in a few seconds
-            // regardless of the cap, so a larger cap is free insurance.
+            // `--exit-on-last-client` is the de-flake (it replaced three
+            // rounds of bumping `--duration` — 8 s flaked on PR #156, 25 s
+            // on PR #162, 60 s on BOTH macos-14 and macos-15 in one run on
+            // 2026-06-19). The agent's lifetime now tracks THIS client:
+            // when `client.close()` below disconnects, the serving layer's
+            // last-client signal stops the agent and it exits 0 within a
+            // few seconds — `await agentRun.value` no longer waits out a
+            // fixed cap. So `--duration` is a pure safety ceiling that the
+            // dirty → poll → badgeChanged round-trip never races: on a
+            // starved hosted runner the round-trip can take tens of
+            // seconds, but the agent only shuts down on disconnect (not
+            // the timer), so it can never beat the badge to the wire.
             let agentRun = Task {
                 try await Sprigctl.run([
                     "agent",
                     "--polling", "--polling-interval", "0.2",
-                    "--duration", "60",
+                    "--exit-on-last-client",
+                    "--duration", "300",
                     "--socket", socketPath,
                     repo.path
                 ])
@@ -108,13 +108,19 @@ extension SprigctlAgentTests {
             try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
             let pipeName = "sprig-agent-e2e-\(UUID().uuidString.prefix(8))"
 
-            // Generous duration: quirk-C process-spawn + filesystem
-            // latency on the Windows VM. The agent exits on its own.
+            // `--exit-on-last-client`: the agent's lifetime tracks THIS
+            // client, so `client.close()` below stops it and it exits 0
+            // promptly — the same de-flake the UDS variant uses. With the
+            // shutdown driven by disconnect rather than the timer, the
+            // quirk-C process-spawn + filesystem latency on the Windows VM
+            // can no longer let the cap expire before the badge round-trip
+            // completes; `--duration` is a pure safety ceiling.
             let agentRun = Task {
                 try await Sprigctl.run([
                     "agent",
                     "--polling", "--polling-interval", "0.2",
-                    "--duration", "15",
+                    "--exit-on-last-client",
+                    "--duration", "120",
                     "--pipe", pipeName,
                     repo.path
                 ])
