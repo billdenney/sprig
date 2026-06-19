@@ -100,6 +100,13 @@ public actor DiffViewerViewModel {
     /// successful load.
     public private(set) var payload: DiffPayload?
 
+    /// Per-file classification for the current target (ADR 0086 C0):
+    /// content type, `diff=`/`merge=` driver, LFS-pointer resolution,
+    /// and the renderer each file routes to. Populated by
+    /// ``classifyFiles()`` — independent of ``load()`` so the raw-diff
+    /// path stays fast.
+    public private(set) var classifiedFiles: [ClassifiedDiffFile] = []
+
     /// State of the in-flight or last `git` invocation. Success
     /// payload is the file count — pairs with the UI's "showing X
     /// files" indicator without forcing it to await ``payload``.
@@ -156,6 +163,28 @@ public actor DiffViewerViewModel {
         }
 
         await runningTask?.value
+    }
+
+    /// Classify each changed file for the current ``target`` —
+    /// content type, `diff=`/`merge=` driver, LFS-pointer resolution,
+    /// and the renderer each routes to (ADR 0086 C0). Populates
+    /// ``classifiedFiles``. Separate from ``load()`` so the raw unified
+    /// diff and the per-file routing can be fetched independently.
+    public func classifyFiles() async {
+        if case .busy = state { return }
+        state = .busy(progress: nil)
+        do {
+            let files = try await DiffFileClassifier.classify(
+                target: target,
+                repoURL: repoURL,
+                runner: runner
+            )
+            classifiedFiles = files
+            state = .success(files.count)
+        } catch {
+            classifiedFiles = []
+            state = .failure(.init(from: error))
+        }
     }
 
     /// Cancel the in-flight load, if any. Leaves the prior payload
