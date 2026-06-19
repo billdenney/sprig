@@ -38,6 +38,14 @@ struct DiffFileClassifierTests {
     func classifiesContentTypes() async throws {
         let (dir, runner) = try await makeRepo("types")
         defer { try? FileManager.default.removeItem(at: dir) }
+        // git-for-Windows ships a global gitattributes mapping `*.docx
+        // diff=astextplain` (an Office textconv driver); since route()
+        // prioritizes a configured diff driver, that would route doc.docx
+        // to `.externalTool` instead of `.office` on Windows only. Unset
+        // the inherited driver at the repo root so this content-type test
+        // is deterministic across platforms (the configured-driver path
+        // has its own test, `driverRoutesToExternalTool`).
+        try Data("*.docx !diff\n".utf8).write(to: dir.appendingPathComponent(".gitattributes"))
         try Data("hello\nworld\n".utf8).write(to: dir.appendingPathComponent("text.txt"))
         try Data("a,b\n1,2\n".utf8).write(to: dir.appendingPathComponent("data.csv"))
         // PNG signature + a NUL → git binary, sniff = png.
