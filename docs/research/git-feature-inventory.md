@@ -186,6 +186,16 @@ Three warn-and-proceed rails evaluated in `SyncViewModel`'s push leg from the po
 - `<sha>:<path>` / `:<path>` blob reads via `CatFileBatch` (commit/index targets) and a worktree file read — the new-side bytes for the magic-number content sniff; LFS pointers are read from `.git/lfs/objects/<oid>` and sniffed as the real media.
 - `git difftool` / `git mergetool --no-prompt [--tool <tool>] -- <path>` — the ADR 0027 external-tool fallback for drivers / unknown binaries / Office docs (the tool mutates the worktree file in place; the caller stages it).
 
+### Submodules tracked by default (ADR 0096) — engine invocations
+
+`SubmoduleKit.SubmoduleUpdate` (auto-reconcile) + `SubmoduleFreshnessProbe` (the throttled-suggestion heuristic) + `SubmoduleSuggestionThrottle` (per-repo last-shown store), all over `GitCore.Runner` and `SafetyKit.WorktreeBackup`:
+
+- `git submodule status` (parsed by `SubmoduleStatusParser`) — the entry list + the `+` out-of-date signal; per-submodule dirt is probed with `git -C <sub> status --porcelain -z` (ANY output, tracked OR untracked, counts as dirty).
+- `git submodule update --init --recursive -- <clean paths…>` — the default auto-reconcile (NO `--force`): run over ONLY the clean submodules, because git's own `update` aborts the WHOLE command (exit 1, nothing updated) when any submodule's tracked dirt would be overwritten. Dirty submodules are skipped + reported, never touched.
+- Snapshot-then-force remedy (explicit, per dirty submodule): `SafetyKit.WorktreeBackup.createBackupIfDirty()` run with a runner cwd'd INSIDE the submodule (the `refs/sprig/backup/...` ref lands in the submodule's own gitdir, capturing tracked + untracked work) **first**, then `git submodule update --init --force -- <sub>`. No super-repo HEAD moves, so no ADR 0033 snapshot ref is minted — recoverable from the submodule's Recover surface.
+- Upstream-newer signal (read-only, no fetch): inside the submodule, `git rev-parse --abbrev-ref --symbolic-full-name @{u}` (on a branch) else `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` (the detached-HEAD checkout `submodule update` produces), then `git rev-list --count HEAD..<upstream>` for the "commits behind" number.
+- Throttle store: `git rev-parse --path-format=absolute --git-common-dir` resolves the shared common dir; the last-shown instant is persisted as integer epoch seconds in `<git-common-dir>/sprig/submodule-suggestion-shown` (shared across linked worktrees; missing/unparseable = never shown).
+
 ## Newer-git features Sprig explicitly takes advantage of
 
 Master plan §10 has a per-version (2.40 → 2.46) breakdown. Highlights:

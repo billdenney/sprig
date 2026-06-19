@@ -104,6 +104,28 @@ public struct AppPreferences: Sendable, Codable, Equatable {
     /// `PreflightChecks(suppressedRails:)`. Empty by default.
     public var suppressedGuardRails: [String]
 
+    /// Keep submodules reconciled with the super-repo by default
+    /// (ADR 0096) — `SubmoduleUpdate.reconcile` runs `git submodule
+    /// update --init --recursive` (no `--force`, dirty submodules
+    /// skipped + reported). Default **on**: submodules are tracked by
+    /// default, and the op never clobbers local work. Wiring into the
+    /// branch-switch / sync / auto-sync flows is the ADR 0096 follow-up.
+    public var submoduleAutoUpdateEnabled: Bool
+
+    /// Hours between repeats of the ADR 0096 submodule-update
+    /// suggestion for one repo (`SubmoduleSuggestionThrottle`).
+    /// Default 4. `<= 0` disables throttling (the suggestion may show
+    /// on every refresh).
+    public var submoduleSuggestionThrottleHours: Int
+
+    /// Pass `--recurse-submodules` to the ADR 0096 fetch flows and run
+    /// a post-fast-forward `submodule update`. Default **on** (tracked
+    /// by default). Reserved for the ADR 0096 follow-up that wires it
+    /// into `SyncViewModel` / `BranchSwitcherViewModel` /
+    /// `AutoSyncScheduler`; defined here so the prefs schema is stable
+    /// when that lands.
+    public var fetchRecurseSubmodules: Bool
+
     public init(
         schemaVersion: Int = 1,
         watchRoots: [URL] = [],
@@ -115,7 +137,10 @@ public struct AppPreferences: Sendable, Codable, Equatable {
         autoBackupEnabled: Bool = true,
         autoBackupIntervalMinutes: Int = 30,
         autoBackupTTLDays: Int = 7,
-        suppressedGuardRails: [String] = []
+        suppressedGuardRails: [String] = [],
+        submoduleAutoUpdateEnabled: Bool = true,
+        submoduleSuggestionThrottleHours: Int = 4,
+        fetchRecurseSubmodules: Bool = true
     ) {
         self.schemaVersion = schemaVersion
         self.watchRoots = watchRoots
@@ -128,6 +153,9 @@ public struct AppPreferences: Sendable, Codable, Equatable {
         self.autoBackupIntervalMinutes = autoBackupIntervalMinutes
         self.autoBackupTTLDays = autoBackupTTLDays
         self.suppressedGuardRails = suppressedGuardRails
+        self.submoduleAutoUpdateEnabled = submoduleAutoUpdateEnabled
+        self.submoduleSuggestionThrottleHours = submoduleSuggestionThrottleHours
+        self.fetchRecurseSubmodules = fetchRecurseSubmodules
     }
 
     /// Custom decode so preference files written before the ADR 0068 /
@@ -154,6 +182,12 @@ public struct AppPreferences: Sendable, Codable, Equatable {
             .decodeIfPresent(Int.self, forKey: .autoBackupTTLDays) ?? 7
         suppressedGuardRails = try container
             .decodeIfPresent([String].self, forKey: .suppressedGuardRails) ?? []
+        submoduleAutoUpdateEnabled = try container
+            .decodeIfPresent(Bool.self, forKey: .submoduleAutoUpdateEnabled) ?? true
+        submoduleSuggestionThrottleHours = try container
+            .decodeIfPresent(Int.self, forKey: .submoduleSuggestionThrottleHours) ?? 4
+        fetchRecurseSubmodules = try container
+            .decodeIfPresent(Bool.self, forKey: .fetchRecurseSubmodules) ?? true
     }
 }
 
