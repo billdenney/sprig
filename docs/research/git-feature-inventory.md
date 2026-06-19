@@ -162,6 +162,14 @@ Three warn-and-proceed rails evaluated in `SyncViewModel`'s push leg from the po
 - `git hash-object -w -- <path>` + `git update-ref --stdin create refs/sprig/filebackup/<ts>/<label> <blob>` — the single-file safety backup: the file's current bytes as a blob, with a ref kept reachable by `git gc`. Same atomic-create + timestamp-bump collision handling as ADR 0075's `WorktreeBackup`.
 - `git cat-file blob <filebackup-ref>` → write — restore (and the fail-closed pre-restore backup of current bytes). Restore writes to the worktree; it is additive and never rewrites history.
 
+### Forge release creation (ADR 0087) — engine invocations
+
+`GitCore.TagOps` + `ForgeKit.ForgeReleaseClient` + `TaskWindowKit.CreateReleaseViewModel` (the "Create Release…" surface):
+
+- `git tag -a <name> -m <message> <commit>` — create the annotated tag the release points at. Fail-closed: `TagOps` checks `git rev-parse --quiet --verify refs/tags/<name>` first and refuses (typed `.refusedAlreadyExists`) rather than passing `-f`, which Sprig never emits.
+- `git rev-parse --quiet --verify refs/tags/<name>` — tag existence oracle; `git tag --list` for the tag set.
+- The forge calls are HTTP, not git: `ForgeReleaseClient` `POST`s to the GitHub Releases API (`/repos/{o}/{r}/releases`, then the response `upload_url` template for raw-bytes asset upload) and the GitLab Releases API (`/api/v4/projects/{o%2Fr}/releases`) through the injected `ForgeHTTPClient`, with the token in the `Authorization` header (never a URL, never persisted). GitLab binary asset upload (two-step uploads + `release_links`) is a tracked follow-up.
+
 ### Binary & visual diff classification (ADR 0086 C0) — engine invocations
 
 `GitCore.DiffNumstat` / `GitAttributeDrivers` / `ContentTypeSniffer` / `ExternalDiffTool` + `TaskWindowKit.DiffViewerViewModel.classifyFiles()`:

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-06-18
 deciders: maintainer
 consulted: —
@@ -31,7 +31,9 @@ from a tag/commit context as "Create Release…".** Inputs: target tag (existing
 new annotated tag at a commit), title, notes (optional — the AI draft path rides ADR
 0095/0035 later), and assets (file picker → upload). Auth reuses `ForgeKit.ForgeDeviceFlow`
 and `CredentialKit` with the established **tokens-injected-never-persisted** pattern (ADR
-0078). Network/HTTP transport goes through `TransportKit`.
+0078). HTTP goes through the injected `ForgeKit.ForgeHTTPClient` seam (same as
+`ForgeRepoBrowser`/`ForgeDeviceFlow`) — **not** `TransportKit`, which is the IPC transport
+between the shell and the agent, a distinct concern from forge HTTP.
 
 **Publishing is consent.** Release creation is a publish action: it falls in the
 explicit-permission category and always shows a confirmation summarizing what will be created
@@ -39,6 +41,27 @@ where; it is never automatic and never implied by another verb.
 
 Deferred: editing/deleting existing releases, pre-release/draft toggles beyond the basic
 flag, and Bitbucket/Gitea providers (add behind the same protocol when their forge verbs land).
+
+## Implementation status (D.1)
+
+Shipped:
+- `GitCore.TagOps` — `createAnnotatedTag(name:message:at:)` (`git tag -a`), fail-closed on a
+  pre-existing tag (`TagCreateOutcome.created` / `.refusedAlreadyExists`); `exists`/`list`.
+- `ForgeKit.ForgeReleaseClient` (+ `…+Providers`) — `createRelease` for GitHub
+  (`POST /repos/{o}/{r}/releases`) and GitLab (`POST /api/v4/projects/{o%2Fr}/releases`);
+  `uploadAsset` for GitHub (expand the `upload_url` template, raw bytes). Provider-neutral
+  `CreateReleaseRequest` / `Release` / `ReleaseAsset`; HTTP through the injected
+  `ForgeHTTPClient`; the token is a parameter, never persisted. `ForgeError` (401 →
+  `unauthorized`, other non-2xx → `httpStatus`) plus `ForgeReleaseError`
+  (`providerNotSupported` / `assetUploadNotSupported` / `missingUploadURL`).
+- `TaskWindowKit.CreateReleaseViewModel` — the publish-consent flow: `prepare()` builds a
+  `ReleaseSummary`, `publish()` refuses until prepared (consent gate), then creates the local
+  tag (if requested), the forge release, and uploads assets with per-asset progress.
+
+Deferred to a follow-up (tracked here): **GitLab binary asset upload** (the two-step
+project-uploads + `release_links` flow — `uploadAsset` throws `assetUploadNotSupported(.gitlab)`
+today) and **byte-level / resumable upload progress** (the current `ForgeHTTPClient.send`
+seam returns once the whole body is sent, so progress is per-asset, not per-byte).
 
 ## Consequences
 
@@ -54,4 +77,4 @@ flag, and Bitbucket/Gitea providers (add behind the same protocol when their for
 
 - ADR 0063 (forge integration as task-window verbs), 0078 (forge browse / token handling),
   0081 (forge sign-in device flow), 0046 (Sprig's own release cadence — distinct concern),
-  0095 (optional AI-drafted release notes). Transport via `TransportKit`.
+  0095 (optional AI-drafted release notes). HTTP via `ForgeKit.ForgeHTTPClient`.

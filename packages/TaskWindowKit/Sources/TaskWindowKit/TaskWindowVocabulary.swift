@@ -212,6 +212,28 @@ public enum TaskWindowVocabulary {
     public static let fileVersionBinaryPreview =
         "This is a binary file — Sprig can restore it, but can't preview it here yet."
 
+    // MARK: - Create release (ADR 0087)
+
+    public static let releaseNeedsTag = "Enter a tag name for the release."
+
+    public static let confirmReleaseFirst =
+        "Review what will be published, then confirm to create the release."
+
+    public static func releaseTagExists(_ name: String) -> String {
+        "The tag \(name) already exists — pick a different name, or use the existing tag."
+    }
+
+    /// The release was published but some assets didn't upload. The
+    /// release already exists on the forge, so the message says so (with
+    /// its URL) and points to re-running publish to finish — never
+    /// implies nothing happened.
+    public static func releasePartialAssets(uploaded: Int, total: Int, url: String?) -> String {
+        let location = url.map { " at \($0)" } ?? ""
+        let failed = total - uploaded
+        return "The release was published\(location), but \(failed) of \(total) file(s) didn't upload "
+            + "— publish again to finish uploading them."
+    }
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the
