@@ -78,6 +78,42 @@ Both blockers are now built (the surface itself is still to come):
   this ADR's slice** — until then their commits would read as "external", so do that wiring
   before the detection heuristic ships.
 
+## Implementation status
+
+Engine half shipped (this slice):
+
+- **Detection** — `GitCore.ExternalChangeDetector` (Tier 1, pure, real-git tested). Given a
+  worktree it lists the commits in a range via `git log -z` and filters to the
+  externally-authored set through `OperationProvenance.externalCommits(among:)`
+  (`externalCommits(in:)`); it also compares the current ref→SHA against
+  `OperationProvenance.lastKnownHeads()` to detect "HEAD moved to a different existing commit
+  Sprig didn't move it to" (`headMovement()`), keeping a Sprig-authored new tip from
+  false-flagging. `report()` ties both together, scoping the commit range to the last
+  checkpoint (`<checkpoint>..HEAD`, else `HEAD`). Two edge cases are handled explicitly:
+  an **unborn branch / empty repo** (HEAD doesn't resolve) returns a clean empty report
+  rather than letting `git log HEAD` error into the Review window; and HEAD-movement
+  suppression only fires for a **forward** move — Sprig authored the new tip *and* the
+  checkpoint is an ancestor of it (`git merge-base --is-ancestor`) — so an external rewind
+  onto an older Sprig-authored commit still reads as `movedExternally` (authoring a commit
+  object is not the same as moving HEAD there).
+- **`TaskWindowKit.AgentReviewViewModel`** (actor, `TaskWindowState<AgentReviewOutcome>`) —
+  `refresh()` populates the external-change report + a per-commit `git show` diff; `stage` /
+  `unstage` / `stageSelection` curate the index (region staging reuses `DiffPatchSlicer`, the
+  same path as `CommitComposerViewModel`); `splitCommit(_:)` snapshots HEAD (medium tier,
+  `SnapshotRefName.opSplit`) then `reset --soft <sha>^` so the commit's changes sit in the
+  index for re-staging — never a silent rewrite; `undo()` restores the pre-split snapshot
+  through the real Recover path (`RecoverViewModel.restoreSnapshot`). Failure copy lives in
+  `TaskWindowVocabulary` (`agentReviewSplit…` / `agentReviewNothingToUndo`).
+- **`SafetyKit`** — added `SnapshotRefName.opSplit` + its medium-tier `DestructiveOpTier`
+  registration.
+
+Deferred (documented follow-up): wiring detection into the live `AgentKit.RepoAgent`
+watcher/badge path (a "external changes pending" badge + the "Review external changes…"
+launch), and recording provenance for the remaining commit-producing verbs (merge, rebase,
+squash, revert, restack, cherry-pick) so their commits don't read as external — until then,
+only `CommitComposerViewModel` records authorship, so other Sprig verbs' commits surface in
+the review set (a conservative, dismissable false positive, never lost work).
+
 ## Links
 
 - Builds on ADR 0056 (external-agent awareness), 0061 (region staging), 0033/0075

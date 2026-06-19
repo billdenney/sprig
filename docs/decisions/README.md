@@ -97,7 +97,7 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0085 | Stacked-branch restack engine — frozen fork-point over git's rebase        | accepted |
 | 0086 | Binary & visual diff/merge (image, PDF, notebook, CSV) + binary conflicts  | accepted (C0 plumbing shipped; renderers C1/C2/C3 deferred) |
 | 0087 | Forge release creation (tag + notes + assets)                              | accepted |
-| 0088 | Agent-review surface — review/stage/split external-agent commits           | proposed |
+| 0088 | Agent-review surface — review/stage/split external-agent commits           | accepted (engine shipped; live-watcher wiring deferred) |
 | 0089 | Selective sync — beginner folder picker over sparse-checkout               | accepted |
 | 0090 | File version history & restore-previous-version                            | accepted |
 | 0091 | Type-aware LFS guidance + document-store offer                              | accepted |
