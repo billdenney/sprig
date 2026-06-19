@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-06-18
 deciders: maintainer
 consulted: —
@@ -65,6 +65,31 @@ keep-ours/theirs), and a registry UI for user-defined per-type renderers.
 - Snapshot-test surface grows substantially (every renderer needs golden fixtures under
   `tests/snapshots/`); rendering is the riskiest area for cross-platform pixel drift.
 - Office/notebook coverage is best-effort without external drivers; copy must set expectations.
+
+## Implementation status
+
+**C0 (plumbing) shipped 2026-06-19; renderers C1/C2/C3 + the binary-conflict resolver mode
+remain deferred.** C0 is the per-file classification + routing every renderer builds on:
+
+- `GitCore.DiffNumstat` — `git diff --numstat -z` → per-file added/deleted counts + git's
+  binary marker (the `-`/`-` rows), with the `-z` rename three-token shape parsed.
+- `GitCore.GitAttributeDrivers` — `git check-attr -z --stdin diff merge` → the configured
+  `diff=`/`merge=` driver names (defer-to-git, ADR 0023).
+- `GitCore.ContentTypeSniffer` / `ContentType` — magic-number detection (PNG/JPEG/GIF/WebP/
+  PDF/ZIP-container) with a NUL-byte text/binary fallback.
+- `GitCore.ExternalDiffTool` — the ADR 0027 fallback, finally built: `git difftool` /
+  `git mergetool --no-prompt [--tool …] -- <path>` through `Runner` (so the user's
+  `diff.tool`/`merge.tool` config and `.gitattributes` drivers ride git's native stacks).
+- `TaskWindowKit.DiffViewerViewModel.classifiedFiles` (`[ClassifiedDiffFile]`, via
+  `DiffFileClassifier`) — combines the three legs plus LFS-pointer resolution (read from
+  `.git/lfs/objects/` and sniffed as the real media) into a `DiffRendererKind` per file. The
+  C1/C2/C3 renderers consume `renderer`; C0 only computes it. A configured `diff=` driver
+  wins (→ `.externalTool`).
+
+Deferred to C1/C2/C3: the actual renderers (image side-by-side/onion-skin, PDF raster, CSV
+column diff, notebook cell diff, Office text extraction) and the resolver's binary-conflict
+mode (keep-ours/theirs/both with previews). Non-standard gitdir layouts (linked worktrees,
+submodules) for LFS resolution are a noted follow-up.
 
 ## Links
 
