@@ -114,11 +114,13 @@ public struct RepoRollup: Sendable, Equatable {
         repos.reduce(0) { $0 + ($1.currentBranchState?.behind ?? 0) }
     }
 
-    /// True iff nothing across the readable repos needs attention: no
-    /// dirt, no parked operation, nothing ahead or behind. Failed reads
-    /// don't count as "clean" — `failedCount` surfaces them separately.
+    /// True iff every repo was readable AND nothing needs attention: no
+    /// dirt, no parked operation, nothing ahead or behind. A failed read
+    /// is NOT "clean" — we can't vouch for a repo we couldn't read — so
+    /// any failure makes this false (`failedCount` surfaces the count).
     public var allClean: Bool {
-        dirtyCount == 0 && conflictedCount == 0 && totalAhead == 0 && totalBehind == 0
+        failedCount == 0 && dirtyCount == 0 && conflictedCount == 0
+            && totalAhead == 0 && totalBehind == 0
     }
 
     public init(repos: [RepoRollupEntry]) {

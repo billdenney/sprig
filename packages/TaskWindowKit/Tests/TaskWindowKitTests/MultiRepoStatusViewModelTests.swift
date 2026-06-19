@@ -191,6 +191,9 @@ struct MultiRepoStatusViewModelTests {
         #expect(!rollup.repos[1].hasConflict)
         // The good repo still reads through.
         #expect(!rollup.repos[0].failed)
+        // A failed read is NOT "clean": even though the readable repo is
+        // clean, allClean must be false because one repo couldn't be read.
+        #expect(!rollup.allClean)
     }
 
     @Test("refresh is re-runnable: a row goes dirty on the second pass")
