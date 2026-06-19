@@ -32,7 +32,7 @@ jobs:
       # 81eb85a — tracked in docs/planning/audit-followups.md (UP-5472).
       image: swiftlang/swift@sha256:f94c1fb1c41bef0d0bf3f0987f69c9432aba3148d73099d5594ae0b56225bb49
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install git + libjemalloc-dev
         # `git` — GitCore tests shell out to the system git for version
         #   probes, init/status round-trips, and merge-conflict fixtures.

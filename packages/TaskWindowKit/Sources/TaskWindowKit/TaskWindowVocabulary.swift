@@ -199,6 +199,19 @@ public enum TaskWindowVocabulary {
             + "Sprig keeps a backup you can restore."
     }
 
+    // MARK: - File history (ADR 0090)
+
+    public static let restoreThisVersion = "Restore this version."
+
+    public static func fileVersionRestored(_ path: String) -> String {
+        "Restored — Sprig saved a copy of your current \(path) before restoring."
+    }
+
+    public static let fileVersionGone = "That version is no longer available — refresh the history."
+
+    public static let fileVersionBinaryPreview =
+        "This is a binary file — Sprig can restore it, but can't preview it here yet."
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the

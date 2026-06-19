@@ -32,6 +32,7 @@ struct SprigCtl: AsyncParsableCommand {
             LFSCommand.self,
             SubmoduleCommand.self,
             SparseCommand.self,
+            FileHistoryCommand.self,
             SyncCommand.self,
             SetupCommand.self,
             DiagnoseCommand.self

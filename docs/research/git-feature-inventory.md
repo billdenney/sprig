@@ -153,6 +153,15 @@ Three warn-and-proceed rails evaluated in `SyncViewModel`'s push leg from the po
 - `git status --porcelain=v2 -z --untracked-files=all` — `planChange(to:)`'s dirty-folder guard: dropped folders holding uncommitted/untracked/staged work are reported as `blockedDrops` (sparse-checkout's "lossless" claim holds only for clean folders), so the surfaces fail closed.
 - Force path (after a fail-closed report, only with explicit confirmation): `SafetyKit.WorktreeBackup.createBackupIfDirty()` (captures tracked + untracked work) **first**, then per blocked folder `git restore --worktree --staged -- <dir>` + `git clean -fd -- <dir>` (no `-x`, so ignored files survive; no `-ff`, so nested repos survive), then `sparse-checkout set`. Recoverable via the Recover surface — never moves HEAD.
 
+### File version history + restore (ADR 0090) — engine invocations
+
+`GitCore.FileHistory` + `SafetyKit.FileBackup` (the per-file "Show History… / Restore Previous Version…" surface + `sprigctl file-history`):
+
+- `git log --follow --name-status --format=<RS>%H<US>%aN<US>%aI<US>%s -- <path>` — the revision list following renames; the `--name-status` block yields the file's path AT EACH commit (the new-name field of a rename), needed because `<old-sha>:<current-path>` fails after a rename.
+- `<sha>:<pathAtRevision>` read via `CatFileBatch` — the per-revision blob bytes (the documented history/blame foundation).
+- `git hash-object -w -- <path>` + `git update-ref --stdin create refs/sprig/filebackup/<ts>/<label> <blob>` — the single-file safety backup: the file's current bytes as a blob, with a ref kept reachable by `git gc`. Same atomic-create + timestamp-bump collision handling as ADR 0075's `WorktreeBackup`.
+- `git cat-file blob <filebackup-ref>` → write — restore (and the fail-closed pre-restore backup of current bytes). Restore writes to the worktree; it is additive and never rewrites history.
+
 ### Binary & visual diff classification (ADR 0086 C0) — engine invocations
 
 `GitCore.DiffNumstat` / `GitAttributeDrivers` / `ContentTypeSniffer` / `ExternalDiffTool` + `TaskWindowKit.DiffViewerViewModel.classifyFiles()`:
