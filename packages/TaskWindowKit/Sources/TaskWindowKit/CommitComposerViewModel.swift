@@ -360,6 +360,10 @@ public actor CommitComposerViewModel {
 
     private func recordCommitSuccess(_ sha: String) async {
         runningTask = nil
+        // Provenance (ADR 0088): record that Sprig authored this commit so
+        // the agent-review surface won't flag the user's own GUI commit as
+        // an external change. Best-effort — a hint, never blocks the commit.
+        try? await OperationProvenance(runner: runner).recordAuthored(sha)
         // Re-read the partition so the UI reflects the post-commit state.
         await refresh()
         state = .success(sha)

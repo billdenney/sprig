@@ -50,6 +50,36 @@ the cross-repo view without violating ADR 0034; the opt-in per-repo notification
 reuses existing fetch cadence). Option 3 stays on the radar as a later enhancement. If the
 maintainer prefers to hold the line at Option 1, this ADR records that instead and closes.
 
+## Implementation status
+
+**Option 2 engine shipped; Option 4 deferred (status stays `proposed`).**
+
+- **Option 2 (engine).** The on-demand roll-up's portable half is built:
+  `TaskWindowKit.MultiRepoStatusViewModel` (an actor mirroring
+  `StatusViewModel`'s `TaskWindowState` lifecycle) takes an ordered set of
+  watch-root repo URLs, runs one `StatusViewModel` per root (one
+  `GitCore.Runner` each — no new git plumbing), and folds the per-repo
+  `RepoStatusSummary` values into a `RepoRollup`. The aggregate exposes
+  `readableCount`, `failedCount`, `dirtyCount`, `conflictedCount` (parked
+  merge/rebase/cherry-pick/revert/am **or** conflicted paths), `totalAhead`
+  / `totalBehind` (summed over the checked-out branches), and `allClean`,
+  plus the per-repo `RepoRollupEntry` rows (order-preserved) for the list.
+  It is **on-demand only** — the caller drives `refresh()`; the VM never
+  installs a watcher and never polls (Option 1 stays rejected). An
+  unreadable root degrades to a `.failed` entry and is counted, never
+  crashing the roll-up; the empty set yields a valid all-clean roll-up.
+  The Mac/Windows "Repositories" task-window shells that bind to this VM are
+  separate, later work.
+- **Option 4 (opt-in upstream nudge) is NOT built** — explicitly later, per
+  the recommendation's "Option 4 (opt-in)" being a distinct, default-off
+  NotifyKit change.
+- **Why the status stays `proposed`:** the ADR's recommended *Decision* is
+  the **bundle** "Option 2 + Option 4 (opt-in)", which is not yet fully
+  ratified — Option 4 is unbuilt and Option 3 is still "on the radar." Only
+  the **Option 2** sub-decision is unambiguous and implemented. The ADR is
+  flipped to `accepted` once the maintainer ratifies the full surface
+  (notably the Option 4 opt-in nudge).
+
 ## Consequences
 
 **Positive**

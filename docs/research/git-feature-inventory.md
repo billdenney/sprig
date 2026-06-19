@@ -86,6 +86,13 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git diff` — the unstaged worktree-vs-index diff the UI renders and the user drag-selects in. `DiffPatchSlicer.slice(diff:selection:)` then rewrites that diff into a patch staging exactly the selected +/- lines (unselected `+` dropped, unselected `-` demoted to context, `@@` counts re-derived, per-file headers carried verbatim).
 - `git apply --cached --recount -` (patch on stdin) — applies the sliced patch to the index only. `--recount` lets git re-derive the hunk line counts, so a sub-hunk slice never needs byte-perfect `@@` headers. Index-only and reversible (`git restore --staged`), so no snapshot is minted — staging isn't a destructive op.
 
+### Operation provenance (ADR 0088 prerequisite) — engine invocations
+
+`GitCore.OperationProvenance` (the "did Sprig author this?" signal the agent-review surface consumes):
+
+- `git rev-parse --path-format=absolute --git-common-dir` — resolves the **common** git dir (shared by all linked worktrees) so the provenance store at `<common>/sprig/provenance.json` is repo-global: a commit authored in one worktree is recognized as Sprig-authored from any worktree. `--path-format=absolute` (git 2.31+) gives an absolute path even from the main worktree, where `--git-common-dir` alone returns a relative `.git`.
+- No other git invocation: provenance is a plain JSON file (authored-SHA set + a ref→sha checkpoint), local-only (never pushed) and gc-neutral (a ref pointing at the commit would *pin* it, defeating `git gc` — the file stores SHAs as text and pins nothing). The producer side is each commit-making verb calling `recordAuthored(<new-sha>)`; the consumer is ADR 0088's detector calling `externalCommits(among:)`.
+
 ### Sync verb (ADR 0071) — engine invocations
 
 `SyncOps.pushCurrentBranch` + `TaskWindowKit.SyncViewModel` (fetch and fast-forward legs reuse ADR 0068's invocations below):
@@ -187,6 +194,23 @@ Three warn-and-proceed rails evaluated in `SyncViewModel`'s push leg from the po
 - `git check-attr -z --stdin diff merge` — the configured `.gitattributes` `diff=`/`merge=` driver names (defer-to-git, ADR 0023); a named driver routes the file to the external tool.
 - `<sha>:<path>` / `:<path>` blob reads via `CatFileBatch` (commit/index targets) and a worktree file read — the new-side bytes for the magic-number content sniff; LFS pointers are read from `.git/lfs/objects/<oid>` and sniffed as the real media.
 - `git difftool` / `git mergetool --no-prompt [--tool <tool>] -- <path>` — the ADR 0027 external-tool fallback for drivers / unknown binaries / Office docs (the tool mutates the worktree file in place; the caller stages it).
+
+### Multi-repo status roll-up (ADR 0094 Option 2) — engine invocations
+
+`TaskWindowKit.MultiRepoStatusViewModel` (on-demand "Repositories" roll-up; Option 2 engine half — Option 4's opt-in nudge is deferred):
+
+- **No new git spawns.** The roll-up runs one `TaskWindowKit.StatusViewModel` per watch-root (one `GitCore.Runner` each) and folds the resulting `RepoStatusSummary` values into a `RepoRollup` aggregate (total dirty, total ahead/behind on the checked-out branch, repos with a parked merge/rebase or conflicted paths, repos that couldn't be read). Every underlying invocation is exactly the ADR 0064 Status surface's (`status --porcelain=v2 -z --branch`, the `branchSyncStates` `for-each-ref` pass, the `MidstreamOperation` probe, `log -1 --format=%cI`, the snapshot/backup `for-each-ref`s).
+- **On-demand by construction:** the caller drives `refresh()`; the VM never installs a watcher and never polls (ADR 0094 rejects the ambient Option 1 and the tray). An unreadable root degrades to a counted `.failed` entry rather than sinking the roll-up.
+
+### Submodules tracked by default (ADR 0096) — engine invocations
+
+`SubmoduleKit.SubmoduleUpdate` (auto-reconcile) + `SubmoduleFreshnessProbe` (the throttled-suggestion heuristic) + `SubmoduleSuggestionThrottle` (per-repo last-shown store), all over `GitCore.Runner` and `SafetyKit.WorktreeBackup`:
+
+- `git submodule status` (parsed by `SubmoduleStatusParser`) — the entry list + the `+` out-of-date signal; per-submodule dirt is probed with `git -C <sub> status --porcelain -z` (ANY output, tracked OR untracked, counts as dirty).
+- `git submodule update --init --recursive -- <clean paths…>` — the default auto-reconcile (NO `--force`): run over ONLY the clean submodules, because git's own `update` aborts the WHOLE command (exit 1, nothing updated) when any submodule's tracked dirt would be overwritten. Dirty submodules are skipped + reported, never touched.
+- Snapshot-then-force remedy (explicit, per dirty submodule): `SafetyKit.WorktreeBackup.createBackupIfDirty()` run with a runner cwd'd INSIDE the submodule (the `refs/sprig/backup/...` ref lands in the submodule's own gitdir, capturing tracked + untracked work) **first**, then `git submodule update --init --force -- <sub>`. No super-repo HEAD moves, so no ADR 0033 snapshot ref is minted — recoverable from the submodule's Recover surface.
+- Upstream-newer signal (read-only, no fetch): inside the submodule, `git rev-parse --abbrev-ref --symbolic-full-name @{u}` (on a branch) else `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` (the detached-HEAD checkout `submodule update` produces), then `git rev-list --count HEAD..<upstream>` for the "commits behind" number.
+- Throttle store: `git rev-parse --path-format=absolute --git-common-dir` resolves the shared common dir; the last-shown instant is persisted as integer epoch seconds in `<git-common-dir>/sprig/submodule-suggestion-shown` (shared across linked worktrees; missing/unparseable = never shown).
 
 ## Newer-git features Sprig explicitly takes advantage of
 
