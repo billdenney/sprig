@@ -43,16 +43,26 @@ already has; the heuristic samples the tracked set, it does not walk full histor
 - A curated extension list is a maintenance item (audit periodically, like the defaults bundle).
 - LFS still requires `git-lfs` on PATH (ADR 0029 detect-and-prompt; never silent install).
 
-## Implementation status (2026-06-18)
+## Implementation status (2026-06-19)
 
-- **Shipped:** `binaryTypeWithoutLFS` rail + `LFSKit.LFSBinaryTypes` (the curated, injectable
-  type set) + `LFSKit.LFSTrack` (the "Track with LFS" write action — probes `git-lfs`, refuses
-  with a typed error if absent per ADR 0029, then `git lfs track <pattern>`; never a silent
-  install). The rail fires on a curated-binary staged file that isn't LFS-tracked and is *under*
-  the size threshold, so a file never gets both this and the size rail's banner.
-- **Follow-up:** `DocumentStoreHeuristic` (the one-time, repo-level "this looks like a document
-  store — set up LFS?" offer) is tracked separately. The shared `LFSTrack` action it needs is
-  already in place.
+- **Shipped (part A):** `binaryTypeWithoutLFS` rail + `LFSKit.LFSBinaryTypes` (the curated,
+  injectable type set) + `LFSKit.LFSTrack` (the "Track with LFS" write action — probes
+  `git-lfs`, refuses with a typed error if absent per ADR 0029, then `git lfs track <pattern>`;
+  never a silent install). The rail fires on a curated-binary staged file that isn't LFS-tracked
+  and is *under* the size threshold, so a file never gets both this and the size rail's banner.
+- **Shipped (part B):** `LFSKit.DocumentStoreHeuristic` (the one-time, repo-level "this looks
+  like a document store — set up LFS?" offer). Pure Tier-1 classification over the tracked path
+  list (`git ls-files -z` via `GitCore.Runner`): a repo is "dominated" when curated-binary files
+  are **≥ 50% of tracked files** *and* there are **≥ 5 tracked files** (both injectable — the
+  count floor stops a 1-file repo tripping at 100%). Output is a `DocumentStoreRecommendation`
+  (verdict + counts + ranked `*.ext` patterns), surfaced to the UI as a provider-neutral
+  `DocumentStoreOffer`. Once-per-repo suppression is `DocumentStoreOfferFlag`: a marker file
+  under `<git-common-dir>/sprig/` (resolved with `git rev-parse --path-format=absolute
+  --git-common-dir`, so it is worktree-safe and repo-global) — deliberately **not** a ref, which
+  would be pushed/shared. **Never automatic** — it produces an offer; the user consents before
+  any `.gitattributes` write. The shared `LFSTrack` action wires the "Set up LFS" remedy.
+  *UI wiring (a `TaskWindowKit.StatusViewModel` status-rail banner) is a follow-up; this slice
+  is the engine.*
 
 ## Links
 
