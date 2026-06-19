@@ -55,9 +55,22 @@ public final class PollingFileWatcher: FileWatcher, @unchecked Sendable {
     public func start(paths: [URL]) -> AsyncStream<WatchEvent> {
         let interval = pollInterval
         let state = state
+        // Capture the baseline snapshot SYNCHRONOUSLY here — before
+        // returning the stream — NOT as the first line of the polling
+        // Task. Otherwise any change made in the window between start()
+        // returning and that Task actually being scheduled is folded into
+        // the baseline and never detected. That window is load-sensitive:
+        // under scheduler pressure the Task's first tick is delayed, so a
+        // caller that begins serving and a client that dirties a file
+        // immediately after start() can race ahead of the baseline and
+        // the change is silently lost (it surfaced as a flaky agent
+        // end-to-end test where the badge never arrived on loaded CI).
+        // Taking the baseline before the stream is returned makes "any
+        // change after start() returns is diffed" a hard guarantee.
+        let baseline = Self.takeSnapshot(of: paths)
         return AsyncStream<WatchEvent> { continuation in
             let task = Task<Void, Never> {
-                var snapshot = Self.takeSnapshot(of: paths)
+                var snapshot = baseline
                 while !Task.isCancelled {
                     do {
                         try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))

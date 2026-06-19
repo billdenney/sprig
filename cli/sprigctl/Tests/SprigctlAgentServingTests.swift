@@ -28,24 +28,24 @@ extension SprigctlAgentTests {
             try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
             let socketPath = "/tmp/sprig-agent-e2e-\(UUID().uuidString.prefix(8)).sock"
 
-            // Agent process runs concurrently; the duration is a safety
-            // cap, not a tight deadline. 60 s, not 8/25: on a loaded
-            // hosted macos-15 runner the agent's own process spawn +
-            // UDS-server bring-up can eat *tens* of seconds before the
-            // client's connect-retry even succeeds, leaving too little
-            // life for the subscribe → dirty → poll → badgeChanged
-            // round-trip — the agent shut down first and the subscriber
-            // saw `subscriptionEnded(agent_shutdown)` instead (flaked
-            // macos-15 at 8 s on PR #156, then *again* at 25 s on PR #162
-            // under heavier load — the agent exited at 25 s before the
-            // badge event arrived). The agent still exits on its own; a
-            // healthy run finishes the handshake in a few seconds
-            // regardless of the cap, so a larger cap is free insurance.
+            // Agent process runs concurrently. `--duration` is a pure
+            // safety cap (so a wedged test can't leak the child), NOT the
+            // normal stop signal: the test CANCELS `agentRun` the instant
+            // the badge round-trip succeeds (see below), which terminates
+            // the child immediately. That decouples the agent's lifetime
+            // from a wall-clock timer and kills the flake where a starved
+            // hosted runner let the cap fire before the handshake
+            // finished — the subscriber then saw
+            // `subscriptionEnded(agent_shutdown)` instead of the badge
+            // (flaked at 8 s on PR #156, 25 s on PR #162, and even 60 s on
+            // PR #176 when the loaded runner stretched the whole test past
+            // 60 s). The cap is large because a healthy run never reaches
+            // it — the cancel always stops the agent first.
             let agentRun = Task {
                 try await Sprigctl.run([
                     "agent",
                     "--polling", "--polling-interval", "0.2",
-                    "--duration", "60",
+                    "--duration", "180",
                     "--socket", socketPath,
                     repo.path
                 ])
@@ -78,8 +78,12 @@ extension SprigctlAgentTests {
             }
 
             await client.close()
+            // Badge round-trip done — stop the agent NOW (cancel →
+            // terminate) instead of waiting out the safety-cap duration.
+            agentRun.cancel()
             let out = try await agentRun.value
-            #expect(out.exitCode == 0)
+            // We terminated it, so the exit code is the signal, not 0;
+            // the serving banner (printed at startup) proves it served.
             #expect(out.stderr.contains("# agent: serving at \(socketPath)"))
         }
 
@@ -108,13 +112,16 @@ extension SprigctlAgentTests {
             try await Sprigctl.spawnGit(["commit", "-m", "seed"], cwd: repo)
             let pipeName = "sprig-agent-e2e-\(UUID().uuidString.prefix(8))"
 
-            // Generous duration: quirk-C process-spawn + filesystem
-            // latency on the Windows VM. The agent exits on its own.
+            // `--duration` is a pure safety cap; the test cancels
+            // `agentRun` the moment the badge arrives (terminating the
+            // child), so the agent's lifetime is bounded by the handshake
+            // rather than a wall-clock timer that can race quirk-C
+            // process-spawn + filesystem latency on a loaded Windows VM.
             let agentRun = Task {
                 try await Sprigctl.run([
                     "agent",
                     "--polling", "--polling-interval", "0.2",
-                    "--duration", "15",
+                    "--duration", "180",
                     "--pipe", pipeName,
                     repo.path
                 ])
@@ -143,8 +150,10 @@ extension SprigctlAgentTests {
             }
 
             await client.close()
+            // Badge round-trip done — stop the agent NOW (cancel →
+            // terminate) instead of waiting out the safety-cap duration.
+            agentRun.cancel()
             let out = try await agentRun.value
-            #expect(out.exitCode == 0)
             #expect(out.stderr.contains("# agent: serving at \(pipeName)"))
         }
 
