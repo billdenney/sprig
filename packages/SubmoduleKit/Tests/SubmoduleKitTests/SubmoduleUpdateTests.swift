@@ -22,7 +22,12 @@ struct SubmoduleUpdateTests {
     /// bump the parent's recorded pointer, then roll the submodule's
     /// checkout BACK one commit so it's out-of-date relative to the
     /// recorded pointer. `reconcile` should move it forward.
-    private func makeDrifted() async throws -> DriftFixture {
+    ///
+    /// `seedFile` is the name of the submodule's seed (`c1`) tracked
+    /// file — the one a dirty-edit test mutates. Defaults to `a.txt`;
+    /// the snapshot-then-force data-loss regression passes a name that
+    /// matches a `WorktreeBackup` exclude glob (e.g. `config.key`).
+    private func makeDrifted(seedFile: String = "a.txt") async throws -> DriftFixture {
         let helper = mktemp("skit-up-helper")
         let parent = mktemp("skit-up-parent")
         try mkdir(helper, parent)
@@ -38,7 +43,7 @@ struct SubmoduleUpdateTests {
         // byte-exact restore round-trip. `-text` is committed IN the
         // submodule so it travels with it, deterministic on every OS.
         try write("* -text\n", to: helper.appendingPathComponent(".gitattributes"))
-        try write("c1\n", to: helper.appendingPathComponent("a.txt"))
+        try write("c1\n", to: helper.appendingPathComponent(seedFile))
         _ = try await helperRunner.run(["add", "-A"])
         _ = try await helperRunner.run(["commit", "-m", "c1"])
 
@@ -257,6 +262,59 @@ struct SubmoduleUpdateTests {
         // Restore through the real Recover path (the undo-round-trip
         // rule): the discarded work comes back byte-exactly.
         let subRunner = Runner(defaultWorkingDirectory: subWorktree)
+        _ = try await WorktreeBackup(runner: subRunner).restore(backupRef.refName)
+        let restored = try String(contentsOf: subFile, encoding: .utf8)
+        #expect(restored == original)
+    }
+
+    @Test("""
+    snapshotThenForce backs up a tracked secret-glob edit (config.key) \
+    and round-trips it — no junk-only-dirty data loss
+    """)
+    func snapshotThenForcePreservesTrackedSecretGlobEdit() async throws {
+        // Regression: the sole dirt is a TRACKED file matching a
+        // `WorktreeBackup` default exclude glob (`config.key` → `*.key`).
+        // With the default excludes, `createBackupIfDirty` staged a tree
+        // equal to HEAD's (the `.key` excluded), hit its junk-only-dirty
+        // guard, and returned `nil` — then the `--force` clobbered the
+        // tracked edit with NO backup ref to recover from (HIGH-severity
+        // data loss). The fix backs up with NO exclude list, so the edit
+        // is captured and recoverable. The same hole exists for any
+        // tracked `*.env`/`*secret*`/`*.pem`-shaped file.
+        let fixture = try await makeDrifted(seedFile: "config.key")
+        defer { cleanup(fixture.parent, fixture.helper) }
+        let runner = Runner(defaultWorkingDirectory: fixture.parent)
+
+        let subWorktree = fixture.parent.appendingPathComponent("sub")
+        let subFile = subWorktree.appendingPathComponent("config.key")
+        let original = "SECRET=do-not-lose-me\nrotated-2026-06-19\n"
+        try write(original, to: subFile)
+
+        // Sanity: it really matches a secrets exclude glob — otherwise
+        // this test wouldn't exercise the junk-only-dirty path at all.
+        #expect(JunkFilePatterns.rule(matching: "config.key")?.category == .secret)
+
+        let force = try await SubmoduleUpdate.snapshotThenForce(
+            submodulePath: "sub",
+            in: fixture.parent,
+            runner: runner
+        )
+
+        // THE regression assertion: a backup ref WAS minted (pre-fix this
+        // was nil), and it actually exists inside the submodule's gitdir.
+        let backupRef = try #require(
+            force.backupRef,
+            "force-destroy of a tracked secret-glob edit must mint a backup ref"
+        )
+        let subRunner = Runner(defaultWorkingDirectory: subWorktree)
+        let subBackups = try await WorktreeBackup(runner: subRunner).backups()
+        #expect(subBackups.contains { $0.ref.refName == backupRef.refName })
+
+        // The force discarded the working-tree edit (back to recorded).
+        let clobbered = try String(contentsOf: subFile, encoding: .utf8)
+        #expect(clobbered != original)
+
+        // Recover path round-trips the secret-glob edit byte-exactly.
         _ = try await WorktreeBackup(runner: subRunner).restore(backupRef.refName)
         let restored = try String(contentsOf: subFile, encoding: .utf8)
         #expect(restored == original)

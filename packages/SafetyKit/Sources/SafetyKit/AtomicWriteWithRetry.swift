@@ -68,14 +68,38 @@ public enum AtomicWriteWithRetry {
         initialDelaySec: Double = 0.25
     ) async throws {
         var lastError: Error?
-        for attempt in 0 ..< attempts {
+        // Split the budget: atomic first (crash-safe), then a non-atomic
+        // fallback. Retrying the ATOMIC write alone does NOT clear a
+        // persistent Windows sharing violation, because the failing step
+        // is the temp-file `MoveFileEx` *rename over the target* — under a
+        // Defender/indexer handle that can stay blocked for tens of
+        // seconds (hosted CI reproduced a >64 s block). A DIRECT
+        // (non-atomic) write opens the target itself instead of renaming a
+        // temp over it, which clears the violation in practice (the
+        // provenance / LFS-flag / submodule-throttle stores write
+        // non-atomically and pass Windows CI). The only cost of the
+        // fallback is a brief torn-write window on a crash — an acceptable
+        // last resort after the atomic attempts have all failed.
+        let perPhase = max(1, attempts / 2)
+        for attempt in 0 ..< perPhase {
             do {
                 try data.write(to: url, options: .atomic)
                 return
             } catch let error as CocoaError where error.code == .fileWriteNoPermission {
-                // Transient sharing violation on Windows; back off + retry.
                 lastError = error
-                if attempt < attempts - 1 {
+                if attempt < perPhase - 1 {
+                    let backoff = initialDelaySec * pow(2.0, Double(attempt))
+                    try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+                }
+            }
+        }
+        for attempt in 0 ..< perPhase {
+            do {
+                try data.write(to: url)
+                return
+            } catch let error as CocoaError where error.code == .fileWriteNoPermission {
+                lastError = error
+                if attempt < perPhase - 1 {
                     let backoff = initialDelaySec * pow(2.0, Double(attempt))
                     try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
                 }

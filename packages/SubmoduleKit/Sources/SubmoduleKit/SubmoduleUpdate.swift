@@ -25,9 +25,15 @@
 // snapshot-then-force remedy (``snapshotThenForce(submodulePath:in:runner:)``)
 // takes a ``SafetyKit/WorktreeBackup`` snapshot INSIDE THE SUBMODULE'S
 // REPO (ADR 0075 — a `refs/sprig/backup/...` ref in the submodule's own
-// gitdir, capturing tracked + untracked work) and ONLY THEN runs
-// `submodule update --init --force -- <sub>` from the super-repo. The
-// overwritten work is recoverable from the submodule's Recover surface.
+// gitdir, capturing ALL tracked + untracked work with NO exclude list)
+// and ONLY THEN runs `submodule update --init --force -- <sub>` from the
+// super-repo. The no-exclude detail is load-bearing: `WorktreeBackup`'s
+// default `JunkFilePatterns` excludes (`*.key`, `*.env`, `*secret*`, …)
+// are right for periodic auto-backups but WRONG for a force-destroy — a
+// tracked edit to such a file would otherwise be silently excluded,
+// mint no backup ref, and be clobbered by the force with nothing to
+// recover. The overwritten work is recoverable from the submodule's
+// Recover surface.
 // No super-repo HEAD moves, so no ADR 0033 snapshot ref is minted here;
 // the recoverable state is the submodule's uncommitted working tree
 // (a `WorktreeBackup`), exactly as ADR 0089's force path does for
@@ -60,9 +66,13 @@ public struct SubmoduleForceOutcome: Sendable, Equatable {
     public let submodulePath: String
 
     /// The `refs/sprig/backup/...` ref minted inside the submodule's
-    /// repo before the force, or `nil` when the submodule's tree was
-    /// already clean (nothing to back up — the dirt was resolved out of
-    /// band between the skip report and the force).
+    /// repo before the force, or `nil` when there was nothing the force
+    /// could discard — the submodule's working-tree content was already
+    /// equivalent to its `HEAD` (a genuinely clean tree, or only
+    /// stat-/normalization-dirty so staging it reproduces `HEAD`'s
+    /// tree). Because the backup uses NO exclude list, `nil` no longer
+    /// hides a junk-only-dirty case: a tracked edit to a `*.key`/`*.env`/
+    /// `*secret*`-shaped file IS captured and yields a ref.
     public let backupRef: BackupRefName?
 
     public init(submodulePath: String, backupRef: BackupRefName?) {
@@ -134,8 +144,9 @@ public enum SubmoduleUpdate {
     /// The snapshot-then-force remedy for one dirty submodule.
     ///
     /// Takes a ``SafetyKit/WorktreeBackup`` snapshot INSIDE the
-    /// submodule's own repo (capturing tracked + untracked work as a
-    /// `refs/sprig/backup/...` ref) and ONLY THEN runs `git submodule
+    /// submodule's own repo (capturing ALL tracked + untracked work —
+    /// with NO exclude list, so a force-destroy is fully recoverable) as
+    /// a `refs/sprig/backup/...` ref, and ONLY THEN runs `git submodule
     /// update --init --force -- <submodulePath>` from the super-repo,
     /// overwriting the submodule's working tree with the recorded SHA.
     ///
@@ -146,8 +157,9 @@ public enum SubmoduleUpdate {
     ///   - worktree: super-repo worktree root.
     ///   - runner: ``GitCore/Runner`` for the super-repo. The in-submodule
     ///     backup uses a `cwd`-scoped runner derived from it.
-    /// - Returns: the path and the minted backup ref (or `nil` if the
-    ///   submodule turned out clean).
+    /// - Returns: the path and the minted backup ref (or `nil` only when
+    ///   the working tree held nothing the force could discard — its
+    ///   content already equalled `HEAD`).
     @discardableResult
     public static func snapshotThenForce(
         submodulePath: String,
@@ -166,7 +178,21 @@ public enum SubmoduleUpdate {
             environmentOverrides: runner.environmentOverrides,
             log: runner.log
         )
-        let backup = WorktreeBackup(runner: subRunner)
+        // `excludedPatterns: []` — back up EVERYTHING, with no exclude
+        // list. `WorktreeBackup`'s default `JunkFilePatterns` excludes
+        // (`*.key`, `*.env`, `*secret*`, …) exist to keep PERIODIC
+        // auto-backups from persisting likely-secret/junk files into git
+        // objects every tick. That trade-off is wrong here: this is a
+        // user-ELECTED destructive overwrite, and `createBackupIfDirty`'s
+        // junk-only-dirty guard returns `nil` (no ref) when the sole dirt
+        // is an excluded path. If a TRACKED `*.key`/`*.env`/`*secret*`
+        // edit were the only dirt, the default excludes would mint no
+        // backup and the `--force` below would clobber it with NO
+        // recovery ref — permanent data loss. For a force-destroy,
+        // everything the force can discard must be recoverable, so
+        // nothing is excluded. (The backup ref is local to the
+        // submodule's gitdir and TTL-pruned; it is never pushed.)
+        let backup = WorktreeBackup(runner: subRunner, excludedPatterns: [])
         let backupRef = try await backup.createBackupIfDirty()
 
         // Only now overwrite. `--` pins the pathspec so a submodule
