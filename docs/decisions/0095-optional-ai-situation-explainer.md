@@ -46,6 +46,54 @@ confirmation. Held-out eval fixtures (repo-state → expected guidance) go under
 The deterministic vocabulary (ADR 0072) remains the default explainer for everyone; this is
 strictly an optional upgrade for users who have turned AI on.
 
+## Implementation status
+
+**Engine shipped (AIKit); Tier-3 UI + cloud-confirmation deferred (status stays `proposed`).**
+
+- **Engine (AIKit).** The portable explainer is built:
+  - A versioned, user-overridable prompt `situation-explainer-v1.md` under
+    `AIKit/Prompts/` (per ADR 0037, loaded via the same `PromptLoader.loadBundled`
+    path as `commit-message-v1`). It instructs the model to translate a repo
+    snapshot into plain language, suggest only verbs from a closed set, lead with a
+    parked operation or conflicts, and stay suggest-only (never run raw git).
+  - `RepoSituation` — a small, provider-neutral input struct *in AIKit*. AIKit is a
+    Tier-1 **leaf** package (no cross-package deps), so it cannot import GitCore's
+    `MidstreamOperation` or TaskWindowKit's `RepoStatusSummary`; the caller (a
+    TaskWindowKit view model, a follow-up slice) flattens its rich engine types onto
+    `RepoSituation` (`ParkedOperation` mirrors `MidstreamOperation`'s cases). This
+    keeps AIKit testable in isolation and the prompt input stable.
+  - `AISituationExplainer` (actor) renders the prompt + snapshot into an `AIRequest`,
+    calls the injected `any AIProvider` (local-first; Ollama is the production
+    default, but the engine just takes any provider), and returns a
+    `SituationExplanation` (text + structured `SuggestedAction`s + a `.ai`/
+    `.deterministic` source tag). On **no provider, an empty completion, or any
+    `AIError`** it returns the deterministic explanation — AI never blocks the
+    answer (ADR 0007/0036). It also falls back when the model's prose **breaks a
+    hard prompt safety rule** — instructing a raw `git` command (the explainer is
+    suggest-only) or implying data was lost (Sprig keeps recoverable snapshots) —
+    via a runtime guard (`violatesSafetyRules`), the backstop this ADR's "eval
+    coverage is needed to keep guidance safe" trade-off calls for. Suggestion chips
+    stay deterministic even on the AI path so the UI always has clickable verbs
+    mapped to real Sprig affordances.
+  - `DeterministicSituationExplainer` — the always-available, no-AI fallback: pure
+    template strings over `RepoSituation`, priority-ordered (parked op > conflicts >
+    detached HEAD > diverged > behind > ahead > dirty > clean) to agree with the
+    prompt's rules.
+  - Held-out eval corpus `tests/ai-evals/situation-explainer-v1.json` (per ADR 0038)
+    pins repo-situation → expected guidance shape (lead verb, required/absent verbs,
+    headline substrings), exercised against the deterministic path with no LLM. Unit
+    tests cover the AI path via `MockAIProvider` (canned success, scripted error →
+    fallback, empty → fallback, no-provider → fallback) and the deterministic path
+    directly.
+- **NOT built (explicitly later):** the Tier-3 task-window UI that renders the
+  explanation + clickable verb chips, the AI-enabled gate, and the cloud-provider
+  per-action "will send repo context to X" confirmation (ADR 0036). The engine never
+  bypasses that boundary — it only takes a provider the shell decides to construct.
+- **Why the status stays `proposed`:** the ADR is still `proposed` pending maintainer
+  ratification, and its full decision spans the cloud-confirmation boundary and the
+  user-facing surface, which are unbuilt. The engine half is unambiguous and shipped;
+  flip to `accepted` once the maintainer ratifies the full surface.
+
 ## Consequences
 
 **Positive**

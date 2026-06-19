@@ -103,24 +103,46 @@ enum Sprigctl {
 
         try process.run()
 
-        // Feed stdin (or immediate EOF when nil) — commands like
-        // `credential --set` read the secret from stdin.
-        if let stdin {
-            try inPipe.fileHandleForWriting.write(contentsOf: stdin)
+        // Long-running children (e.g. `agent --duration N`) can be
+        // stopped early by cancelling the surrounding Task: on cancel we
+        // terminate the child so its pipes hit EOF and the drains +
+        // termination gate below unblock immediately, instead of waiting
+        // out the child's full lifetime. A no-op for the usual
+        // fast-exiting commands, which are never cancelled.
+        let terminator = ProcessTerminationBox(process: process)
+        return try await withTaskCancellationHandler {
+            // Feed stdin (or immediate EOF when nil) — commands like
+            // `credential --set` read the secret from stdin.
+            if let stdin {
+                try inPipe.fileHandleForWriting.write(contentsOf: stdin)
+            }
+            try inPipe.fileHandleForWriting.close()
+
+            async let outBytes = readToEnd(outPipe.fileHandleForReading)
+            async let errBytes = readToEnd(errPipe.fileHandleForReading)
+            let out = try await outBytes
+            let err = try await errBytes
+            await gate.wait(processIsRunning: { process.isRunning })
+
+            return Captured(
+                stdout: String(data: out, encoding: .utf8) ?? "",
+                stderr: String(data: err, encoding: .utf8) ?? "",
+                exitCode: process.terminationStatus
+            )
+        } onCancel: {
+            terminator.terminate()
         }
-        try inPipe.fileHandleForWriting.close()
+    }
 
-        async let outBytes = readToEnd(outPipe.fileHandleForReading)
-        async let errBytes = readToEnd(errPipe.fileHandleForReading)
-        let out = try await outBytes
-        let err = try await errBytes
-        await gate.wait(processIsRunning: { process.isRunning })
-
-        return Captured(
-            stdout: String(data: out, encoding: .utf8) ?? "",
-            stderr: String(data: err, encoding: .utf8) ?? "",
-            exitCode: process.terminationStatus
-        )
+    /// `@unchecked Sendable` carrier so a `Process` can be terminated
+    /// from a `@Sendable` task-cancellation handler (`Process` itself
+    /// isn't `Sendable`). `terminate()` is safe on an already-exited
+    /// child — SIGTERM to a reaped pid is a harmless no-op.
+    private struct ProcessTerminationBox: @unchecked Sendable {
+        let process: Process
+        func terminate() {
+            if process.isRunning { process.terminate() }
+        }
     }
 
     /// Async pipe drain — same shape as GitCore.Runner's private helper

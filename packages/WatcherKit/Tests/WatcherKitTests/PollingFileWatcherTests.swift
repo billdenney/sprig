@@ -144,10 +144,14 @@ struct PollingFileWatcherRealFSTests {
         }
     }
 
-    /// Pre-write delay for the live-watcher tests below. The watcher's
-    /// first snapshot is taken inside a Task scheduled when `start()`
-    /// returns; the file modification has to happen *after* that
-    /// snapshot or there's nothing for the diff to surface.
+    /// Pre-write delay for the live-watcher tests below. The baseline
+    /// snapshot is now captured SYNCHRONOUSLY inside `start()` (before the
+    /// stream is returned), so the old baseline-vs-write race is gone and
+    /// on macOS/Linux this delay is pure headroom. It is kept to absorb
+    /// filesystem *write-visibility* lag — the window between a write
+    /// returning and the next directory walk seeing it — which on Windows
+    /// can be significant. (`immediateCreateAfterStartIsDetected` above
+    /// deliberately omits this delay to pin the synchronous baseline.)
     ///
     /// Platform-conditional:
     /// - macOS / Linux: 500 ms is generous. Runners settle in ~30–50 ms,
@@ -235,6 +239,33 @@ struct PollingFileWatcherRealFSTests {
         )
         await watcher.stop()
         #expect(events.contains(where: { $0.kind == .modified && $0.path.lastPathComponent == "a.txt" }))
+    }
+
+    @Test("a file created immediately after start() — no settle delay — is detected (synchronous baseline)")
+    func immediateCreateAfterStartIsDetected() async throws {
+        // Regression guard for the baseline race. `start()` now captures
+        // its baseline SYNCHRONOUSLY (before returning the stream), so a
+        // change made the instant start() returns — with NO preWriteDelay,
+        // deliberately — is still diffed. Before the fix the baseline was
+        // taken as the first line of the polling Task and, under scheduler
+        // pressure, could run AFTER this write and silently fold it into
+        // the baseline; that surfaced as a flaky agent end-to-end test
+        // where the badge never arrived under load. The missing delay here
+        // is the whole point: it pins the race window shut.
+        let root = try makeTempDir("immediate")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let watcher = PollingFileWatcher(pollInterval: 0.05)
+        let stream = watcher.start(paths: [root])
+        try Data("hi\n".utf8).write(to: root.appendingPathComponent("new.txt"))
+
+        let events = await collect(
+            from: stream,
+            until: { evs in evs.contains(where: { $0.kind == .created }) },
+            timeout: Self.eventTimeoutSec
+        )
+        await watcher.stop()
+        #expect(events.contains(where: { $0.kind == .created && $0.path.lastPathComponent == "new.txt" }))
     }
 
     @Test("deleting a file produces a .removed event")
