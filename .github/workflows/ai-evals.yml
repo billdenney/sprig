@@ -16,7 +16,7 @@ jobs:
     container:
       image: swift:6.3-noble
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install libjemalloc-dev
         # `swift test --filter AIEvals` still builds every target in
         # the package — including `SprigCoreBenchmarks`, which depends
