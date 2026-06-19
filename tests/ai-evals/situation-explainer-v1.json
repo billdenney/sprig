@@ -1,0 +1,174 @@
+{
+  "prompt": "situation-explainer-v1",
+  "adr": "0095",
+  "description": "Held-out repo-situation -> expected-guidance corpus for the AIKit situation explainer. Each case feeds a flattened RepoSituation through the deterministic explainer (no LLM required) and pins the expected SHAPE of the guidance: which Sprig verb must lead the suggestions, which verbs must appear, and substrings the plain-language headline must contain. The AI path is held to the same closed verb set by the prompt; this corpus is the regression net for the always-available deterministic guidance and the contract the AI path is expected to stay consistent with.",
+  "cases": [
+    {
+      "name": "clean-and-in-sync",
+      "situation": {
+        "branchName": "main",
+        "upstreamName": "origin/main"
+      },
+      "expect": {
+        "leadVerb": "Fetch",
+        "mustContainVerbs": ["Fetch"],
+        "headlineContains": ["in sync"],
+        "mustNotContainVerbs": ["Abort", "Recover", "Resolve", "Continue", "Commit"]
+      }
+    },
+    {
+      "name": "dirty-working-tree",
+      "situation": {
+        "branchName": "main",
+        "upstreamName": "origin/main",
+        "unstagedCount": 3,
+        "untrackedCount": 1
+      },
+      "expect": {
+        "leadVerb": "Commit",
+        "mustContainVerbs": ["Commit"],
+        "headlineContains": ["unsaved changes"],
+        "mustNotContainVerbs": ["Abort", "Recover", "Resolve", "Continue"]
+      }
+    },
+    {
+      "name": "behind-upstream",
+      "situation": {
+        "branchName": "main",
+        "upstreamName": "origin/main",
+        "behind": 4
+      },
+      "expect": {
+        "leadVerb": "Pull",
+        "mustContainVerbs": ["Pull"],
+        "headlineContains": ["4 commit"],
+        "mustNotContainVerbs": ["Abort", "Recover", "Resolve", "Continue", "Commit"]
+      }
+    },
+    {
+      "name": "ahead-of-upstream",
+      "situation": {
+        "branchName": "feature/x",
+        "upstreamName": "origin/feature/x",
+        "ahead": 2
+      },
+      "expect": {
+        "leadVerb": "Push",
+        "mustContainVerbs": ["Push"],
+        "headlineContains": ["2 commit"],
+        "mustNotContainVerbs": ["Abort", "Recover", "Resolve", "Continue", "Commit"]
+      }
+    },
+    {
+      "name": "diverged",
+      "situation": {
+        "branchName": "main",
+        "upstreamName": "origin/main",
+        "ahead": 1,
+        "behind": 3
+      },
+      "expect": {
+        "leadVerb": "Pull",
+        "mustContainVerbs": ["Pull", "Fetch"],
+        "headlineContains": ["diverged"],
+        "mustNotContainVerbs": ["Abort", "Recover", "Resolve", "Continue", "Commit"]
+      }
+    },
+    {
+      "name": "diverged-and-dirty",
+      "situation": {
+        "branchName": "main",
+        "upstreamName": "origin/main",
+        "ahead": 1,
+        "behind": 2,
+        "unstagedCount": 2
+      },
+      "expect": {
+        "leadVerb": "Commit",
+        "mustContainVerbs": ["Commit", "Pull"],
+        "headlineContains": ["diverged"],
+        "mustNotContainVerbs": ["Abort", "Recover", "Resolve", "Continue"]
+      }
+    },
+    {
+      "name": "behind-and-dirty",
+      "situation": {
+        "branchName": "main",
+        "upstreamName": "origin/main",
+        "behind": 3,
+        "unstagedCount": 1,
+        "untrackedCount": 2
+      },
+      "expect": {
+        "leadVerb": "Commit",
+        "mustContainVerbs": ["Commit", "Pull"],
+        "headlineContains": ["3 commit"],
+        "mustNotContainVerbs": ["Abort", "Recover", "Resolve", "Continue"]
+      }
+    },
+    {
+      "name": "merge-conflicts",
+      "situation": {
+        "branchName": "main",
+        "conflictedCount": 2,
+        "parkedOperation": "merge"
+      },
+      "expect": {
+        "leadVerb": "Continue",
+        "mustContainVerbs": ["Continue", "Abort"],
+        "headlineContains": ["merge", "paused"]
+      }
+    },
+    {
+      "name": "rebase-in-progress",
+      "situation": {
+        "branchName": "feature/y",
+        "parkedOperation": "rebase"
+      },
+      "expect": {
+        "leadVerb": "Continue",
+        "mustContainVerbs": ["Continue", "Abort"],
+        "headlineContains": ["rebase", "paused"]
+      }
+    },
+    {
+      "name": "conflicts-without-parked-op",
+      "situation": {
+        "branchName": "main",
+        "conflictedCount": 1
+      },
+      "expect": {
+        "leadVerb": "Resolve",
+        "mustContainVerbs": ["Resolve"],
+        "headlineContains": ["conflicting edits"],
+        "mustNotContainVerbs": ["Continue", "Abort", "Recover", "Commit"]
+      }
+    },
+    {
+      "name": "detached-head",
+      "situation": {
+        "isDetachedHead": true
+      },
+      "expect": {
+        "leadVerb": "Switch",
+        "mustContainVerbs": ["Switch"],
+        "headlineContains": ["not on a branch", "detached HEAD"],
+        "mustNotContainVerbs": ["Abort", "Recover", "Resolve", "Continue", "Fetch"]
+      }
+    },
+    {
+      "name": "upstream-gone",
+      "situation": {
+        "branchName": "old-feature",
+        "upstreamName": "origin/old-feature",
+        "upstreamGone": true
+      },
+      "expect": {
+        "leadVerb": "Fetch",
+        "mustContainVerbs": ["Fetch"],
+        "headlineContains": ["server is gone"],
+        "mustNotContainVerbs": ["Abort", "Recover", "Resolve", "Continue", "Commit"]
+      }
+    }
+  ]
+}
