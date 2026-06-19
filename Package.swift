@@ -45,7 +45,10 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // parser (`SubmoduleStatusParser`) and value type
     // (`SubmoduleEntry`) don't need GitCore, but they live in the
     // same Tier-1 module and the convenience of one dep covers both.
-    "SubmoduleKit": ["GitCore"],
+    // ADR 0096's `SubmoduleUpdate` snapshot-then-force path mints a
+    // `SafetyKit.WorktreeBackup` inside the dirty submodule's repo
+    // before forcing — a Tier-1 cross-dep, no platform coupling.
+    "SubmoduleKit": ["GitCore", "SafetyKit"],
     // DiagKit's `EnvironmentCollector` probes git via
     // `GitCore.Runner` (`git --version` and `git lfs version`) so
     // diagnostics envelopes carry the actually-resolved tool
