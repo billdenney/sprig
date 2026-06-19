@@ -105,6 +105,7 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0093 | Push-time pre-flight rails — protected-branch, force, secret-in-push        | accepted |
 | 0094 | Ambient multi-repo status surface — roll-up window + opt-in nudge           | proposed |
 | 0095 | Optional AI situation-explainer — "what should I do now?"                  | proposed |
+| 0096 | Submodules tracked by default — auto-reconcile (no force) + throttled nudge | accepted |
 
 ADRs 0001–0053 were ratified simultaneously in the initial scaffolding, based on the planning dialogue captured in the master plan file. Subsequent ADRs (0054+) follow the normal one-per-PR cadence.
 
