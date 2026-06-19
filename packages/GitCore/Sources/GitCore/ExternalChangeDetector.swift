@@ -179,10 +179,13 @@ public struct ExternalChangeDetector: Sendable {
         // range `recorded..HEAD` is also empty there, so neither signal
         // would fire).
         let authored = try await provenance.authoredCommits()
-        if authored.contains(current),
-           try await isAncestor(recorded, of: current)
-        {
-            return .unchanged
+        if authored.contains(current) {
+            // Forward move only when the checkpoint is an ancestor of the
+            // new tip (Sprig's commit advanced HEAD); an external rewind
+            // onto an old authored commit fails this and stays external.
+            if try await isAncestor(recorded, of: current) {
+                return .unchanged
+            }
         }
         return .movedExternally(from: recorded, to: current)
     }
