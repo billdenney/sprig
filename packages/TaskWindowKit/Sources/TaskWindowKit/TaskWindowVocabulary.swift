@@ -244,6 +244,20 @@ public enum TaskWindowVocabulary {
             + "— publish again to finish uploading them."
     }
 
+    // MARK: - Agent review (ADR 0088)
+
+    public static let agentReviewSplitNotTip =
+        "Splitting is only offered for the most recent commit — that one is further back in history."
+
+    public static let agentReviewSplitNoParent =
+        "This commit can't be split here — it has no single earlier commit to peel its changes back onto."
+
+    public static let agentReviewSplitDirty =
+        "You have unsaved or staged changes — commit or set them aside first so the split starts clean."
+
+    public static let agentReviewNothingToUndo =
+        "Nothing to undo — Sprig hasn't split a commit in this window yet."
+
     // MARK: - Multi-repo roll-up (ADR 0094 Option 2)
 
     /// A repository in the roll-up finished without a readable result —

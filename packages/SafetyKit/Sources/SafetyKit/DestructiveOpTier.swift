@@ -144,7 +144,8 @@ public enum DestructiveOpTier: Sendable, Equatable, Hashable, CaseIterable {
              SnapshotRefName.opCheckoutDirty,
              SnapshotRefName.opReword,
              SnapshotRefName.opSquash,
-             SnapshotRefName.opRestack:
+             SnapshotRefName.opRestack,
+             SnapshotRefName.opSplit:
             .medium
 
         // High tier — typed-phrase + snapshot + persistent banner.

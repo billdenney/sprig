@@ -93,6 +93,17 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git rev-parse --path-format=absolute --git-common-dir` — resolves the **common** git dir (shared by all linked worktrees) so the provenance store at `<common>/sprig/provenance.json` is repo-global: a commit authored in one worktree is recognized as Sprig-authored from any worktree. `--path-format=absolute` (git 2.31+) gives an absolute path even from the main worktree, where `--git-common-dir` alone returns a relative `.git`.
 - No other git invocation: provenance is a plain JSON file (authored-SHA set + a ref→sha checkpoint), local-only (never pushed) and gc-neutral (a ref pointing at the commit would *pin* it, defeating `git gc` — the file stores SHAs as text and pins nothing). The producer side is each commit-making verb calling `recordAuthored(<new-sha>)`; the consumer is ADR 0088's detector calling `externalCommits(among:)`.
 
+### Agent-review surface (ADR 0088) — engine invocations
+
+`GitCore.ExternalChangeDetector` (detection) + `TaskWindowKit.AgentReviewViewModel` (review/stage/split/undo):
+
+- `git log -z --format=<LogParser.formatString> <range>` — lists the commits in the scanned range (`<checkpoint>..HEAD` when provenance has a ref checkpoint, else `HEAD`). `OperationProvenance.externalCommits(among:)` then filters to the SHAs Sprig never recorded authoring — the reviewable external set.
+- `git symbolic-ref --quiet HEAD` + `git rev-parse --verify --quiet <ref>` — resolves the current branch ref and its SHA for the HEAD-movement check; compared against `OperationProvenance.lastKnownHeads()`. A ref now at a *different existing commit* Sprig didn't author reads as an external HEAD move (reset/checkout/force-update); a Sprig-authored new tip does not.
+- `git show --format= <sha>` — the per-commit unified diff the review UI renders for each external commit (commit metadata already rides in the report from the `git log` parse).
+- `git add <path>` / `git restore --staged <path>` — selective stage/unstage of working-tree changes; `git apply --cached --recount -` (sliced patch on stdin) for region staging (shared `DiffPatchSlicer` path). All index-only and reversible, so no snapshot.
+- **Split a commit:** `git reset --soft <sha>^` after `SnapshotWriter.createSnapshot(op: "split")` mints a medium-tier snapshot at pre-split HEAD. The soft reset moves only the branch ref, leaving the index === the split commit's tree byte-exactly (nothing discarded); the user then region-stages the pieces into separate commits. Pre-flighted: the commit must be the tip (`git rev-parse HEAD`), have exactly one parent (`git rev-list --parents -n 1 <sha>`), and a clean worktree (`git status --porcelain -z`).
+- **Undo:** routes through `RecoverViewModel.restoreSnapshot(<split-snapshot>)` — the same fail-closed `reset --hard` (with an uncommitted-work backup + a pre-restore snapshot) the Recover window uses, so a split is restored SHA-exactly and the restore is itself undoable.
+
 ### Sync verb (ADR 0071) — engine invocations
 
 `SyncOps.pushCurrentBranch` + `TaskWindowKit.SyncViewModel` (fetch and fast-forward legs reuse ADR 0068's invocations below):

@@ -140,6 +140,11 @@ public struct SnapshotRefName: Equatable, Hashable, Sendable {
     /// (`git rebase --onto`, ADR 0085). One snapshot per replayed
     /// child, at the child's pre-restack tip.
     public static let opRestack = "restack"
+    /// Splitting an externally-authored commit into staged pieces via
+    /// `reset --soft` + region staging (ADR 0088 agent-review surface).
+    /// The snapshot is minted at the pre-split HEAD so the whole split
+    /// (the soft reset and any re-commits) is undoable as one unit.
+    public static let opSplit = "split"
 
     // MARK: - Format internals (exposed for tests)
 
