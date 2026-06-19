@@ -99,7 +99,7 @@ New ADRs: copy `0000-template.md`, pick the next free number, add an entry to th
 | 0087 | Forge release creation (tag + notes + assets)                              | proposed |
 | 0088 | Agent-review surface — review/stage/split external-agent commits           | proposed |
 | 0089 | Selective sync — beginner folder picker over sparse-checkout               | accepted |
-| 0090 | File version history & restore-previous-version                            | proposed |
+| 0090 | File version history & restore-previous-version                            | accepted |
 | 0091 | Type-aware LFS guidance + document-store offer                              | accepted |
 | 0092 | Secret-scan pre-flight rail — default-on, promoted from M6                  | accepted |
 | 0093 | Push-time pre-flight rails — protected-branch, force, secret-in-push        | accepted |
