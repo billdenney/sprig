@@ -42,6 +42,16 @@ public enum TaskWindowVocabulary {
 
     public static let enterCommitSubject = "Enter a commit subject."
 
+    /// Region staging (ADR 0061): the selection touched no added or
+    /// removed line, so there's nothing to stage.
+    public static let selectionHasNoChange = "Select added or removed lines to stage."
+
+    /// Region staging (ADR 0061): the selection would split a change to
+    /// the last line of a file that has no trailing newline — stage the
+    /// whole end-of-file change at once.
+    public static let cannotSplitEndOfFile =
+        "Stage the whole change to the last line — it can't be split because the file has no final newline."
+
     // MARK: - Clone dialog
 
     public static let enterRepositoryURL = "Enter a repository URL."

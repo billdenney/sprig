@@ -79,6 +79,13 @@ The right-click menu surfaces these; each maps to a sequence of git primitives. 
 - `git reset --soft HEAD~N` + `git commit -m <message>` — squash; the new commit's tree is byte-identical to the old tip's.
 - `git rev-list --count HEAD --not --remotes` — the rewritable depth the VM exposes as `unpushedCount` (squash bound; zero means everything is shared).
 
+### Region staging (ADR 0061) — engine invocations
+
+`GitCore.DiffPatchSlicer` (pure) + `TaskWindowKit.CommitComposerViewModel.stageSelection`:
+
+- `git diff` — the unstaged worktree-vs-index diff the UI renders and the user drag-selects in. `DiffPatchSlicer.slice(diff:selection:)` then rewrites that diff into a patch staging exactly the selected +/- lines (unselected `+` dropped, unselected `-` demoted to context, `@@` counts re-derived, per-file headers carried verbatim).
+- `git apply --cached --recount -` (patch on stdin) — applies the sliced patch to the index only. `--recount` lets git re-derive the hunk line counts, so a sub-hunk slice never needs byte-perfect `@@` headers. Index-only and reversible (`git restore --staged`), so no snapshot is minted — staging isn't a destructive op.
+
 ### Sync verb (ADR 0071) — engine invocations
 
 `SyncOps.pushCurrentBranch` + `TaskWindowKit.SyncViewModel` (fetch and fast-forward legs reuse ADR 0068's invocations below):

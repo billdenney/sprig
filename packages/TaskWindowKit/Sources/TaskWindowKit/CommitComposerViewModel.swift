@@ -212,6 +212,26 @@ public actor CommitComposerViewModel {
         await runGitMutation(["restore", "--staged", path])
     }
 
+    /// Region staging (ADR 0061): stage exactly `selection` within
+    /// `diff` — the unstaged `git diff` the UI rendered and the user
+    /// drag-selected in. Slices a patch with ``DiffPatchSlicer`` and
+    /// applies it to the index (`git apply --cached --recount`). Staging
+    /// is index-only and reversible (`git restore --staged`), so — like
+    /// ``stage(_:)`` — it mints no snapshot.
+    public func stageSelection(in diff: String, selection: Range<String.Index>) async {
+        let sliced: SlicedPatch
+        do {
+            sliced = try DiffPatchSlicer.slice(diff: diff, selection: selection)
+        } catch DiffPatchSlicerError.cannotSplitEndOfFileChange {
+            state = .failure(.init(description: TaskWindowVocabulary.cannotSplitEndOfFile))
+            return
+        } catch {
+            state = .failure(.init(description: TaskWindowVocabulary.selectionHasNoChange))
+            return
+        }
+        await runGitMutation(["apply", "--cached", "--recount", "-"], stdin: Data(sliced.patch.utf8))
+    }
+
     // MARK: - Commit
 
     /// Run `git commit` with the current message + options. Updates
@@ -296,9 +316,9 @@ public actor CommitComposerViewModel {
 
     // MARK: - Private helpers
 
-    private func runGitMutation(_ argv: [String]) async {
+    private func runGitMutation(_ argv: [String], stdin: Data? = nil) async {
         do {
-            _ = try await runner.run(argv)
+            _ = try await runner.run(argv, stdin: stdin)
             await refresh()
         } catch {
             state = .failure(.init(from: error))
