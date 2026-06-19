@@ -1,9 +1,18 @@
 // AtomicWriteWithRetry.swift
 //
-// Windows-tolerant atomic file write helper for the few places in
-// TaskWindowKit that write working-tree-visible files: the
-// merge-conflict apply pipeline (`MergeApplyPipeline.applyPerRegionText`)
-// and `PreferencesViewModel.save()`.
+// Windows-tolerant atomic file write helper for every place that writes
+// a working-tree-visible file. It lives in SafetyKit (Tier 1, portable)
+// because the lowest common dependency of all its callers is SafetyKit:
+//
+//   * `SafetyKit.FileBackup.restore(_:to:)` — overwrite a file with a
+//     backed-up version's bytes (ADR 0090).
+//   * `TaskWindowKit.FileHistoryViewModel.restore(_:)` — overwrite a
+//     file with an older version's bytes (ADR 0090). TaskWindowKit
+//     depends on SafetyKit, so it reaches this helper here.
+//   * `TaskWindowKit.MergeApplyPipeline.applyPerRegionText(...)` — write
+//     a resolved merge-conflict file.
+//   * `TaskWindowKit.PreferencesViewModel.save()` — persist the prefs
+//     JSON.
 //
 // Why this exists
 // ---------------
@@ -20,14 +29,22 @@
 //
 //   * Text editors keeping the file open while the user resolves a
 //     conflict or edits a config file. The user's expected workflow
-//     is "tweak in editor → hit Apply / Save in Sprig"; Sprig then
-//     races the editor's file watcher.
+//     is "tweak in editor → hit Apply / Save / Restore in Sprig"; Sprig
+//     then races the editor's file watcher.
 //
 //   * Other git or sprig processes touching the same file mid-write
 //     (e.g. `git status` issued by another tool's pre-commit hook).
 //
+// The `.atomic` option also matters everywhere, not just Windows: a
+// plain `Data.write(to:)` truncates-then-writes in place, so a crash or
+// a full disk mid-write leaves the file half-written. For the restore
+// paths that is exactly the data the safety backup is meant to protect
+// -- the backup ref survives, but the worktree file would be corrupt.
+// `.atomic` makes the swap all-or-nothing (the temp file is fsync'd and
+// renamed over the target), so the file is never observed torn.
+//
 // macOS and Linux take the success path on the first attempt --
-// POSIX `rename(2)` overwrites a locked target -- so this is
+// POSIX `rename(2)` overwrites a locked target -- so the retry loop is
 // effectively Windows-only behavior with zero overhead elsewhere.
 //
 // Retry schedule: eight attempts with backoff `250 ms → 500 ms →
@@ -41,10 +58,10 @@
 
 import Foundation
 
-enum AtomicWriteWithRetry {
+public enum AtomicWriteWithRetry {
     /// Write `data` atomically to `url`, retrying with exponential
     /// backoff on transient Windows file-sharing violations.
-    static func run(
+    public static func run(
         _ data: Data,
         to url: URL,
         attempts: Int = 8,
@@ -70,7 +87,7 @@ enum AtomicWriteWithRetry {
     }
 
     /// String overload -- encodes UTF-8 then defers to the Data form.
-    static func run(
+    public static func run(
         _ content: String,
         to url: URL,
         attempts: Int = 8,

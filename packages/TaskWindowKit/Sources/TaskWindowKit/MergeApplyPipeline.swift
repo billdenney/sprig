@@ -14,6 +14,7 @@
 import ConflictKit
 import Foundation
 import GitCore
+import SafetyKit
 
 /// Static apply helpers. Not instantiated; namespace only.
 enum MergeApplyPipeline {
