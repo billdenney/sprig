@@ -153,6 +153,15 @@ Three warn-and-proceed rails evaluated in `SyncViewModel`'s push leg from the po
 - `git status --porcelain=v2 -z --untracked-files=all` — `planChange(to:)`'s dirty-folder guard: dropped folders holding uncommitted/untracked/staged work are reported as `blockedDrops` (sparse-checkout's "lossless" claim holds only for clean folders), so the surfaces fail closed.
 - Force path (after a fail-closed report, only with explicit confirmation): `SafetyKit.WorktreeBackup.createBackupIfDirty()` (captures tracked + untracked work) **first**, then per blocked folder `git restore --worktree --staged -- <dir>` + `git clean -fd -- <dir>` (no `-x`, so ignored files survive; no `-ff`, so nested repos survive), then `sparse-checkout set`. Recoverable via the Recover surface — never moves HEAD.
 
+### Binary & visual diff classification (ADR 0086 C0) — engine invocations
+
+`GitCore.DiffNumstat` / `GitAttributeDrivers` / `ContentTypeSniffer` / `ExternalDiffTool` + `TaskWindowKit.DiffViewerViewModel.classifyFiles()`:
+
+- `git diff --numstat -z` (or `git show --format= <sha> --numstat -z` for a commit) — per-file added/deleted line counts and git's binary marker (the `-`/`-` rows); `-z` gives unquoted paths and the rename three-token shape (`<a>\t<d>\t` then old then new, NUL-separated).
+- `git check-attr -z --stdin diff merge` — the configured `.gitattributes` `diff=`/`merge=` driver names (defer-to-git, ADR 0023); a named driver routes the file to the external tool.
+- `<sha>:<path>` / `:<path>` blob reads via `CatFileBatch` (commit/index targets) and a worktree file read — the new-side bytes for the magic-number content sniff; LFS pointers are read from `.git/lfs/objects/<oid>` and sniffed as the real media.
+- `git difftool` / `git mergetool --no-prompt [--tool <tool>] -- <path>` — the ADR 0027 external-tool fallback for drivers / unknown binaries / Office docs (the tool mutates the worktree file in place; the caller stages it).
+
 ## Newer-git features Sprig explicitly takes advantage of
 
 Master plan §10 has a per-version (2.40 → 2.46) breakdown. Highlights:
