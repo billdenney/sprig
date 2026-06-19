@@ -193,6 +193,13 @@ Three warn-and-proceed rails evaluated in `SyncViewModel`'s push leg from the po
 - `<sha>:<path>` / `:<path>` blob reads via `CatFileBatch` (commit/index targets) and a worktree file read — the new-side bytes for the magic-number content sniff; LFS pointers are read from `.git/lfs/objects/<oid>` and sniffed as the real media.
 - `git difftool` / `git mergetool --no-prompt [--tool <tool>] -- <path>` — the ADR 0027 external-tool fallback for drivers / unknown binaries / Office docs (the tool mutates the worktree file in place; the caller stages it).
 
+### Multi-repo status roll-up (ADR 0094 Option 2) — engine invocations
+
+`TaskWindowKit.MultiRepoStatusViewModel` (on-demand "Repositories" roll-up; Option 2 engine half — Option 4's opt-in nudge is deferred):
+
+- **No new git spawns.** The roll-up runs one `TaskWindowKit.StatusViewModel` per watch-root (one `GitCore.Runner` each) and folds the resulting `RepoStatusSummary` values into a `RepoRollup` aggregate (total dirty, total ahead/behind on the checked-out branch, repos with a parked merge/rebase or conflicted paths, repos that couldn't be read). Every underlying invocation is exactly the ADR 0064 Status surface's (`status --porcelain=v2 -z --branch`, the `branchSyncStates` `for-each-ref` pass, the `MidstreamOperation` probe, `log -1 --format=%cI`, the snapshot/backup `for-each-ref`s).
+- **On-demand by construction:** the caller drives `refresh()`; the VM never installs a watcher and never polls (ADR 0094 rejects the ambient Option 1 and the tray). An unreadable root degrades to a counted `.failed` entry rather than sinking the roll-up.
+
 ### Submodules tracked by default (ADR 0096) — engine invocations
 
 `SubmoduleKit.SubmoduleUpdate` (auto-reconcile) + `SubmoduleFreshnessProbe` (the throttled-suggestion heuristic) + `SubmoduleSuggestionThrottle` (per-repo last-shown store), all over `GitCore.Runner` and `SafetyKit.WorktreeBackup`:

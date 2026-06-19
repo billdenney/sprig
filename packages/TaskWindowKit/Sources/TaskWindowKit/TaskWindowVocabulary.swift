@@ -244,6 +244,14 @@ public enum TaskWindowVocabulary {
             + "— publish again to finish uploading them."
     }
 
+    // MARK: - Multi-repo roll-up (ADR 0094 Option 2)
+
+    /// A repository in the roll-up finished without a readable result —
+    /// shown for the (today unreachable) non-terminal per-repo state so
+    /// the row is never silently dropped.
+    public static let rollupRepoUnavailable =
+        "Couldn't read this repository — refresh the list."
+
     // MARK: - Cancellation (uniform across windows)
 
     /// "Switch cancelled.", "Clone cancelled.", … — pass the
