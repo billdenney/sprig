@@ -73,7 +73,14 @@ let tier1Dependencies: [String: [Target.Dependency]] = [
     // RepoState: the Recover VM (ADR 0033 amendment) lists snapshot
     // refs via `SnapshotIndex` alongside SafetyKit's backups.
     // ForgeKit: the CloneDialog's forge-browse affordance (ADR 0078).
-    "TaskWindowKit": ["GitCore", "ConflictKit", "LFSKit", "SafetyKit", "RepoState", "ForgeKit"],
+    // PlatformKit: `AppPreferences` + `GitIdentity`, the shape
+    // `PreferencesViewModel` edits. They sit one layer down so the
+    // headless agent can read preferences without depending on the
+    // view-model package — see `PlatformKit/AppPreferences.swift`.
+    "TaskWindowKit": [
+        "GitCore", "ConflictKit", "LFSKit", "SafetyKit", "RepoState",
+        "ForgeKit", "PlatformKit"
+    ],
     // ADR 0072's `StatusVocabulary` formats GitCore outcome types
     // (FastForwardOutcome, PushOutcome, BranchSyncState) and
     // TaskWindowKit's (PreflightWarning, SetAsideOutcome) into
@@ -189,12 +196,15 @@ let package = Package(
             case "AgentKit":
                 // SafetyKit: ADR 0075's auto-backup job
                 // (`WorktreeBackup`) runs inside the agent.
-                // TaskWindowKit: `AppPreferences` — the agent host maps
-                // the user's preferences to its background-job startups
-                // (`AgentPreferencesWiring`, ADR 0068/0075 host wiring).
+                // `AppPreferences` — which the agent host maps to its
+                // background-job startups (`AgentPreferencesWiring`,
+                // ADR 0068/0075 host wiring) — comes from the default
+                // `PlatformKit` dep. It deliberately does NOT come from
+                // TaskWindowKit: a headless background loop must not
+                // depend on the view-model package.
                 [
                     "GitCore", "RepoState", "IPCSchema", "WatcherKit",
-                    "TransportKit", "SafetyKit", "TaskWindowKit"
+                    "TransportKit", "SafetyKit"
                 ]
             case "CredentialKit":
                 // GitCore.Runner: the portable default store defers to
@@ -222,11 +232,12 @@ let package = Package(
                 // in the production deps plus their helpers. SafetyKit is
                 // a test-only addition for `RepoAgent`'s snapshot-prune
                 // tests, which write `refs/sprig/snapshots/...` refs via
-                // `SnapshotRefName` to set up fixtures. TaskWindowKit:
-                // `AppPreferences` fixtures for the wiring tests.
+                // `SnapshotRefName` to set up fixtures. The
+                // `AppPreferences` fixtures the wiring tests build come
+                // from the default `PlatformKit` dep.
                 [
                     "GitCore", "RepoState", "IPCSchema", "WatcherKit",
-                    "TransportKit", "SafetyKit", "TaskWindowKit"
+                    "TransportKit", "SafetyKit"
                 ]
             default:
                 []

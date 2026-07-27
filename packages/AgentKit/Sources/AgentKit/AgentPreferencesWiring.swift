@@ -14,7 +14,7 @@
 // last tick).
 
 import Foundation
-import TaskWindowKit
+import PlatformKit
 
 /// Pure `AppPreferences` → startup-configuration mapping.
 public enum AgentPreferencesWiring {

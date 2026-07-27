@@ -4,6 +4,7 @@
 // injected temp-dir URL. No git involvement; pure Foundation.
 
 import Foundation
+import PlatformKit
 @testable import TaskWindowKit
 import Testing
 

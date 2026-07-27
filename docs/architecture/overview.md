@@ -119,10 +119,12 @@ Implemented and CI-required-green on macOS / Linux / Windows:
 
 Not yet started:
 
-- The macOS app shell (`apps/macos/SprigApp/`, `apps/macos/SprigAgent/`, `apps/macos/SprigFinder/`) — milestone M2-Mac onward.
-- The Windows app shell (`apps/windows/`) — milestone M2-Win onward.
-- `RepoState` real implementation (currently a stub package).
-- `ConflictKit`, `SubmoduleKit`, `SubtreeKit`, `LFSKit`, `AIKit` — stub packages awaiting their feature milestones.
+- The macOS app shell (`apps/macos/SprigApp/`, `apps/macos/SprigAgent/`, `apps/macos/SprigFinder/`) — milestone M2-Mac onward. `apps/macos/` holds a stub README and nothing else.
+- The Windows app shell (`apps/windows/`) — milestone M2-Win onward. Likewise a stub README.
+- The Linux GUI shell (`apps/linux/`) — post-1.0 per ADR 0054.
+- `StatusKit` and `SubtreeKit` — still stub packages (~9 lines each) awaiting their feature milestones.
+
+**No user-facing surface exists on any platform.** Every one of the ~31.6k lines above is reachable only from `sprigctl` or a test. `TaskWindowKit`'s 21 view models have no shell binding to them; see [`../planning/roadmap.md`](../planning/roadmap.md)'s status note.
 
 See [`../planning/roadmap.md`](../planning/roadmap.md) for milestone-by-milestone scope.
 

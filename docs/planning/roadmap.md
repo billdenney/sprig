@@ -2,6 +2,28 @@
 
 Sprig 1.0 ships GUI shells for macOS and Windows in parallel. The engine and `sprigctl` CLI are first-class on macOS, Linux, and Windows from day 1. Linux GUI shell is post-1.0. See ADR 0054 for the strategic decision and ADR 0055 for the Windows GUI stack choice.
 
+## Where we actually are *(status check, 2026-07-27)*
+
+Read this before picking up work. The engine has outrun the shells by so much that the milestone table below no longer describes the project's real position.
+
+| | |
+|---|---|
+| Engine + CLI | ~31.6k lines source, ~32.5k lines tests, 22 packages, 18 `sprigctl` subcommands, 97 ADRs, 451 commits |
+| GUI shells (`apps/`) | **0 lines** — three `README.md` files |
+
+- **No user has ever driven Sprig through a UI.** Every line of the engine is reachable only from `sprigctl` or a test.
+- **`TaskWindowKit` holds 21 view models for windows that do not exist.**
+- **M2-Mac: 0 of 8 exit criteria met.** M1 still has its 100k-file benchmark gate open.
+- **ADRs 0084–0096 — thirteen features — shipped with no consumer.** Region staging, forge releases, file history, sparse checkout, secret-scan rails, agent-review surface, multi-repo roll-up, AI situation explainer, submodule auto-reconcile. Each defensible alone; together they widened the never-used surface and each one carried the full three-OS slice gate.
+
+**How this happened.** The shell tracks are hardware-blocked — the self-hosted macOS-arm64 runner (and with it signing, XCUITest, and the M1 benchmark gate) was expected 2026-06 and hasn't arrived. Rather than idle, each development cycle found engine work; the cheap engine work was long done, so the slices moved steadily further out onto speculative ground. The result is a well-tested engine built almost entirely on unfalsified guesses about what a UI will need.
+
+**The guard rail that was overrun.** Risk R16 records that the actor-VM binding pattern is "plausible but unproven" and prescribes *"the M3 spike-first gate — one real window per shell before mass window-building."* The VM count then went from 14 to 21. The gate was written down and walked past. It is now binding again.
+
+**Consequence for prioritisation — engine feature work is paused.** The next unit of work that produces new information is a shell, not an ADR. Concretely, the first task is **risk R1's swift-cross-ui spike**, which the risk register already says should run early because the Windows VM rig exists: build one Status window over the existing `StatusViewModel`, GTK backend on Linux for iteration speed, then confirmed on the Windows VM. That single window falsifies-or-confirms both R1 (framework viability) and R16 (binding ergonomics), and becomes the first non-test consumer of `TaskWindowKit`. Expect it to demand changes to the VM layer — that is the information being bought, and it is cheaper to learn now than after a 22nd view model.
+
+Adding an engine feature is not forbidden, but it now needs an answer to "what consumes this?"
+
 ## Platform tier
 
 | Surface | M0 | M1 | M2 | M3 | M4 (MVP) | M5 | M6 | M7 | M8 | M9 (1.0) |

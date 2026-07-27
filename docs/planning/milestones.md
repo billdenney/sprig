@@ -4,6 +4,8 @@ Concrete "done means done" gates for each milestone. Companion to [`roadmap.md`]
 
 ADR cross-references throughout — each milestone exits cleanly only if all its referenced ADRs are implemented and verified.
 
+> **Read [`roadmap.md`'s status check](roadmap.md#where-we-actually-are-status-check-2026-07-27) first.** As of 2026-07-27 the engine is ~31.6k lines and the GUI shells are 0 lines; M2-Mac has met 0 of 8 exit criteria while thirteen post-M2.5 ADRs shipped with no consumer. Engine feature work is paused in favour of the first real window. The per-milestone criteria below are still the right gates — but the *order* the sections imply is not the order work should now happen in.
+
 ## M0 — Foundations
 
 **Status:** complete (initial scaffolding shipped; CI matrix all required-green).
@@ -116,11 +118,30 @@ Honest remaining *engine* backlog (tracked, not blocking the checkpoint): stacke
 restack (ADR 0051 on the 0083 substrate), plan message-editing, the Revert verb,
 ForgeKit PR list, AIKit feature integration (M7).
 
+> **What happened after this checkpoint *(added 2026-07-27)*.** M2.5 was written to *name*
+> the engine-outran-the-shells problem and make the milestone disciplines fire. It did not
+> stop the pattern: between 2026-06-11 and 2026-07-27 the engine took on thirteen more
+> ADRs (0084–0096), the VM count went **14 → 21**, and the shells stayed at zero lines.
+> The "honest remaining engine backlog" above was worked through and then extended well
+> past itself. `engine-0.5.0` was never tagged.
+>
+> The lesson is the one CLAUDE.md already states as a rule — *a policy that lives only in
+> prose will be violated; if something has recurred, add a mechanical gate.* Naming the
+> problem in a planning doc was prose. The gate that actually binds is **M3's spike-first
+> gate below**: no 22nd view model until one real window exists. Treat the VM count as
+> frozen at 21 until that window is running.
+
 ## M3 — First task windows (parallel tracks)
 
 **Re-scoped 2026-06-11:** the original M3 planned *building* 6 windows; the VM layer now
-holds **14 ready view models**, so M3 is a **shell bring-up** milestone — its risk is
-binding ergonomics and platform quirks, not feature construction.
+holds **21 ready view models** (14 at the 2026-06-11 re-scope), so M3 is a **shell
+bring-up** milestone — its risk is binding ergonomics and platform quirks, not feature
+construction.
+
+**Promoted 2026-07-27:** with the Mac runner still unprovisioned and engine feature work
+paused, the spike-first gate below is no longer waiting for M3's calendar slot — it is the
+**current** task. It runs on the Windows VM rig + a local Linux GTK build, neither of which
+needs Mac hardware.
 
 - **Spike-first gate (both shells, risk R16):** the FIRST M3 task per shell is one real
   window bound to one *existing* VM (suggested: Status), explicitly to validate the

@@ -1,5 +1,12 @@
 # Shell Integration
 
+> **Status: design, not implementation.** None of this is built. `apps/macos/` and
+> `apps/windows/` are stub READMEs — there is no Finder extension, no Explorer DLL, no
+> badge assets, no context menu. This document is written in the present tense because it
+> specifies the intended design; read every "Sprig does X" as "Sprig will do X". The
+> engine-side pieces it leans on (`RepoState`'s badge trie, `IPCSchema`, the transports)
+> *are* built and tested. Milestones M2-Mac / M2-Win own the shell work.
+
 How Sprig hooks the OS file manager — Finder on macOS, Explorer on Windows — to draw overlay badges and surface the right-click verb menu. This is the load-bearing UX of the product: Sprig has no main app window (ADR 0030), so the shell extension is *where users meet Sprig*.
 
 ADR cross-references: 0019 (10-badge set), 0020 (context-menu layout), 0030 (Finder-first / no main window), 0031 (submodules in shell), 0034 (no menu-bar helper), 0048 (cross-platform tier rules), 0054 (Windows GUI shell at 1.0).
@@ -66,7 +73,7 @@ User chooses reveal level in Preferences (per ADR 0019): Minimal 5 / Rich 8 (def
 
 `FIFinderSyncController.setBadgeIdentifier(_:for:)` takes a string identifier we register at extension init via `setBadgeImage(_:label:forBadgeIdentifier:)`. There's no documented cap on identifier count, but Apple recommends keeping it small (<32) — well within budget.
 
-Asset catalog: `apps/macos/SprigFinder/Resources/Badges.xcassets/`. PDFs at 16×16 nominal, scaled by AppKit. Each badge has light + dark variants and a high-contrast variant per ADR 0042 (a11y).
+Asset catalog (planned — `apps/macos/` is a stub today, so none of this is built yet): `apps/macos/SprigFinder/Resources/Badges.xcassets/`. PDFs at 16×16 nominal, scaled by AppKit. Each badge has light + dark variants and a high-contrast variant per ADR 0042 (a11y).
 
 ### Windows rendering
 

@@ -9,7 +9,7 @@
 
 @testable import AgentKit
 import Foundation
-import TaskWindowKit
+import PlatformKit
 import Testing
 
 @Suite("AgentPreferencesWiring — AppPreferences → startups (pure)")

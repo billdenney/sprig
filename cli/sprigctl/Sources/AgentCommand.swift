@@ -16,7 +16,6 @@ import GitCore
 import IPCSchema
 import PlatformKit
 import RepoState
-import TaskWindowKit
 import TransportKit
 import WatcherKit
 

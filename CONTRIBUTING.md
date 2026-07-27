@@ -17,7 +17,24 @@ cd sprig
 ./script/test            # runs the full local test matrix
 ```
 
-You should now be able to open `apps/macos/SprigApp/SprigApp.xcodeproj` in Xcode and build the app. Building the macOS app itself requires macOS, but the engine (`packages/`) and the `sprigctl` CLI (`cli/sprigctl/`) build, test, and lint on macOS, Linux, and Windows — every PR runs the full test suite on all three. That's how we catch cross-platform regressions before they reach `main`.
+**There is no app to build yet.** The GUI shells under `apps/{macos,windows,linux}/` are README-only placeholders — no Xcode project, no Finder extension, no windows (see [Project status](#project-status) below). What exists today and what you can therefore run is the portable engine (`packages/`) and the `sprigctl` CLI (`cli/sprigctl/`), which build, test, and lint on macOS, Linux, and Windows — every PR runs the full test suite on all three. That's how we catch cross-platform regressions before they reach `main`.
+
+```bash
+swift run sprigctl status <path-to-a-git-repo>
+```
+
+## Project status
+
+Read this before picking up work, because the repo's shape is surprising: the engine is far ahead of the user interface.
+
+| | |
+|---|---|
+| Engine + CLI (`packages/`, `cli/`) | ~31.6k lines of source, ~32.5k lines of tests, 22 packages, 18 `sprigctl` subcommands |
+| GUI shells (`apps/`) | **not started** — three `README.md` files, zero lines of code |
+
+Concretely: `TaskWindowKit` holds 21 portable view models for windows that do not exist, and no human has ever driven any of this through a UI. Contributions that connect the engine to a real interface are worth more right now than contributions that widen the engine. If you're adding an engine feature, expect to be asked what consumes it.
+
+See [`docs/planning/roadmap.md`](docs/planning/roadmap.md) for how this happened and what the next milestone actually is.
 
 ## Branching
 

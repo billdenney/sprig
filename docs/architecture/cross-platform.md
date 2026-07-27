@@ -16,7 +16,7 @@ This document mirrors §12 of the master plan ([`docs/planning/master-plan.md`](
 | `WatcherKit.PollingFileWatcher` | ✅ | ✅ | ✅ | Pure-portable; default on non-macOS, fallback on macOS via `--polling`. |
 | `WatcherKit.FSEventsWatcher` | ✅ | — | — | macOS-only kernel API; CoreServices FSEvents. |
 | `sprigctl` (version / status / watch / repos / log / agent / recover / conflicts) | ✅ | ✅ | ✅ | Every subcommand works on all three OSes. The Windows engine is testable today via the CLI; per-PR `ci-windows` runs the full suite. |
-| `apps/macos/SprigApp` (FinderSync, LaunchAgent, …) | ✅ | — | — | The macOS user-facing shell. Tier-3 platform shell. |
+| `apps/macos/SprigApp` (FinderSync, LaunchAgent, …) | M2-Mac+ | — | — | The macOS user-facing shell. Tier-3 platform shell. **Not started** — stub README in `apps/macos/` only; all 8 M2-Mac exit criteria are open. |
 | `apps/windows/SprigApp` (Explorer shell extension, Windows Service host, MSIX, …) | — | — | M2-Win+ | 1.0 deliverable per ADR 0054. Stub README in `apps/windows/` until M2-Win begins. |
 | `apps/linux/SprigApp` (Nautilus extension, …) | — | — | post-1.0 | Linux GUI shell explicitly out of 1.0 scope per ADR 0054 (Linux desktop is too fragmented to multiplex). |
 
@@ -26,7 +26,7 @@ CI required-green per platform: macOS (`ci-macos`), Linux `packages/` (`ci-linux
 
 1. **Portable core** (`packages/{GitCore, RepoState, ConflictKit, AIKit, LFSKit, SubmoduleKit, SubtreeKit, SafetyKit, IPCSchema, PlatformKit, DiagKit, StatusKit, TaskWindowKit, UIKitShared}/`) — pure Swift + Foundation. Compiles + tests on macOS, Linux, Windows.
 2. **Platform adapters** (`packages/{WatcherKit, CredentialKit, NotifyKit, UpdateKit, LauncherKit, TransportKit, AgentKit}/`) — protocol in `Sources/<Pkg>/`; macOS impl in `Sources/Mac/`; portable Linux/Windows fallbacks where they exist (e.g. `PollingFileWatcher`); per-OS native impls coming as needed.
-3. **Platform shells** (`apps/{macos,windows,linux}/`) — full rewrite per OS. Only `apps/macos/` is populated today.
+3. **Platform shells** (`apps/{macos,windows,linux}/`) — full rewrite per OS. **None are populated today**; all three hold a stub README.
 
 ## Hard rules (CI-enforced)
 

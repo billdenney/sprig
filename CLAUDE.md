@@ -16,7 +16,7 @@ The repo has three tiers; files live where their tier says they live.
 
 - **Tier 1 — Portable core** (`packages/{GitCore, RepoState, ConflictKit, AIKit, LFSKit, SubmoduleKit, SubtreeKit, SafetyKit, IPCSchema, PlatformKit, DiagKit, StatusKit, TaskWindowKit, UIKitShared}/`). Pure Swift + Foundation. **Must compile and pass tests on macOS, Linux, and Windows.**
 - **Tier 2 — Platform adapters** (`packages/{WatcherKit, CredentialKit, NotifyKit, UpdateKit, LauncherKit, TransportKit, AgentKit}/`). Protocol in `Sources/<Pkg>/`; native macOS impl in `Sources/Mac/`; Linux/Windows in `Sources/Linux/` and `Sources/Windows/`. Where a portable fallback exists (e.g. `PollingFileWatcher`) it lives in `Sources/<Pkg>/` and is the default everywhere except where a native impl wins on perf. Stubs are `fatalError` until a real impl is added.
-- **Tier 3 — Platform shells** (`apps/macos/`, `apps/windows/`, `apps/linux/`). Full rewrite per OS. Only `apps/macos/` is populated today; the other two are README-only placeholders for future work.
+- **Tier 3 — Platform shells** (`apps/macos/`, `apps/windows/`, `apps/linux/`). Full rewrite per OS. **None are populated today** — all three are README-only placeholders. There is no GUI, no Finder extension, and no Xcode project anywhere in this repo; `sprigctl` is the only runnable surface. See "Project status" below before planning work.
 
 ### Hard rules (enforced via SwiftLint + the three-OS CI matrix)
 
@@ -48,8 +48,21 @@ AI features (merge conflict suggestions, commit message drafting, PR description
 - **I'm touching anything platform-specific** → add it behind a `PlatformKit` protocol + adapter. Never in a portable package.
 - **I'm changing defaults** (git config, prompts, badges) → update the relevant ADR in `docs/decisions/` and document in `docs/architecture/`.
 - **I'm adding an AI feature** → prompts live in `packages/AIKit/Sources/AIKit/Prompts/*.md` (versioned, user-overridable). Add a held-out eval fixture in `tests/ai-evals/`.
-- **I'm adding a task window** → in `apps/macos/SprigApp/Sources/TaskWindows/`. Its view model goes in `packages/TaskWindowKit/` (portable).
-- **I'm touching Finder integration** → only in `apps/macos/SprigFinder/`. Keep the extension thin — all work is delegated to SprigAgent over XPC.
+- **I'm adding a task window** → the view model goes in `packages/TaskWindowKit/` (portable). **The window itself has nowhere to go yet** — no shell exists. Before adding a 22nd view model to a package whose 21 existing ones have no consumer, read "Project status" below; the answer is almost certainly to build a shell instead.
+- **I'm touching Finder integration** → nothing to touch yet; `apps/macos/` is a stub. When the extension lands it goes in `apps/macos/SprigFinder/` and stays thin, delegating to SprigAgent over IPC (transport TBD — see M2-Mac experiment #1 in `docs/planning/milestones.md`).
+
+## Project status — read before planning work
+
+The engine is far ahead of the user interface, and the gap is the main thing to know about this repo:
+
+| | |
+|---|---|
+| Engine + CLI (`packages/`, `cli/`) | ~31.6k lines source, ~32.5k lines tests, 22 packages, 18 `sprigctl` subcommands, 97 ADRs |
+| GUI shells (`apps/`) | **not started** — 3 `README.md` files, 0 lines of code |
+
+Nothing in this repo has ever been driven by a human through a UI. `TaskWindowKit` holds 21 view models for windows that don't exist. ADRs 0084–0096 shipped thirteen engine features with no consumer.
+
+**Consequence for planning:** default to *not* adding another engine feature. Risk R16 in `docs/planning/risk-register.md` says the actor-VM binding pattern is unproven and its stated mitigation is "one real window per shell before mass window-building" — that gate was already overrun once (14 → 21 VMs). The next unit of work that creates real information is a shell, not an ADR. If you are asked to add an engine feature, it's fair to ask what consumes it.
 
 ## What to never do
 

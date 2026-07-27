@@ -50,16 +50,15 @@ cd sprig
 # Engine + CLI work everywhere:
 swift build
 .build/debug/sprigctl status .
-
-# macOS app build (macOS only):
-# open apps/macos/SprigApp.xcodeproj
 ```
+
+There is no GUI to build yet on any platform — `sprigctl` is the whole runnable surface today. See [Project status](CONTRIBUTING.md#project-status).
 
 ## Repository layout
 
 The repo is organized into three tiers so that platform shells are additive — the engine never needs to move when a new shell lands. See [`docs/architecture/cross-platform.md`](docs/architecture/cross-platform.md) for the full design.
 
-- [`apps/macos/`](apps/macos/) — the macOS GUI shell (SwiftUI + AppKit, LaunchAgent, FinderSync extension, DMG installer). Populated.
+- [`apps/macos/`](apps/macos/) — the macOS GUI shell (SwiftUI + AppKit, LaunchAgent, FinderSync extension, DMG installer). Stub placeholder; **not started** — this is the 1.0 product's primary surface and the highest-value work in the repo.
 - [`apps/windows/`](apps/windows/) — the Windows GUI shell (swift-cross-ui main app, Explorer shell extension, Windows Service for the agent, MSIX installer). Stub placeholder; planned 1.0 deliverable.
 - [`apps/linux/`](apps/linux/) — Linux GUI shell (Nautilus extension first, others post-1.0). Stub placeholder; post-1.0.
 - [`packages/`](packages/) — Swift packages that form the **portable core** (Tier 1) and **platform adapters** (Tier 2). Every package builds and tests on macOS, Linux, and Windows toolchains every PR. Adapter packages have `Sources/{Mac,Linux,Windows}/` subdirs; portable fallbacks live alongside (e.g. `PollingFileWatcher`).
