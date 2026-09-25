@@ -41,7 +41,7 @@ jobs:
       # action drift between runs); toolchain bumped 6.3 → 6.3.1 to
       # match the local Server 2022 validation VM, so "passes on the
       # VM" keeps meaning "passes on CI".
-      - uses: compnerd/gha-setup-swift@eeda069c5bc95ac8a9ac5cea7d4f588ae5420ca5
+      - uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057
         with:
           branch: swift-6.3.1-release
           tag: 6.3.1-RELEASE
